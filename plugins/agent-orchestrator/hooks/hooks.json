@@ -59,7 +59,8 @@
               "${ZCODE_PLUGIN_ROOT}/hooks/bg-gate.mjs",
               "--policy", "${user_config.background_gate}",
               "--exempt", "${user_config.background_gate_exempt_types}",
-              "--sentinel-hint", "${user_config.wake_sentinel}"
+              "--sentinel-hint", "${user_config.wake_sentinel}",
+              "--contract", "${user_config.dispatch_contract}"
             ],
             "timeoutMs": 10000,
             "statusMessage": "检查派发是否应转后台…"

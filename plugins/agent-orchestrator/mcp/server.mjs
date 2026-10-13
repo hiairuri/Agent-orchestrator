@@ -90,7 +90,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.4.1";
+const SERVER_VERSION = "0.5.0";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -118,6 +118,11 @@ const STATUSES = [
 // Dependency-graph semantics: closed counts as satisfied, skipped counts as a
 // failure signal (cascades), everything else is pending.
 const DEP_GREEN_STATUSES = ["done", "skipped", "closed"];
+// v0.5 §9.1 presentation caps (constants single-source): t1_head / question_head
+// (board + resume) and the mailbox details presentation cap (read response
+// only — the spool event file keeps the full text, 存证不忽略).
+const T1_HEAD_CAP = 160;
+const DETAILS_PRESENTATION_CAP = 2000;
 
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
@@ -674,6 +679,193 @@ function isInstallLikeTask(text) {
   );
 }
 
+/**
+ * F1 normalizePathList (v0.5): canonical form for path allowlists, shared by
+ * all three call sites (sandbox write / context_pack parse / apply compare).
+ * Array guard (non-array -> []) -> per-item String -> trim -> backslashes
+ * unified to "/" -> post-trim empty entries dropped -> order preserved. No
+ * dedup (prefix matching is idempotent) and no length cap (callers enforce
+ * their own limits). Superset of the previous inline forms: it adds trim and
+ * separator unification, and the empty-string filter now also covers the
+ * write side (an empty entry would otherwise act as a match-all prefix).
+ */
+function normalizePathList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item).trim().split("\\").join("/"))
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * F2 scopeOverlap (v0.5): lexical prefix intersection of two path lists.
+ * Entry a covers entry b iff a === b or b starts with a (same startsWith
+ * semantics as the sandbox apply out-of-scope check). Purely lexical: no fs
+ * resolution, no case folding, no "./" stripping. Returns the covered
+ * entries of both sides (first-occurrence order, deduped) — the shared set
+ * under the cover relation, so a broader incoming scope still collides with
+ * a narrower registered one and vice versa.
+ */
+function scopeOverlap(aPaths, bPaths) {
+  const covers = (a, b) => a === b || b.startsWith(a);
+  const out = [];
+  const seen = new Set();
+  const push = (p) => {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  };
+  for (const a of aPaths) {
+    for (const b of bPaths) {
+      if (covers(a, b)) push(b);
+    }
+  }
+  for (const b of bPaths) {
+    for (const a of aPaths) {
+      if (covers(b, a)) push(a);
+    }
+  }
+  return out;
+}
+
+/**
+ * G-3 occlusion predicate (v0.5, function-level single point shared by the
+ * upsert preflight below and the board list view): a pair is deliberately
+ * serialized when EITHER side's blockedBy references the other. Such pairs
+ * are never reported as scope conflicts — "转串行" is the sanctioned
+ * resolution, so both views must fall silent at once (CRV3-01 / M-05).
+ */
+function scopePairOccluded(a, b) {
+  const depsOf = (m) => (Array.isArray(m && m.blockedBy) ? m.blockedBy.map(String) : []);
+  return depsOf(a).includes(b.id) || depsOf(b).includes(a.id);
+}
+
+/**
+ * G-3 single-source pair judgment (v0.5): the ONLY place that decides whether
+ * two missions' scopes conflict, consumed by both the upsert preflight (F3)
+ * and the board list view (E7). Returns the scope_warnings-shaped entry
+ * {with_mission_id, overlap, hint} for the pair (a reported against b), or
+ * null when the pair is clean: either side unregistered (empty scope never
+ * participates), no lexical overlap under the F2 prefix relation, or the pair
+ * is occluded via blockedBy (deliberate serialization is never reported).
+ * Inputs may hold raw path values — normalization is idempotent.
+ */
+function scopePairConflict(a, b) {
+  const aPaths = normalizePathList(a.scope_paths);
+  const bPaths = normalizePathList(b.scope_paths);
+  if (!aPaths.length || !bPaths.length) return null;
+  if (scopePairOccluded(a, b)) return null;
+  const overlap = scopeOverlap(aPaths, bPaths);
+  if (!overlap.length) return null;
+  const overlapText = overlap.join("、");
+  return {
+    with_mission_id: b.id,
+    overlap,
+    hint: `scope 与 ${b.id} 相交：${overlapText}。三选一：给本 mission 加 blockedBy=[${b.id}] 转串行；改沙箱分叉各自 apply；重切把相交文件归一边独占。`,
+  };
+}
+
+/**
+ * F3 checkScopeConflicts (v0.5, CR-05 preflight): compare the incoming
+ * patch's scope_paths against every live mission's registered scope. Live
+ * = STATUSES minus done/failed/skipped/closed (CR-05 enum, verbatim). The
+ * patch's own mission is skipped (G-2: re-registering the same scope must
+ * not self-alarm). An empty/absent patch scope (unregistered) never
+ * participates. Pair judgment (overlap + occlusion) is the G-3 single-source
+ * scopePairConflict — the occlusion exemption reads the EFFECTIVE dependency
+ * edges of the incoming side: an explicit patch.blockedBy wins, otherwise the
+ * stored self mission's edges carry over (re-registering scope after
+ * serializing via blockedBy must not self-alarm, M-05 转串行后同空). Default
+ * tier returns [{with_mission_id, overlap, hint}] for the caller's
+ * scope_warnings; strict tier (patch.strict_scope === true) throws ToolError
+ * on the first conflict — board untouched ("reject before write", same
+ * pattern as the cycle gate).
+ */
+function checkScopeConflicts(board, patch) {
+  const patchPaths = normalizePathList(patch.scope_paths);
+  if (!patchPaths.length) return [];
+  const live = STATUSES.filter(
+    (s) => !["done", "failed", "skipped", "closed"].includes(s),
+  );
+  const self =
+    patch.id != null
+      ? (Array.isArray(board.missions) ? board.missions : []).find(
+          (m) => m && typeof m === "object" && m.id === patch.id,
+        )
+      : null;
+  const patchView = {
+    id: patch.id ?? null,
+    blockedBy: patch.blockedBy !== undefined ? patch.blockedBy : self && self.blockedBy,
+    scope_paths: patch.scope_paths,
+  };
+  const conflicts = [];
+  for (const m of Array.isArray(board.missions) ? board.missions : []) {
+    if (!m || typeof m !== "object") continue;
+    if (patchView.id != null && m.id === patchView.id) continue; // G-2: no self-alarm
+    if (!live.includes(m.status)) continue;
+    if (patch.strict_scope === true) {
+      const hit = scopePairConflict(patchView, m);
+      if (hit) {
+        throw new ToolError(
+          `strict_scope 拒绝登记：scope 与 ${hit.with_mission_id} 相交：${hit.overlap.join("、")}（board 未改动）`,
+        );
+      }
+    } else {
+      const entry = scopePairConflict(patchView, m);
+      if (entry) conflicts.push(entry);
+    }
+  }
+  return conflicts;
+}
+
+/**
+ * E7 (v0.5): board list top-level scope_conflicts — the pairwise conflict
+ * view over the CURRENT in-flight layout (the upsert preflight is the same
+ * judgment at write-transaction time; the rules differ only in trigger
+ * timing, never in outcome — M-05 钉同源). Live missions only, both sides
+ * registered, G-3 occlusion exemption via the same scopePairConflict
+ * predicate. Presentation cap ≤10 entries (sentinel_health 体例); the key is
+ * omitted entirely when clean (conditional-key precedent).
+ */
+function collectScopeConflicts(board) {
+  const live = STATUSES.filter(
+    (s) => !["done", "failed", "skipped", "closed"].includes(s),
+  );
+  const ms = (Array.isArray(board.missions) ? board.missions : []).filter(
+    (m) => m && typeof m === "object" && live.includes(m.status),
+  );
+  const conflicts = [];
+  for (let i = 0; i < ms.length; i++) {
+    for (let j = i + 1; j < ms.length; j++) {
+      // Report the pair from the later-registered side (board order is
+      // first-registration order): with_mission_id names the EARLIER mission,
+      // so the hint's "给本 mission 加 blockedBy=[<earlier>]" reads exactly as
+      // the CR-05 doctrine "后写者 blockedBy=[前写者] 转串行" and matches the
+      // upsert view entry for the same situation (M-05 同源).
+      const entry = scopePairConflict(ms[j], ms[i]);
+      if (entry) conflicts.push(entry);
+    }
+  }
+  return conflicts.slice(0, 10);
+}
+
+/**
+ * F4 checkScopeAudit (v0.5, files_touched out-of-scope audit): a mission
+ * with no registered scope_paths has no baseline -> never audited
+ * ("登记什么就审什么", same single-source semantics as the F3 preflight).
+ * Otherwise a touched file is a violation iff no scope entry covers it under
+ * the F2 prefix relation (entry covers file iff entry === file or file
+ * starts with entry). Purely lexical, read-only over the declaration; the
+ * returned violations keep declaration order.
+ */
+function checkScopeAudit(mission, files) {
+  const scope = normalizePathList(mission && mission.scope_paths);
+  if (!scope.length) return [];
+  return (Array.isArray(files) ? files : []).filter(
+    (f) => !scope.some((s) => s === f || f.startsWith(s)),
+  );
+}
+
 const sandboxesRoot = () => path.join(root, "sandboxes");
 
 /**
@@ -746,7 +938,7 @@ function materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionD
     branch,
     base_commit: baseCommit,
     junction_shared: junctionShared,
-    oob_allowlist: Array.isArray(oobAllowlist) ? oobAllowlist.map(String) : [],
+    oob_allowlist: normalizePathList(oobAllowlist),
     created_at: at,
     applied_at: null,
     applied_commit: null,
@@ -839,13 +1031,59 @@ function fmtAge(min) {
   return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
 }
 
-/** Decorated read-only view: ack/wake_failure are computed, never written back. */
+/**
+ * T5 (v0.5): most recent report-class timeline event, scanned from the tail.
+ * Report events are written by toolReport as `report:<kind>` (same family the
+ * wake-failure check already greps). Zero new storage — the presentation field
+ * is derived at read time (懒迁移: old 0.4.x missions simply have none).
+ */
+function lastReportEvent(m) {
+  const tl = Array.isArray(m && m.timeline) ? m.timeline : [];
+  for (let i = tl.length - 1; i >= 0; i--) {
+    const e = tl[i];
+    if (e && typeof e === "object" && String(e.event ?? "").startsWith("report:")) return e;
+  }
+  return null;
+}
+
+/**
+ * T5 (v0.5): t1_head — head of the latest report summary (stored under the
+ * existing 200-char cap), truncated to 160 chars (§9.1). A mission without
+ * any report event presents null.
+ */
+function t1HeadOf(m) {
+  const e = lastReportEvent(m);
+  if (!e || e.summary == null) return null;
+  return truncateStr(String(e.summary), T1_HEAD_CAP);
+}
+
+/**
+ * Decorated read-only view: ack/wake_failure are computed, never written back.
+ * v0.5 T5/E6 adds the S4 presentation fields (board get/list/upsert read
+ * paths; the claim small object does not go through here). All are response
+ * only — the stored mission keeps zero new default keys.
+ */
 function withComputed(m) {
   const w = wakeFailureInfo(m);
+  // Same pending-question predicate as the close-over warning (v0.3.1 C6):
+  // an answered question is no longer actionable for the coordinator.
+  const pendingQuestion = Boolean(
+    m.blocked && m.blocked.question && m.blocked.answered === false,
+  );
   return {
     ...m,
     ack: missionAck(m), // P2-1: 旧记录缺失 ack（undefined）归一为 null，JSON 序列化不丢键
     wake_failure: w.suspected ? { result_at: w.result_at, minutes: w.minutes } : null,
+    // T5: latest report summary head + count fields (无 report → null/0/false).
+    t1_head: t1HeadOf(m),
+    artifacts_n: Array.isArray(m.artifacts) ? m.artifacts.length : 0,
+    output_files_n: Array.isArray(m.output_files) ? m.output_files.length : 0,
+    has_question: pendingQuestion,
+    // E6 (G-8/DA4-1 终裁): scope summary under the original storage key names.
+    // Unregistered presents [] / false; scope_violations passes through the
+    // spread only when present (有值自然透出).
+    scope_paths: normalizePathList(m.scope_paths),
+    strict_scope: m.strict_scope === true,
   };
 }
 
@@ -957,6 +1195,17 @@ const MERGEABLE_KEYS = new Set([
   "qa",
   "skippedReason",
   "timeline",
+  // v0.5 stage 2 (E2 registration): context_pack registers the normalized
+  // write scope. Stage 3 (E4) completes the scope admission fields. None of
+  // the four joins ONE_LEVEL: whole replacement IS the registration/audit
+  // semantics (each upsert replaces the full list; scope_violations is
+  // recomputed wholesale by the report close-out; the manifest pointer has
+  // exactly one legitimate writer — the report close-out — and is stripped
+  // from upsert input below).
+  "scope_paths",
+  "strict_scope",
+  "scope_violations",
+  "manifest",
 ]);
 
 /** Unknown top-level patch keys (reported, not merged). */
@@ -1894,8 +2143,16 @@ function toolBoard(args) {
     if (!patchRaw) throw new ToolError('board upsert requires "mission" object');
     // ack/owner/claim are read-only: ack is written by the ack action or the
     // auto-ack rules; owner/claim are owned by board claim / report renewal /
-    // lease回收 (v0.4). All three are stripped from caller patches.
-    const { ack: _ignored, owner: _ownerIgnored, claim: _claimIgnored, ...patch } = patchRaw;
+    // lease回收 (v0.4). All three are stripped from caller patches. manifest
+    // joins them in v0.5 (E4④): a derived pointer whose only legitimate
+    // writer is the report close-out.
+    const {
+      ack: _ignored,
+      owner: _ownerIgnored,
+      claim: _claimIgnored,
+      manifest: _manifestIgnored,
+      ...patch
+    } = patchRaw;
     if (patch.status !== undefined && !STATUSES.includes(patch.status)) {
       throw new ToolError(
         `invalid status: ${JSON.stringify(patch.status)}; allowed: ${STATUSES.join(", ")}`,
@@ -1913,7 +2170,24 @@ function toolBoard(args) {
         throw new ToolError("mission.skippedReason must be a string or null");
       }
     }
-    const mission = withRootLock(() => {
+    // v0.5 E4②: scope admission shape gates (invalid-status precedent).
+    // scope_paths must be a string array and enters the patch F1-normalized,
+    // so storage only ever holds canonical paths. strict_scope must be
+    // boolean; absent means false and writes no default key (lazy migration,
+    // E4③: newMission stays untouched).
+    if (patch.scope_paths !== undefined) {
+      if (
+        !Array.isArray(patch.scope_paths) ||
+        patch.scope_paths.some((p) => typeof p !== "string")
+      ) {
+        throw new ToolError("mission.scope_paths must be an array of strings");
+      }
+      patch.scope_paths = normalizePathList(patch.scope_paths);
+    }
+    if (patch.strict_scope !== undefined && typeof patch.strict_scope !== "boolean") {
+      throw new ToolError("mission.strict_scope must be a boolean");
+    }
+    const result = withRootLock(() => {
       // v0.4 (D3): reject dependency cycles BEFORE touching the board. An empty
       // array is an explicit clear and cannot cycle; a new mission with an
       // auto-generated id cannot reference itself either.
@@ -1934,9 +2208,17 @@ function toolBoard(args) {
           }
         }
       }
-      return upsertMission(patch); // v0.3.1 A1
+      // v0.5 E5 (CR-05): scope conflict preflight — after the cycle gate,
+      // before any board write. Default tier collects scope_warnings;
+      // strict tier throws inside F3 (reject-before-write, board untouched).
+      const scopeWarnings = checkScopeConflicts(loadBoard(), patch);
+      return { mission: upsertMission(patch), scopeWarnings }; // v0.3.1 A1
     });
+    const mission = result.mission;
     const out = { ok: true, mission: withComputed(mission) };
+    // v0.5 E5 (§5.4): optional response key — omitted entirely when there is
+    // no conflict; independent key, never folded into note/ignored_keys.
+    if (result.scopeWarnings.length) out.scope_warnings = result.scopeWarnings;
     // v0.4.1 merge whitelist: unknown keys are dropped, not stored.
     const ignoredKeys = ignoredPatchKeys(patch);
     if (ignoredKeys.length) {
@@ -1987,12 +2269,19 @@ function toolBoard(args) {
   }
   if (action === "list") {
     const filter = Array.isArray(args.filter_status) ? args.filter_status.map(String) : null;
-    let missions = loadBoard().missions.slice();
+    const board = loadBoard();
+    let missions = board.missions.slice();
     if (filter) missions = missions.filter((m) => m && filter.includes(m.status));
     else missions = missions.filter((m) => m && m.status !== "closed");
     missions.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
     // v0.4.1: sentinel family health rides on list (read-only view of sentinel/)
-    return { missions: missions.map(withComputed), sentinel_health: sentinelHealth() };
+    const out = { missions: missions.map(withComputed), sentinel_health: sentinelHealth() };
+    // v0.5 E7: optional top-level key — the pairwise scope-conflict view over
+    // the live layout (G-3 single-source predicate, ≤10 entries); omitted
+    // entirely when clean.
+    const scopeConflicts = collectScopeConflicts(board);
+    if (scopeConflicts.length) out.scope_conflicts = scopeConflicts;
+    return out;
   }
   if (action === "claim") {
     // v0.4 self-claiming (CAS): a pool worker claims a ready/drafted mission.
@@ -2081,6 +2370,11 @@ function toolReport(args) {
   if ((kind === "blocked" || kind === "question") && !(question && question.trim())) {
     throw new ToolError(`report kind=${kind} requires "question"`);
   }
+  // v0.5 E8②: files_touched envelope field — array guard + per-item String +
+  // F1 normalization (same family as artifacts). Every kind stores it in the
+  // spool event verbatim (evidence); only milestone/done additionally feed
+  // the scope audit (G-7: evidence is never dropped, only the audit skips).
+  const filesTouched = normalizePathList(args.files_touched);
 
   // v0.3.1 (A1): spool write + board update + lessons append are one critical
   // section under the root lock.
@@ -2112,6 +2406,7 @@ function toolReport(args) {
       summary,
       details: args.details == null ? "" : String(args.details),
       artifacts: Array.isArray(args.artifacts) ? args.artifacts.map(String) : [],
+      files_touched: filesTouched,
       question,
       urgent: Boolean(args.urgent),
     };
@@ -2146,6 +2441,65 @@ function toolReport(args) {
       ...(Array.isArray(mission.timeline) ? mission.timeline : []),
       { at, event: `report:${kind}`, summary },
     ];
+    // v0.5 E8③④ (G-7): the files_touched audit runs for milestone/done
+    // only — blocked/question keep the event as stored evidence but skip the
+    // audit (the closed branch above likewise returns before this point, so
+    // its board stays untouched). The baseline is the registration present
+    // BEFORE this report (mission.scope_paths); violations land two ways:
+    // a scope_violation audit event on the timeline (summary lists the
+    // out-of-scope paths verbatim) and mission.scope_violations rewritten
+    // wholesale (G-5: recompute-and-replace via the merge whitelist). The
+    // field is only touched when there is something to write or prior
+    // findings to clear, so clean missions carry no scope_violations key.
+    // Advisory only — never an isError, the audit faces the coordinator.
+    const scopeViolations =
+      kind === "milestone" || kind === "done" ? checkScopeAudit(mission, filesTouched) : [];
+    if (scopeViolations.length) {
+      patch.scope_violations = scopeViolations;
+      patch.timeline.push({
+        at,
+        event: "scope_violation",
+        summary: `scope 越界：${scopeViolations.join("、")}`,
+      });
+    } else if (
+      Array.isArray(mission.scope_violations) &&
+      mission.scope_violations.length &&
+      (kind === "milestone" || kind === "done")
+    ) {
+      patch.scope_violations = []; // wholesale recompute: clean sweep clears old findings
+    }
+    // v0.5 T2: manifest close-out pipeline — done only (milestone never
+    // writes a manifest; a condensation worker's done walks the same
+    // pipeline), inside this same root-lock critical section. The pointer
+    // rides the same board patch (manifest is merge-whitelisted, whole
+    // replacement); the sidecar write is atomic and precedes the board
+    // update. Response keys manifest_note/manifest_warnings are conditional
+    // (omitted when empty).
+    let manifestNote = null;
+    let manifestWarnings = null;
+    if (kind === "done") {
+      // v0.5 QA fix: report artifacts are board material, not just mailbox
+      // evidence. Without this write-back a `report(done, artifacts=[…])`
+      // carrying zero manifest_entries left mission.artifacts empty, so the
+      // T2 auto-stub found no outputs and downstream inputs pull mis-classed
+      // the mission as L3 (zero-output). Append-only merge: prior entries stay
+      // verbatim (string or {path,note}), report paths dedupe in; the patch
+      // rides the existing whole-replacement artifacts whitelist row.
+      const prevArts = Array.isArray(mission.artifacts) ? mission.artifacts : [];
+      const reported = Array.isArray(args.artifacts)
+        ? args.artifacts.map((p) => String(p ?? "").trim()).filter(Boolean)
+        : [];
+      const seenArts = new Set(
+        prevArts.map((a) => (a && typeof a === "object" ? String(a.path ?? JSON.stringify(a)) : String(a))),
+      );
+      const freshArts = reported.filter((p) => !seenArts.has(p));
+      const mergedMission = freshArts.length ? { ...mission, artifacts: [...prevArts, ...freshArts] } : mission;
+      if (freshArts.length) patch.artifacts = mergedMission.artifacts;
+      const mr = closeOutManifest(mergedMission, args.manifest_entries, at);
+      if (mr.pointer) patch.manifest = mr.pointer;
+      if (mr.note) manifestNote = mr.note;
+      if (mr.warnings && mr.warnings.length) manifestWarnings = mr.warnings;
+    }
     // v0.4: any report from the (lease-holding) worker renews the claim lease
     // in the same critical section. A foreign worker still renews (design) but
     // gets a warn naming the actual holder.
@@ -2226,6 +2580,9 @@ function toolReport(args) {
       token,
       readyToClaim,
       claimWarn,
+      scopeViolations,
+      manifestNote,
+      manifestWarnings,
     };
   });
 
@@ -2245,6 +2602,12 @@ function toolReport(args) {
     outcome.expectedToken && !outcome.token
       ? "未携带 token；下次上报请带上派发 prompt 的 [token] 行"
       : null,
+    // v0.5 E8⑤: the scope violations keep their own warn_scope key (distinct
+    // keys so no warn can overwrite another — the 0.4.1 QA fix precedent)
+    // and additionally join the combined warn line.
+    outcome.scopeViolations && outcome.scopeViolations.length
+      ? `scope 越界：${outcome.scopeViolations.join("、")}`
+      : null,
   ].filter(Boolean);
   return {
     ok: true,
@@ -2263,6 +2626,17 @@ function toolReport(args) {
     ...(outcome.expectedToken && !outcome.token
       ? { warn_token: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
       : {}),
+    // v0.5 E8⑤: warn_scope carries the out-of-scope paths verbatim (omitted
+    // when the declaration is fully in scope or unaudited); never an isError
+    // — the worker does not fail on its own declaration, the audit faces the
+    // coordinator.
+    ...(outcome.scopeViolations && outcome.scopeViolations.length
+      ? { warn_scope: outcome.scopeViolations }
+      : {}),
+    // v0.5 T2: manifest close-out response keys — conditional, omitted when
+    // empty (caps inside limits / no assertion findings -> no keys).
+    ...(outcome.manifestNote ? { manifest_note: outcome.manifestNote } : {}),
+    ...(outcome.manifestWarnings ? { manifest_warnings: outcome.manifestWarnings } : {}),
     ...(warnParts.length ? { warn: warnParts.join(" ") } : {}),
     ...readyToClaimExtras,
   };
@@ -2271,6 +2645,24 @@ function toolReport(args) {
 /* ------------------------------------------------------------------ */
 /* tool: mailbox                                                       */
 /* ------------------------------------------------------------------ */
+
+/**
+ * T7 (v0.5, §4.4): mailbox read details presentation cap — the largest S4
+ * gate hole closed mechanically. The read RESPONSE truncates details to the
+ * head 2000 chars and appends the verbatim marker `…[截断于N字]` (N = the
+ * original length) plus the verbatim hint sentence. The spool event file
+ * keeps the full text untouched (存证不忽略, G-7 philosophy); peek never
+ * carried details and stays byte-for-byte as before.
+ */
+function presentMailboxDetails(details) {
+  const s = String(details ?? "");
+  if (s.length <= DETAILS_PRESENTATION_CAP) return s;
+  return (
+    s.slice(0, DETAILS_PRESENTATION_CAP) +
+    `…[截断于${s.length}字]` +
+    "details 已截断（帽 2000 字）：长文应写文件走 artifacts，邮箱只传摘要"
+  );
+}
 
 function toolMailbox(args) {
   const action = args.action ?? "peek";
@@ -2346,7 +2738,12 @@ function toolMailbox(args) {
         }
       }
       payloads.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
-      return { consumed: payloads.length, events: payloads };
+      return {
+        consumed: payloads.length,
+        // v0.5 T7: presentation-only details cap on the response — the event
+        // objects in the spool keep their full details (evidence).
+        events: payloads.map((p) => ({ ...p, details: presentMailboxDetails(p.details) })),
+      };
     });
   }
 
@@ -2786,6 +3183,9 @@ function buildPackMarkdown(opts) {
     workerName,
     lessonLines,
     recentLines,
+    ownershipLines,
+    budgetLines,
+    pull,
     sandboxLines,
   } = opts;
   const L = [];
@@ -2800,10 +3200,35 @@ function buildPackMarkdown(opts) {
   L.push("");
   L.push("## CONTEXT（上游产物，逐字注入——你当时不在场）");
   L.push(upstream && upstream.trim() ? upstream : "（无）");
+  // v0.5 T3 (§2.5): manual upstream first, then inputs T0 verbatim blocks
+  // (inputs array order). Manual side has no cap; caps act on pulled side only.
+  if (pull && pull.t0Blocks.length) {
+    L.push("");
+    L.push(pull.t0Blocks.join("\n\n"));
+  }
   L.push("");
+  // v0.5 T3 (registry row 3): SUMMARY exists only when inputs produced T1
+  // content (incl. L2 degraded summary lines and cap-degradation notes);
+  // notice lines head it. T1 lines first (inputs order), then notes.
+  const sumAll = pull ? [...pull.t1Lines, ...pull.sumLines] : [];
+  const sumExists = sumAll.length > 0;
+  if (sumExists) {
+    L.push("## SUMMARY（上游摘要——inputs 机械牵引，server 自动生成）");
+    for (const n of pull.notices) L.push(n);
+    for (const line of sumAll) L.push(line);
+    L.push("");
+  }
   L.push("## READ FIRST");
+  // v0.5 T3: without a SUMMARY section, notice lines head READ FIRST instead
+  // (§2.3); pulled T2 pointers append after the manual list (manual wins on
+  // exact-line collision, filtered by the caller).
+  if (pull && !sumExists && pull.notices.length) {
+    for (const n of pull.notices) L.push(n);
+  }
+  const hasT2 = Boolean(pull && pull.t2Lines.length);
   if (readFirst.length) for (const p of readFirst) L.push(`- ${p}`);
-  else L.push("- （无）");
+  else if (!hasT2) L.push("- （无）");
+  if (hasT2) for (const line of pull.t2Lines) L.push(line);
   L.push("");
   L.push("## TASK");
   L.push(task);
@@ -2813,6 +3238,17 @@ function buildPackMarkdown(opts) {
   L.push("- 受阻/目标矛盾/必败门禁：立即 report(kind=blocked, question=…)，不硬扛不造假");
   for (const r of rules) L.push(`- ${r}`);
   L.push("");
+  // v0.5 E3 (registry rows 7/8, D3 arbitration): OWNERSHIP then BUDGET sit
+  // right after RULES, before SANDBOX; both are conditional — absent entirely
+  // when their parameter is missing (byte-identical default packs).
+  if (ownershipLines && ownershipLines.length) {
+    for (const line of ownershipLines) L.push(line);
+    L.push("");
+  }
+  if (budgetLines && budgetLines.length) {
+    for (const line of budgetLines) L.push(line);
+    L.push("");
+  }
   // v0.4: the SANDBOX section sits between RULES and LESSONS (design §1.3 step 9).
   if (sandboxLines && sandboxLines.length) {
     for (const line of sandboxLines) L.push(line);
@@ -2847,6 +3283,550 @@ function buildPackMarkdown(opts) {
   return L.join("\n") + "\n";
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.5 S2/S5 constants + context_pack argument parsers                */
+/* (design §9.1/§9.2 — single source of truth for caps and tiers)      */
+/* ------------------------------------------------------------------ */
+
+const SCOPE_PATHS_MAX = 32; // report error beyond, never silent-truncate (§9.1)
+const INPUTS_MAX = 4; // mission ids per context_pack call (§9.1)
+const PULL_T0_ENTRY_BYTES = 4000; // per-entry cap at routing time (§9.1)
+const PULL_T0_LAYER_BYTES = 24 * 1024; // T0 total across all inputs (§9.1)
+const PULL_T1_LAYER_BYTES = 4 * 1024; // SUMMARY total (§9.1)
+const PULL_T2_MAX = 20; // READ FIRST appended pointer lines (§9.1)
+const BUDGET_TIER_STEPS = { S: 20, M: 60, L: 120 }; // §9.2 (shared with W2/W3)
+
+// v0.5 T2 (S1) manifest close-out caps — single source of truth §9.1. Every
+// cap is enforced SOFTLY at report time: over-cap drops/truncates + a
+// manifest_note, never an isError (§1.4).
+const MANIFEST_MAX_ENTRIES = 12; // entries per manifest; overflow drops tail + note
+const MANIFEST_T0_ENTRY_BYTES = 4000; // per-entry T0 text cap in UTF-8 bytes, keep head
+const MANIFEST_T0_MAX = 8; // T0 entry count; overflow drops tail + note
+const MANIFEST_T1_ENTRY_CHARS = 500; // per-entry T1 text cap in characters, keep head
+const MANIFEST_TITLE_CHARS = 60; // per-entry title cap in characters, truncate
+const MANIFEST_FILE_BYTES = 32 * 1024; // whole-sidecar cap; overflow drops tail + note
+// Closed five-value type enum (§1.2; "summary" is deliberately illegal — CR-V19).
+const MANIFEST_TYPES = ["assertion", "env_fact", "anchor", "conclusion", "directive"];
+const MANIFEST_LAYERS = ["T0", "T1", "T2"];
+
+/** scope_paths argument: array guard -> F1 -> over-cap rejects (design E1②). */
+function parseScopePathsArg(value) {
+  if (value == null) return [];
+  const list = normalizePathList(value);
+  if (list.length > SCOPE_PATHS_MAX) {
+    throw new ToolError(
+      `scope_paths 超限：${list.length} 项（帽 ${SCOPE_PATHS_MAX} 项，报错拒绝而非静默截断）`,
+    );
+  }
+  return list;
+}
+
+/** budget argument: enum S/M/L guard; null when absent (design G-1). */
+function parseBudgetArg(value) {
+  if (value == null) return null;
+  const tier = String(value).trim();
+  if (tier !== "S" && tier !== "M" && tier !== "L") {
+    throw new ToolError(
+      'context_pack budget 必须是 "S"、"M" 或 "L"（S≈20/M≈60/L≈120 步），非法值报错拒绝',
+    );
+  }
+  return tier;
+}
+
+/** inputs argument: string array, ≤4 mission ids; 5th id rejects (§2.1). */
+function parseInputsArg(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    throw new ToolError("context_pack inputs 必须是 mission id 字符串数组");
+  }
+  const ids = value.map((x) => String(x).trim()).filter((s) => s.length > 0);
+  if (ids.length > INPUTS_MAX) {
+    throw new ToolError(
+      `inputs 超限：${ids.length} 个 mission id（帽 ${INPUTS_MAX} 个，报错拒绝而非静默截断）`,
+    );
+  }
+  return ids;
+}
+
+/**
+ * v0.5 E3: OWNERSHIP section lines (registry row 7; only when scope_paths is
+ * non-empty). Wording verbatim from cost-rules §7.2 (via DESIGN §7.2①).
+ */
+function buildOwnershipLines(scopePaths) {
+  if (!scopePaths || !scopePaths.length) return null;
+  return [
+    "## OWNERSHIP（文件所有权）",
+    "允许写（scope_paths，越界 = 验收 fail 信号）：",
+    ...scopePaths.map((p) => `- ${p}`),
+    "清单外路径一律只读。done 的 files_touched 会按此清单比对。",
+  ];
+}
+
+/**
+ * v0.5 E3: BUDGET section lines (registry row 8; only when budget is given).
+ * Wording verbatim from cost-rules §7.2 + the static token-tier preview line
+ * (§5.5/§9.2, DA4-5). Tier numbers {20|60|120} render from the given tier.
+ * v0.5 QA (CR-V6②): L-tier packs additionally carry the pre-split doctrine
+ * sentence (cost-rules §12 / CR-09) — "包内可见预拆阶段说明".
+ */
+function buildBudgetLines(tier) {
+  if (!tier) return null;
+  const lines = [
+    "## BUDGET（预算档位）",
+    `档位：${tier}（≈${BUDGET_TIER_STEPS[tier]} 步上限）。milestone report 请附进度与剩余步数估计；逼近上限时主动收尾：完成当前阶段、report(done) 附遗留清单。`,
+  ];
+  if (tier === "L") {
+    lines.push("L 档附加：本任务应已预拆阶段或转 workflow（派发前就拆）——你只负责当前阶段，逼近上限即按上行收尾交接。");
+  }
+  lines.push("上下文档位：WARN 120K 提醒 / ACT 150K 决策 / HARD 180K 强制收尾 / ABS 230K 红线（由主控对账判定，worker 无需自测）");
+  return lines;
+}
+
+/** UTF-8 byte-capped truncation that never splits a code point. */
+function truncateUtf8Bytes(str, cap) {
+  let s = String(str);
+  if (Buffer.byteLength(s, "utf8") <= cap) return s;
+  while (Buffer.byteLength(s, "utf8") > cap) s = s.slice(0, -1);
+  return s;
+}
+
+/**
+ * v0.5 T2 (S1): manifest close-out — the report "done" branch's seven steps
+ * (§2.2), executed inside the caller's root lock. milestone never writes a
+ * manifest; a condensation worker's done walks this same pipeline.
+ *
+ * 1) read manifest_entries (optional; a non-array value ignores the whole
+ *    field + note)
+ * 2) shape check: layer enum T0/T1/T2, the closed five-value type enum
+ *    ("summary" is illegal), required title/ref — invalid entries dropped
+ *    and counted
+ * 3) caps: entries ≤12 (overflow drops tail+note), T0 text ≤4000B per entry
+ *    with ≤8 T0 entries, T1 text ≤500 chars, title ≤60 chars, whole sidecar
+ *    ≤32KB (overflow drops tail+note); truncation keeps the head with the
+ *    verbatim markers "…[截断于N字节]" (T0) / "…[截断于N字]" (T1)
+ * 4) T2 auto-stub: zero valid declarations but the mission has
+ *    artifacts/output_files/pack.path -> server generates source:"server"
+ *    T2-only stubs (one entry per path) — invariant: a done mission with
+ *    outputs always has a minimal pullable manifest
+ * 5) write the sidecar <root>/packs/<mission_id>/manifest.json (atomic;
+ *    fields v=1/mission_id/generated_at/source/entries; all-empty writes
+ *    no file and sets no pointer)
+ * 6) mission.manifest pointer {path, entry_count, updated_at} (whole
+ *    replacement via the merge whitelist — done by the caller's patch)
+ * 7) mechanical comparison of assertion entries: trigger = type=assertion
+ *    && ref.path hits the tests/assertions/ convention (no mission
+ *    classification); server reads the assertion file — exists and contains
+ *    the entry text -> consistent (silent); mismatch or unreadable file ->
+ *    manifest_warnings (read-only, non-blocking)
+ *
+ * Returns { pointer, note, warnings }: pointer null when nothing was
+ * written; note null when there is nothing to flag. Over-cap and shape
+ * violations are all soft — a report never fails on declaration quality.
+ */
+function closeOutManifest(mission, rawEntries, at) {
+  const notes = [];
+  const warnings = [];
+
+  // 1) read + non-array guard (whole field ignored + note).
+  const declared = Array.isArray(rawEntries)
+    ? rawEntries
+    : rawEntries == null
+      ? null
+      : (notes.push("manifest_entries 非数组，整字段已忽略"), null);
+
+  // 2) shape validation: drop-and-count, reasons recorded for the note.
+  const valid = [];
+  if (declared) {
+    const reasons = [];
+    let dropped = 0;
+    for (let i = 0; i < declared.length; i++) {
+      const e = declared[i];
+      const why =
+        !e || typeof e !== "object" || Array.isArray(e)
+          ? `第${i + 1}条非对象`
+          : (() => {
+              const layer = String(e.layer ?? "").trim();
+              const type = String(e.type ?? "").trim();
+              const title = String(e.title ?? "").trim();
+              const ref = e.ref && typeof e.ref === "object" && !Array.isArray(e.ref) ? e.ref : null;
+              const refPath = ref ? String(ref.path ?? "").trim() : "";
+              if (!MANIFEST_LAYERS.includes(layer)) return `第${i + 1}条 layer 非法（${truncateStr(layer || "空", 16)}）`;
+              if (!MANIFEST_TYPES.includes(type)) return `第${i + 1}条 type 非法（${truncateStr(type || "空", 16)}）`;
+              if (!title) return `第${i + 1}条缺 title`;
+              if (!refPath) return `第${i + 1}条缺 ref.path`;
+              return null;
+            })();
+      if (why) {
+        dropped += 1;
+        reasons.push(why);
+        continue;
+      }
+      const ref = e.ref;
+      const refPath = String(ref.path ?? "").trim();
+      const refLoc = String(ref.loc ?? "").trim();
+      valid.push({
+        layer: String(e.layer).trim(),
+        type: String(e.type).trim(),
+        title: String(e.title).trim(),
+        text: String(e.layer).trim() === "T2" ? undefined : String(e.text ?? ""),
+        ref: refLoc ? { path: refPath, loc: refLoc } : { path: refPath },
+      });
+    }
+    if (dropped) {
+      notes.push(`manifest 条目形状违规丢弃 ${dropped} 条：${reasons.join("、")}`);
+    }
+  }
+
+  // 3) caps — entry count first, then the T0 count, then per-entry truncation.
+  let entries = valid.slice();
+  if (entries.length > MANIFEST_MAX_ENTRIES) {
+    notes.push(
+      `manifest 条目超帽（≤${MANIFEST_MAX_ENTRIES} 条），丢弃尾部 ${entries.length - MANIFEST_MAX_ENTRIES} 条`,
+    );
+    entries = entries.slice(0, MANIFEST_MAX_ENTRIES);
+  }
+  let t0Seen = 0;
+  const t0Kept = [];
+  for (const e of entries) {
+    if (e.layer === "T0") {
+      t0Seen += 1;
+      if (t0Seen > MANIFEST_T0_MAX) continue;
+    }
+    t0Kept.push(e);
+  }
+  if (entries.length - t0Kept.length > 0) {
+    notes.push(`T0 条目超帽（≤${MANIFEST_T0_MAX} 条），丢弃尾部 ${entries.length - t0Kept.length} 条`);
+  }
+  entries = t0Kept;
+  for (const e of entries) {
+    if (e.title.length > MANIFEST_TITLE_CHARS) e.title = e.title.slice(0, MANIFEST_TITLE_CHARS);
+    if (e.layer === "T0" && Buffer.byteLength(e.text ?? "", "utf8") > MANIFEST_T0_ENTRY_BYTES) {
+      const head = truncateUtf8Bytes(e.text, MANIFEST_T0_ENTRY_BYTES);
+      e.text = `${head}…[截断于${Buffer.byteLength(head, "utf8")}字节]`;
+    } else if (e.layer === "T1" && (e.text ?? "").length > MANIFEST_T1_ENTRY_CHARS) {
+      const head = e.text.slice(0, MANIFEST_T1_ENTRY_CHARS);
+      e.text = `${head}…[截断于${head.length}字]`;
+    }
+  }
+
+  // 4) T2 auto-stub: only when the worker declared nothing valid but the
+  // mission carries outputs (artifacts / output_files / pack.path).
+  let stubbed = false;
+  if (!entries.length) {
+    const arts = Array.isArray(mission.artifacts) ? mission.artifacts.map(String) : [];
+    const outs = Array.isArray(mission.output_files) ? mission.output_files.map(String) : [];
+    const packPath = mission.pack && mission.pack.path ? String(mission.pack.path) : null;
+    const paths = [...arts, ...outs, ...(packPath ? [packPath] : [])].filter(Boolean);
+    if (paths.length) {
+      stubbed = true;
+      entries = paths.map((p) => ({
+        layer: "T2",
+        type: "anchor",
+        title: "产物指针（server 桩）",
+        text: undefined,
+        ref: { path: p },
+      }));
+      if (entries.length > MANIFEST_MAX_ENTRIES) {
+        notes.push(
+          `server 桩条目超帽（≤${MANIFEST_MAX_ENTRIES} 条），丢弃尾部 ${entries.length - MANIFEST_MAX_ENTRIES} 条`,
+        );
+        entries = entries.slice(0, MANIFEST_MAX_ENTRIES);
+      }
+    }
+  }
+
+  // Canonical seven-field entries with sequential ids c01..c12 (order = the
+  // two-digit semantic; the server renumbers, the worker supplies content).
+  const assemble = (list, src) =>
+    list.map((e, i) => {
+      const out = {
+        id: `c${String(i + 1).padStart(2, "0")}`,
+        layer: e.layer,
+        type: e.type,
+        title: e.title,
+      };
+      if (e.text !== undefined && e.text !== "") out.text = e.text;
+      out.ref = e.ref;
+      out.source = src;
+      return out;
+    });
+
+  if (!entries.length) {
+    // 5b) all-empty: no file, no pointer — the note explains why (CR-V21).
+    notes.push("manifest 未写入：零有效条目且零产物物料（不落 sidecar、不设指针）");
+    return { pointer: null, note: notes.join("；"), warnings };
+  }
+
+  // 5) write the sidecar (atomic), enforcing the 32KB whole-file cap by
+  // dropping tail entries until it fits.
+  const source = stubbed ? "server" : "worker";
+  let payload = { v: 1, mission_id: mission.id, generated_at: at, source, entries: assemble(entries, source) };
+  let fileDropped = 0;
+  while (
+    entries.length &&
+    Buffer.byteLength(JSON.stringify(payload, null, 2) + "\n", "utf8") > MANIFEST_FILE_BYTES
+  ) {
+    entries.pop();
+    fileDropped += 1;
+    payload = { v: 1, mission_id: mission.id, generated_at: at, source, entries: assemble(entries, source) };
+  }
+  if (fileDropped) notes.push(`manifest 文件超 32KB 总帽，丢弃尾部 ${fileDropped} 条`);
+  if (!entries.length) {
+    notes.push("manifest 未写入：零有效条目且零产物物料（不落 sidecar、不设指针）");
+    return { pointer: null, note: notes.join("；"), warnings };
+  }
+  const sidecarPath = path.join(root, "packs", mission.id, "manifest.json");
+  atomicWriteFileSync(sidecarPath, JSON.stringify(payload, null, 2) + "\n");
+
+  // 6) board pointer (whole replacement by the caller's patch).
+  const pointer = {
+    path: displayPath(sidecarPath),
+    entry_count: entries.length,
+    updated_at: at,
+  };
+
+  // 7) assertion mechanical comparison — entry-level trigger predicate:
+  // type=assertion && ref.path hits tests/assertions/ (no mission classing).
+  // Read-only, non-blocking; mismatch/unreadable -> manifest_warnings.
+  for (const e of payload.entries) {
+    if (e.type !== "assertion") continue;
+    const refPath = String((e.ref && e.ref.path) ?? "");
+    if (!refPath.includes("tests/assertions/")) continue;
+    let fileText = null;
+    try {
+      const abs = path.isAbsolute(refPath) ? refPath : path.join(projectDir, refPath);
+      fileText = fs.readFileSync(abs, "utf8");
+    } catch {
+      fileText = null;
+    }
+    if (fileText == null) {
+      warnings.push(`assertion 未比对：断言文件不可读（${refPath}）`);
+    } else if (!fileText.includes(e.text ?? "")) {
+      warnings.push(`assertion 比对不一致：${refPath} 未包含条目 ${e.id} 的内联文本`);
+    }
+  }
+
+  return { pointer, note: notes.length ? notes.join("；") : null, warnings };
+}
+
+/**
+ * v0.5 T3 (S2): mechanically pull upstream mission manifests into pack
+ * sections. Pure with respect to its inputs; reads upstream sidecars under
+ * <root>/packs/<mid>/manifest.json — caller holds the root lock (§2.1).
+ *
+ * Snapshot semantics (§2.7): materializes verbatim at pack-build time; later
+ * upstream manifest updates never backfill an already-built pack.
+ *
+ * Routing (§2.2): T0 -> CONTEXT verbatim block (header source line
+ * "> 来源 <mid>#<id> · <title> · <ref>"), T1 -> SUMMARY line
+ * "- <mid>#<id> <title>：<text>", T2 -> READ FIRST pointer
+ * "- <path>（<loc>）——来自 <mid>#<id>". Array order is document order;
+ * within an input, entries sort by id (c01→c12).
+ *
+ * Dedup (§2.3): ① the same <mid>#<id> arriving via repeated inputs -> first
+ * occurrence wins, counter line "（去重：N 条重复条目已跳过，首次出现胜出）"
+ * heads SUMMARY (or READ FIRST when no SUMMARY); ② exact-string collision with
+ * a manual READ FIRST line -> manual wins (caller filters).
+ *
+ * Caps (§2.4/§9.1): per-entry T0 4000B truncate-keep-head with marker
+ * "…[截断于4000字节]", then T0 layer 24KB / T1 layer 4KB total across all
+ * inputs — order preserved, whole-input degradation to T2 pointer + SUMMARY
+ * note ("其 T0 因总量帽未随包，见指针"); T2 append ≤20, overflow noted in
+ * pack. Entries are never silently dropped.
+ *
+ * Fallback chain per input, short-circuit (§2.6): L1 sidecar exists and
+ * parses -> full routing; L2 no manifest (or corrupt/unparseable sidecar —
+ * treated as L1 failure with a warning line) but mission has
+ * artifacts/output_files/pack.path -> T2-only stubs marked "server 桩" + last
+ * done report summary as a SUMMARY line (source:"server"); L3 no manifest and
+ * zero artifacts -> zero-output record (partial: skip + in-pack warning; all:
+ * throws ToolError with guidance — caller must not have produced side effects).
+ */
+function pullInputsContent(inputIds, board) {
+  const seenEntries = new Set();
+  const seenMissions = new Set();
+  let dupCount = 0;
+  const t0Groups = []; // [{ mid, items: [{ block, pointer }] }]
+  const t1Groups = []; // [{ mid, items: [{ addr, title, line, pointer }] }]
+  const t2Lines = [];
+  const sumLines = [];
+  const warnNotices = [];
+  const zeroIds = [];
+  const refTextOf = (ref) => {
+    if (!ref || typeof ref !== "object") return "";
+    const p = String(ref.path ?? "");
+    const loc = String(ref.loc ?? "");
+    return loc ? `${p}（${loc}）` : p;
+  };
+
+  for (const mid of inputIds) {
+    const mission = findMission(board, mid);
+    if (!mission) throw new ToolError(`mission not found: ${mid}`); // board-get semantics
+    const sidecarPath = path.join(root, "packs", mid, "manifest.json");
+    let entries = null;
+    let corrupted = false;
+    if (fs.existsSync(sidecarPath)) {
+      try {
+        const sc = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+        if (sc && Array.isArray(sc.entries)) entries = sc.entries;
+        else corrupted = true;
+      } catch {
+        corrupted = true;
+      }
+    }
+
+    if (entries) {
+      const ordered = [...entries].sort((a, b) =>
+        String((a && a.id) ?? "").localeCompare(String((b && b.id) ?? "")),
+      );
+      const t0Items = [];
+      const t1Items = [];
+      for (const e of ordered) {
+        if (!e || typeof e !== "object") continue;
+        const addr = `${mid}#${e.id}`;
+        if (seenEntries.has(addr)) {
+          dupCount++;
+          continue;
+        }
+        seenEntries.add(addr);
+        const layer = String(e.layer ?? "");
+        const title = String(e.title ?? "");
+        const text = String(e.text ?? "");
+        const rText = refTextOf(e.ref);
+        const pointer = `- ${rText}——来自 ${addr}`;
+        if (layer === "T0") {
+          let body = text;
+          if (Buffer.byteLength(body, "utf8") > PULL_T0_ENTRY_BYTES) {
+            body =
+              truncateUtf8Bytes(body, PULL_T0_ENTRY_BYTES) + `…[截断于${PULL_T0_ENTRY_BYTES}字节]`;
+          }
+          t0Items.push({ block: `> 来源 ${addr} · ${title} · ${rText}\n${body}`, pointer });
+        } else if (layer === "T1") {
+          t1Items.push({ addr, title, line: `- ${addr} ${title}：${text}`, pointer });
+        } else {
+          // T2 (and any unknown layer degrades visibly to a pointer).
+          t2Lines.push(pointer);
+        }
+      }
+      if (t0Items.length) t0Groups.push({ mid, items: t0Items });
+      if (t1Items.length) t1Groups.push({ mid, items: t1Items });
+    } else {
+      // L2 / L3: no usable manifest — mission-level dedup for repeated ids.
+      if (seenMissions.has(mid)) {
+        dupCount++;
+        continue;
+      }
+      seenMissions.add(mid);
+      const arts = Array.isArray(mission.artifacts) ? mission.artifacts.map(String) : [];
+      const outs = Array.isArray(mission.output_files) ? mission.output_files.map(String) : [];
+      const packPath = mission.pack && mission.pack.path ? String(mission.pack.path) : null;
+      if (arts.length || outs.length || packPath) {
+        // L2: T2-only degradation (source:"server"), never a semantic layer.
+        if (corrupted) {
+          warnNotices.push(`（警示：${mid} 的 manifest sidecar 损坏不可解析，已按 server 桩降级牵引）`);
+        }
+        for (const p of [...arts, ...outs, ...(packPath ? [packPath] : [])]) {
+          t2Lines.push(`- ${p}——来自 ${mid}（server 桩）`);
+        }
+        const timeline = Array.isArray(mission.timeline) ? mission.timeline : [];
+        const doneEv = [...timeline].reverse().find((t) => t && t.event === "report:done");
+        if (doneEv && doneEv.summary) {
+          sumLines.push(`- ${mid}（server 桩）：${truncateStr(String(doneEv.summary), 200)}`);
+        }
+      } else {
+        zeroIds.push(mid); // L3: zero-output record
+      }
+    }
+  }
+
+  // Layer caps: order-preserving, whole-input degradation (§2.4). Block bytes
+  // count separators so the rendered section is what the cap measures.
+  const t0Blocks = [];
+  let t0Bytes = 0;
+  const degradedT0 = [];
+  for (const g of t0Groups) {
+    const gBytes = g.items.reduce((n, it) => n + Buffer.byteLength(it.block, "utf8") + 2, 0);
+    if (t0Bytes + gBytes <= PULL_T0_LAYER_BYTES) {
+      for (const it of g.items) {
+        t0Blocks.push(it.block);
+        t0Bytes += Buffer.byteLength(it.block, "utf8") + 2;
+      }
+    } else {
+      degradedT0.push(g);
+    }
+  }
+  for (const g of degradedT0) {
+    sumLines.push(`- ${g.mid}：其 T0 因总量帽未随包，见指针`);
+    for (const it of g.items) t2Lines.push(it.pointer);
+  }
+  const t1Lines = [];
+  let t1Bytes = 0;
+  const degradedT1 = [];
+  for (const g of t1Groups) {
+    const gBytes = g.items.reduce((n, it) => n + Buffer.byteLength(it.line, "utf8") + 1, 0);
+    if (t1Bytes + gBytes <= PULL_T1_LAYER_BYTES) {
+      for (const it of g.items) {
+        t1Lines.push(it.line);
+        t1Bytes += Buffer.byteLength(it.line, "utf8") + 1;
+      }
+    } else {
+      degradedT1.push(g);
+    }
+  }
+  for (const g of degradedT1) {
+    for (const it of g.items) {
+      sumLines.push(`- ${it.addr} ${it.title}：其 T1 因总量帽未随包，见指针`);
+      t2Lines.push(it.pointer);
+    }
+  }
+
+  // T2 append cap: keep order, record overflow in-pack (never silent).
+  let t2Dropped = 0;
+  const t2Kept = [];
+  for (const line of t2Lines) {
+    if (t2Kept.length < PULL_T2_MAX) t2Kept.push(line);
+    else t2Dropped++;
+  }
+  if (t2Dropped > 0) {
+    warnNotices.push(
+      `（警示：READ FIRST 追加指针超帽（${PULL_T2_MAX} 条），${t2Dropped} 条未随包）`,
+    );
+  }
+
+  // Dedup counter line heads the notices (goes to SUMMARY or READ FIRST head).
+  const notices = [];
+  if (dupCount > 0) {
+    notices.push(`（去重：${dupCount} 条重复条目已跳过，首次出现胜出）`);
+  }
+  notices.push(...warnNotices);
+
+  if (zeroIds.length) {
+    const detail = zeroIds
+      .map((mid) => {
+        const m = findMission(board, mid);
+        const tl = m && Array.isArray(m.timeline) ? m.timeline : [];
+        const dones = tl.filter((t) => t && t.event === "report:done");
+        const last = dones.length ? String(dones[dones.length - 1].summary) : "无 done report";
+        const n = m && Array.isArray(m.artifacts) ? m.artifacts.length : 0;
+        return `${mid}（artifacts ${n} 项，最后 report：${last}）`;
+      })
+      .join("；");
+    if (zeroIds.length === inputIds.length) {
+      // L3 all-zero: isError with guidance; caller has produced zero side
+      // effects (pull runs before sandbox materialization and pack writes).
+      throw new ToolError(
+        `inputs 全部零产出：${zeroIds.join("、")}。现有物料：${detail}。` +
+          `建议：改用手动 upstream_context 注入，或先让这些 mission 补 report(kind=done, artifacts=…) 申报后再牵引。`,
+      );
+    }
+    notices.push(
+      `（警示：inputs ${zeroIds.join("、")} 无 manifest 且零产物，已跳过——建议改手动 upstream 或先补 done 申报）`,
+    );
+  }
+
+  return { t0Blocks, t1Lines, t2Lines: t2Kept, sumLines, notices };
+}
+
 function toolContextPack(args) {
   // v0.3.1 (A1): pack writes + the board upsert hold the root lock.
   return withRootLock(() => toolContextPackInner(args));
@@ -2875,12 +3855,26 @@ function toolContextPackInner(args) {
       'context_pack isolation must be "worktree" or "none" (缺省取 userConfig sandbox_default)',
     );
   }
-  const oobAllowlist = Array.isArray(args.oob_allowlist)
-    ? args.oob_allowlist.map(String).filter((s) => s.trim())
-    : [];
+  const oobAllowlist = normalizePathList(args.oob_allowlist);
+  // v0.5 E1: new context_pack parameters (scope_paths / budget / inputs).
+  // Parsing happens before any side effect; invalid values reject the call.
+  const scopePaths = parseScopePathsArg(args.scope_paths);
+  const budgetTier = parseBudgetArg(args.budget);
+  const inputIds = parseInputsArg(args.inputs);
+  // v0.5 E2 (G-4): a non-empty scope_paths WHOLLY replaces oob_allowlist as
+  // the sandbox out-of-bounds allowlist — tighter wins, never a silent union.
+  // Alias-only calls keep the exact 0.4.1 behavior; storage key stays
+  // sandbox.oob_allowlist.
+  const effectiveAllowlist = scopePaths.length ? scopePaths : oobAllowlist;
+  const oobIgnoredWarn =
+    scopePaths.length && oobAllowlist.length ? "oob_allowlist 被忽略（scope_paths 优先）" : null;
   let sandboxInfo = null;
   let sandboxLines = null;
   let sandboxWarn = null;
+  // v0.5 T3: pull upstream content BEFORE any side effect — an all-zero L3
+  // input set must fail with zero side effects (§2.6). The pulled strings are
+  // rewritten to the sandbox root after the sandbox exists (§2.8).
+  const pull = inputIds.length ? pullInputsContent(inputIds, loadBoard()) : null;
   if (isolation === "worktree") {
     const installLike = isInstallLikeTask(title + "\n" + task);
     let junctionDecision;
@@ -2897,13 +3891,23 @@ function toolContextPackInner(args) {
       junctionDecision =
         fs.existsSync(path.join(projectDir, "node_modules")) && !installLike;
     }
-    sandboxInfo = materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionDecision });
+    sandboxInfo = materializeSandbox({ missionId, oobAllowlist: effectiveAllowlist, junctionShared: junctionDecision });
     // Path rewriting: project root -> sandbox root, both slash forms.
     const rewrite = (s) => rewritePathStrings(s, projectDir, sandboxInfo.root);
     task = rewrite(task);
     readFirst = readFirst.map(rewrite);
     rules = rules.map(rewrite);
     upstream = rewrite(upstream);
+    if (pull) {
+      // §2.8: ALL pulled text (T0 blocks / T1 lines / T2 pointers / summary
+      // lines / notices) goes through the same project-root→sandbox-root
+      // rewrite, or pack paths would point back at the main root.
+      pull.t0Blocks = pull.t0Blocks.map(rewrite);
+      pull.t1Lines = pull.t1Lines.map(rewrite);
+      pull.t2Lines = pull.t2Lines.map(rewrite);
+      pull.sumLines = pull.sumLines.map(rewrite);
+      pull.notices = pull.notices.map(rewrite);
+    }
     sandboxLines = buildSandboxLines({
       sandboxRoot: sandboxInfo.root,
       branch: sandboxInfo.branch,
@@ -2921,6 +3925,16 @@ function toolContextPackInner(args) {
     existing && typeof existing.agent_type === "string" && existing.agent_type.includes(":")
       ? existing.agent_type.split(":").pop()
       : "orch-worker";
+
+  // v0.5 T3 (§2.3②): exact-string collision with a manual READ FIRST line ->
+  // manual wins, pulled pointer skipped. Compared in rendered form.
+  if (pull) {
+    const manualLines = new Set(readFirst.map((p) => `- ${p}`));
+    pull.t2Lines = pull.t2Lines.filter((line) => !manualLines.has(line));
+  }
+  // v0.5 E3: conditional OWNERSHIP / BUDGET section lines (absent by default).
+  const ownershipLines = buildOwnershipLines(scopePaths);
+  const budgetLines = buildBudgetLines(budgetTier);
 
   // v0.3 injections: keyword-matched lessons + optional mirror digest. Both are
   // computed once and shared across variant packs.
@@ -2956,6 +3970,9 @@ function toolContextPackInner(args) {
         workerName: `${workerBare}#1`,
         lessonLines,
         recentLines,
+        ownershipLines,
+        budgetLines,
+        pull,
         sandboxLines,
       }),
     );
@@ -2980,6 +3997,9 @@ function toolContextPackInner(args) {
           workerName: `${workerBare}#${k}`,
           lessonLines,
           recentLines,
+          ownershipLines,
+          budgetLines,
+          pull,
           sandboxLines,
         }),
       );
@@ -2990,6 +4010,10 @@ function toolContextPackInner(args) {
   upsertMission({
     id: missionId,
     ...(existing && existing.title ? {} : { title }),
+    // v0.5 E2: scope_paths registration (non-sandbox dispatch registers +
+    // materializes OWNERSHIP only). Empty/normalized-away list = unregistered
+    // (CRV2-06 negative). Stored normalized (F1), same list OWNERSHIP renders.
+    ...(scopePaths.length ? { scope_paths: scopePaths } : {}),
     pack: { path: displayPath(packPaths[0]), variants: packPaths.map(displayPath) },
     dispatch: { token },
   });
@@ -3019,7 +4043,10 @@ function toolContextPackInner(args) {
       base_commit: sandboxInfo.base_commit,
       junction_shared: sandboxInfo.junction_shared,
     };
-    if (sandboxWarn) result.warn = sandboxWarn;
+    if (sandboxWarn || oobIgnoredWarn) {
+      // v0.5 E2: warns compose with "；" (sandbox junction warn + alias-ignored).
+      result.warn = [sandboxWarn, oobIgnoredWarn].filter(Boolean).join("；");
+    }
   }
   return result;
 }
@@ -3096,9 +4123,7 @@ function toolSandboxApplyInner(args) {
   }
   // 3. mechanical out-of-bounds detection (allowlist prefix match; empty =
   // everything allowed).
-  const allow = Array.isArray(sb.oob_allowlist)
-    ? sb.oob_allowlist.map(String).filter((s) => s.trim())
-    : [];
+  const allow = normalizePathList(sb.oob_allowlist);
   const changed = listDiffNames(projectDir, baseCommit, branch);
   const violations = allow.length
     ? changed.filter((p) => !allow.some((pre) => p === pre || p.startsWith(pre)))
@@ -3368,7 +4393,11 @@ function toolResume(args) {
     const unread = countUnread(m.id);
     const rec = recommendedAction(m, unread, sessionId);
     const wake = wakeFailureInfo(m);
-    missionsOut.push({
+    // T6 (v0.5): blocked/question rows present only the ≤160-char question
+    // head — the full text stays behind mailbox read (S4 matrix row 3); every
+    // other row keeps the existing blocked shape untouched.
+    const isQuestionRow = m.status === "blocked" || m.status === "question";
+    const row = {
       id: m.id,
       title: m.title || "",
       status: m.status,
@@ -3383,14 +4412,23 @@ function toolResume(args) {
       wake_failure: wake.suspected ? { result_at: wake.result_at, minutes: wake.minutes } : null,
       blocked: m.blocked
         ? {
-            question: m.blocked.question ?? null,
+            ...(isQuestionRow
+              ? { question_head: truncateStr(String(m.blocked.question ?? ""), T1_HEAD_CAP) }
+              : { question: m.blocked.question ?? null }),
             answered: m.blocked.answered === true,
             answer: m.blocked.answer ?? null,
           }
         : null,
       updated_at: m.updated_at || null,
       recommended_action: rec.primary,
-    });
+    };
+    // T6 (v0.5): done/failed rows still awaiting ack carry t1_head (already
+    // acked rows do not — the coordinator has seen them). Optional key only;
+    // no cap is added to the resume response.
+    if ((m.status === "done" || m.status === "failed") && !missionAck(m)) {
+      row.t1_head = t1HeadOf(m);
+    }
+    missionsOut.push(row);
     for (const a of rec.actions) actions.push({ mission_id: m.id, priority: a.priority, action: a.action });
   }
   // v0.4: pool missions waiting for a claim are surfaced here (not in the Stop
@@ -3548,7 +4586,9 @@ function harvestText(content) {
 }
 
 function renderHarvestMessages(messages, includeTools, tail) {
-  const slice = messages.slice(-tail);
+  // H1 (v0.5, D2 §1.2): tail=0 → probe mode, zero transcript echo.
+  // (slice(-0) === slice(0) would return the WHOLE array — guard it.)
+  const slice = tail > 0 ? messages.slice(-tail) : [];
   const lines = [];
   for (const m of slice) {
     if (!m || typeof m !== "object") continue;
@@ -3587,7 +4627,8 @@ function renderHarvestMessages(messages, includeTools, tail) {
 
 function toolAgentHarvest(args) {
   let tail = Math.floor(Number(args.tail));
-  if (!Number.isFinite(tail) || tail < 1) tail = HARVEST_DEFAULT_TAIL;
+  // H1 (v0.5): 0 is now legal — probe mode (metadata only, zero echo); <0/non-numeric still default.
+  if (!Number.isFinite(tail) || tail < 0) tail = HARVEST_DEFAULT_TAIL;
   tail = Math.min(HARVEST_MAX_TAIL, tail);
   let maxChars = Math.floor(Number(args.max_chars));
   if (!Number.isFinite(maxChars) || maxChars < 200) maxChars = HARVEST_DEFAULT_CHARS;
@@ -3620,14 +4661,22 @@ function toolAgentHarvest(args) {
     );
   }
   let rec;
+  let fileBytes;
   try {
     rec = readLastJsonLine(file, HARVEST_LINE_CAP);
+    fileBytes = fs.statSync(file).size; // H1 (v0.5): one statSync for the file_bytes metadata
   } catch (err) {
     if (err instanceof ToolError) throw err;
     throw new ToolError("转录读取失败：" + (err && err.message ? err.message : err));
   }
   if (!rec) throw new ToolError("转录文件为空或无完整记录");
   const messages = Array.isArray(rec.request && rec.request.messages) ? rec.request.messages : [];
+  // H1 (v0.5, D2 §1.2): exact last-record usage + file facts, already in hand from the parse.
+  // input_tokens is the LAST record's response.usage.inputTokens verbatim (W2 21/21 precise anchor);
+  // no byte-ratio estimation anywhere. Fallback 2KB tail-read probe stays unactivated (D2 §1.2 备选).
+  const usage =
+    rec.response && rec.response.usage && typeof rec.response.usage === "object" ? rec.response.usage : null;
+  const messagesKind = (rec.request && rec.request.messagesKind) ?? null;
   const rendered = renderHarvestMessages(messages, includeTools, tail);
   let transcript = rendered.lines.join("\n");
   const fullLen = transcript.length;
@@ -3645,6 +4694,17 @@ function toolAgentHarvest(args) {
     tail_truncated: rendered.truncated,
     transcript_chars: fullLen,
     transcript,
+    // H1 (v0.5, D2 §1.2): additive probe metadata — tail=0 turns this response into the
+    // zero-echo probe mode (transcript empty) for CR-10 usage sampling. Keys only, no new tool.
+    usage: usage
+      ? {
+          input_tokens: usage.inputTokens ?? null,
+          output_tokens: usage.outputTokens ?? null,
+          cache_read_tokens: usage.cacheReadTokens ?? null,
+        }
+      : null,
+    file_bytes: fileBytes,
+    messages_kind: messagesKind,
   };
 }
 
@@ -3842,6 +4902,38 @@ const TOOLS = [
         summary: { type: "string", maxLength: 200 },
         details: { type: "string", description: "可选长文/结论" },
         artifacts: { type: "array", items: { type: "string" } },
+        files_touched: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 50,
+          description: "仅 milestone/done 参与越界审计，其他 kind 仅存证不审计——G-7",
+        },
+        manifest_entries: {
+          type: "array",
+          maxItems: 12,
+          description:
+            "kind=done 时可选：manifest 条目申报（layer T0/T1/T2；type 封闭五值 assertion/env_fact/anchor/conclusion/directive）；仅 done 走七步收口管线，超帽与形状违规一律软处置不报错",
+          items: {
+            type: "object",
+            required: ["layer", "type", "title", "ref"],
+            properties: {
+              layer: { enum: ["T0", "T1", "T2"], description: "申报的最高可得层" },
+              type: {
+                enum: ["assertion", "env_fact", "anchor", "conclusion", "directive"],
+                description: "封闭五值；summary 为非法值（枚举封闭）",
+              },
+              title: { type: "string", description: "≤60 字符，超帽写入侧截断" },
+              text: { type: "string", description: "T0=逐字原文/T1=摘要/T2 省略" },
+              ref: {
+                type: "object",
+                properties: {
+                  path: { type: "string", description: "溯源文件路径" },
+                  loc: { type: "string", description: "§节标题 / L120-L180 / 断言 ID" },
+                },
+              },
+            },
+          },
+        },
         question: {
           type: "string",
           description: "kind=blocked/question 时必填的提问",
@@ -3951,7 +5043,24 @@ const TOOLS = [
           type: "array",
           items: { type: "string" },
           description:
-            '仓库相对路径前缀白名单（如 ["src/","tests/"]）；sandbox_apply 据此机械检出越界改动。缺省/空=允许全部路径。仅 isolation=worktree 生效',
+            '仓库相对路径前缀白名单（如 ["src/","tests/"]）；sandbox_apply 据此机械检出越界改动。缺省/空=允许全部路径。仅 isolation=worktree 生效（兼容别名，scope_paths 优先）',
+        },
+        scope_paths: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "写集清单（≤32 项，超限报错拒绝不静默截断）：非空时整体取代 oob_allowlist 作为沙箱越界白名单（宁紧勿松，禁止并集），并物化为包内 OWNERSHIP 节与 mission 登记",
+        },
+        budget: {
+          enum: ["S", "M", "L"],
+          description:
+            "预算档位（给定即物化 BUDGET 节）：S≈20 步 / M≈60 步 / L≈120 步；缺省该节整体不出现",
+        },
+        inputs: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "上游 mission id 列表（≤4 个，第 5 个报错）：组包瞬间机械牵引其 manifest 条目（T0→CONTEXT 逐字块 / T1→SUMMARY / T2→READ FIRST 指针），快照语义——上游之后更新不回灌本包",
         },
         share_node_modules: {
           type: "boolean",
@@ -4070,7 +5179,9 @@ const TOOLS = [
         tail: {
           type: "number",
           default: 12,
-          description: "渲染末尾 N 条消息（1-100，默认 12；早期消息省略）",
+          description:
+            "渲染末尾 N 条消息（1-100，默认 12；早期消息省略）。0=探测模式：零转录回显（transcript 为空），" +
+            "仅返回 usage/file_bytes/messages_kind 元数据（主控 CR-10 对账采样用）",
         },
         max_chars: {
           type: "number",

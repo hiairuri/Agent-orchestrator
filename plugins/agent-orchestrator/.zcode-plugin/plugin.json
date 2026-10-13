@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
@@ -32,6 +32,13 @@
       "title": "闸门豁免子代理类型 / Gate-exempt subagent types",
       "description": "逗号分隔的子代理类型名子串（对 subagent_type 做不区分大小写的包含匹配），命中则不做后台提醒。默认 judge。留空=不豁免。/ Comma-separated substrings of subagent_type exempt from the background gate (case-insensitive contains). Default: judge. Empty = no exemption.",
       "default": "judge",
+      "required": false
+    },
+    "dispatch_contract": {
+      "type": "string",
+      "title": "派发契约检查 / Dispatch contract check",
+      "description": "派发 [channel]/[token] 契约头校验的处置（独立于 background_gate——后台闸门=off 不影响本检查）：remind=校验失败仅提醒（默认）；ask=仅当 [channel] 值匹配 mission id 生成形状（m-日期-时间-4位十六进制）且校验失败时转人工确认，占位符文本天然不匹配不升级；off=完全静默。其他值按 remind 处理。/ How to treat failed [channel]/[token] dispatch-contract checks (independent of background_gate): remind (warn only, default), ask (escalate to the user ONLY when the [channel] value matches the generated mission-id shape and the check failed; placeholder text never escalates), off (silent). Unknown values fall back to remind.",
+      "default": "remind",
       "required": false
     },
     "wake_sentinel": {
