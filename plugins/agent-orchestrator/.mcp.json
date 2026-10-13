@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "orch": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${ZCODE_PLUGIN_ROOT}/mcp/server.mjs",
+        "--root", "${user_config.storage_dir}",
+        "--wake-timeout-min", "${user_config.wake_timeout_min}",
+        "--wake-retries", "${user_config.wake_retries}",
+        "--poll-sec", "${user_config.wake_poll_sec}"
+      ],
+      "cwd": "${ZCODE_PROJECT_DIR}",
+      "timeoutMs": 120000
+    }
+  }
+}
