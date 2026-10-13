@@ -11,11 +11,13 @@
  *
  * Session tool full names are prefixed with: mcp__plugin_agent-orchestrator_orch__
  *   board | report | mailbox | spawn_agent | context_pack | resume | lessons |
- *   sandbox_apply | sandbox_discard            (v0.4: 9 tools total)
+ *   sandbox_apply | sandbox_discard | agent_harvest     (v0.4.1: 10 tools total)
  *
  * Storage layout (under the resolved root, default <project>/.zcode/orchestrator):
  *   board.json
- *   root.txt                     (pointer to a custom root, written for hook scripts)
+ *   root.txt                     (pointer to a custom root, written for hook scripts;
+ *                                 v0.4.1: NOT written for temp-dir test roots, and a
+ *                                 dangling pointer is removed + falls back to default)
  *   spool/<mission_id>/unread/<15-digit-zero-padded-epochMs>-<8hex>.json
  *   spool/<mission_id>/read/     (same names; consumed via rename)
  *   spool/<mission_id>/answers/<seq>-answer.json
@@ -25,8 +27,12 @@
  *   archive/board-<ts>.json      (closed missions moved here by mailbox gc)
  *   memory/lessons.jsonl         (v0.3 learning memory: one lesson per line)
  *   context/journal-<sessionId>.jsonl  (v0.3 context mirror, written by hooks)
- *   sentinel.cfg.json            (v0.3 wake-sentinel config bridge, read-only here)
- *   sentinel.lock                (v0.3 sentinel lock, owned by bg-sentinel.mjs)
+ *   sentinel.cfg.json            (v0.3 wake-sentinel config bridge, read-only here;
+ *                                 v0.4.1: full v2 key set + signals block)
+ *   sentinel/                    (v0.4.1 sentinel v2 family: instance-<k>.json slots,
+ *                                 fired/ shot claims, echo.jsonl, coord-session.txt —
+ *                                 owned by bg-sentinel.mjs; the server is READ-ONLY here
+ *                                 except coord-session.txt which it refreshes)
  *   .lock/owner.json             (v0.3.1 root lock: {holder,pid,heartbeatAt}; all
  *                                 board read-modify-write sections run under it)
  *
@@ -57,15 +63,40 @@
  *     "ready"/"skipped", fixpoint sweepGraph on every board write (unlock,
  *     cascade skip, lease回收, dangling cleanup), board action=claim (in-lock
  *     CAS + lease), report renews the lease and hints ready_to_claim.
+ *
+ * v0.4.1 (sentinel v2 / harvest / robustness):
+ *   - writeSentinelCfg publishes the full v2 key set + signals block; new argv
+ *     --sentinel-family / --sentinel-grace-min (0.3.1 keys stay as bridges).
+ *   - sentinelHealth(root): read-only view of <root>/sentinel/ attached to board
+ *     list responses (instances / shots_24h / abandoned / echo_tail); resume
+ *     gains a family-refill + abandoned-takeover action.
+ *   - coord-session.txt refreshed from the resume tool's session_id channel.
+ *   - agent_harvest: read-only subagent transcript harvester over the rollout
+ *     model-io JSONL (last complete record's request.messages tail).
+ *   - mergeMission whitelist: unknown top-level keys are dropped (reported in
+ *     the upsert response as ignored_keys) instead of stored verbatim.
+ *   - root.txt redesign: temp-dir test roots never write the global pointer; a
+ *     dangling pointer is self-healed (removed) and readers fall back to default.
+ *   - QA fixes: sandbox_apply idempotent branch moved ahead of the done/qa
+ *     gates; report warn responses use distinct keys; dangling-dep timeline
+ *     wording names the dropped ids.
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import child_process from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.4.0";
+const SERVER_VERSION = "0.4.1";
+// v0.4.1: display path of the sentinel script (server suggests the refill
+// command; forward slashes for copy-paste into Bash on Windows).
+const SENTINEL_SCRIPT_DISPLAY = path
+  .join(path.dirname(fileURLToPath(import.meta.url)), "..", "hooks", "bg-sentinel.mjs")
+  .split(path.sep)
+  .join("/");
 const BOARD_VERSION = 2; // marker only; readers never validate this value
 const PROTOCOL_VERSION_FALLBACK = "2024-11-05";
 const PREFIX = "mcp__plugin_agent-orchestrator_orch__";
@@ -390,11 +421,33 @@ function resolveRoot() {
 const root = resolveRoot();
 fs.mkdirSync(root, { recursive: true });
 
-// When an explicit custom root differs from the default, publish a pointer file
-// under the default root so hook scripts can find the same storage.
-if (path.resolve(root) !== path.resolve(defaultRoot)) {
+// root.txt bridge (v0.4.1 redesign):
+//   1. Temp-dir roots (os.tmpdir) never publish the pointer — test servers with
+//      "--root <mkdtemp>" must not repoint the project's hooks at a soon-to-be-
+//      deleted directory. Real custom roots (user storage_dir) still publish.
+//   2. Self-heal: when running on the default root, a root.txt whose target no
+//      longer exists (deleted test dir / moved storage) is removed, and hook
+//      readers fall back to the default root via the same liveness check.
+const isTempRoot = (() => {
+  const tmp = path.resolve(os.tmpdir());
+  const r = path.resolve(root);
+  const rel = path.relative(tmp, r);
+  return rel !== "" && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+})();
+if (!isTempRoot && path.resolve(root) !== path.resolve(defaultRoot)) {
   fs.mkdirSync(defaultRoot, { recursive: true });
   atomicWriteFileSync(path.join(defaultRoot, "root.txt"), root + "\n", defaultRoot);
+}
+if (path.resolve(root) === path.resolve(defaultRoot)) {
+  try {
+    const pointer = path.join(defaultRoot, "root.txt");
+    if (fs.existsSync(pointer)) {
+      const target = fs.readFileSync(pointer, "utf8").trim();
+      if (!target || !fs.existsSync(target)) fs.unlinkSync(pointer); // dangling → self-heal
+    }
+  } catch {
+    /* best effort */
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -417,14 +470,40 @@ function numArg(argv, flag, def, min, max) {
  * wake-sentinel settings to <root>/sentinel.cfg.json so the separately started
  * bg-sentinel.mjs (host background Bash task) can pick them up. CLI > cfg file
  * > builtin defaults, resolved inside the sentinel itself.
+ *
+ * v0.4.1: full v2 key set (sentinel family / staggered graces / fired
+ * arbitration) + the rev.b signals block. 0.3.1 keys keep their names and
+ * meanings as bridge sources (refire_gap_min←wake_timeout_min,
+ * wake_cap←wake_retries — the bridging itself happens in the sentinel).
  */
 function writeSentinelCfg() {
   try {
     const argv = process.argv.slice(2);
     const cfg = {
+      // —— 0.3.1 existing three keys: kept verbatim (bridge sources) ——
       wake_timeout_min: numArg(argv, "--wake-timeout-min", 10, 1, 1440),
       wake_retries: Math.round(numArg(argv, "--wake-retries", 3, 1, 100)),
       wake_poll_sec: numArg(argv, "--poll-sec", 60, 1, 3600),
+      // —— v2 keys (defaults = recommended values) ——
+      wake_grace_min: numArg(argv, "--sentinel-grace-min", 5, 0.01, 1440),
+      answer_grace_min: numArg(argv, "--answer-grace-min", 3, 0.01, 1440),
+      stall_grace_min: numArg(argv, "--stall-grace-min", 30, 0.01, 1440),
+      crash_grace_min: numArg(argv, "--crash-grace-min", 10, 0.01, 1440),
+      coord_idle_min: numArg(argv, "--coord-idle-min", 3, 0.01, 1440),
+      refire_gap_min: numArg(argv, "--refire-gap-min", 5, 0.01, 1440),
+      wake_cap: Math.round(numArg(argv, "--wake-cap", 3, 1, 100)),
+      cap_window_min: numArg(argv, "--cap-window-min", 120, 1, 10080),
+      family_size: Math.round(numArg(argv, "--sentinel-family", 3, 1, 5)),
+      stagger_sec: numArg(argv, "--stagger-sec", 20, 0, 600),
+      max_lifetime_min: numArg(argv, "--max-lifetime-min", 1440, 0.01, 43200),
+      // —— rev.b signals block: empty string = sentinel-side default ——
+      signals: {
+        rollout_dir: "", // default <homedir>/.zcode/cli/rollout
+        tool_usage_db: "", // default <homedir>/.zcode/cli/db/db.sqlite (ro, tool_usage only)
+        coord_session_file: "sentinel/coord-session.txt",
+        mailbox_root: "", // default ZCODE_MAILBOX_ROOT ?? <homedir>/.zcode/mailbox
+        toast_on_abandon: true,
+      },
     };
     atomicWriteFileSync(path.join(root, "sentinel.cfg.json"), JSON.stringify(cfg, null, 2) + "\n");
   } catch (err) {
@@ -858,10 +937,38 @@ function newMission(id) {
 // Top-level keys whose object values are merged one level deep instead of replaced.
 const ONE_LEVEL = new Set(["dispatch", "blocked", "pack", "qa"]);
 
+// v0.4.1 merge whitelist (QA finding: upsert used to store unknown keys such as
+// "timeline_note" verbatim — schema drift). Anything outside this set is dropped
+// from the patch and reported back as ignored_keys. Read-only/owned keys (ack /
+// owner / claim) are stripped earlier; id/timeline bookkeeping is handled by
+// upsertMission itself.
+const MERGEABLE_KEYS = new Set([
+  "title",
+  "original_prompt",
+  "agent_type",
+  "model",
+  "status",
+  "dispatch",
+  "pack",
+  "artifacts",
+  "output_files",
+  "blocked",
+  "blockedBy",
+  "qa",
+  "skippedReason",
+  "timeline",
+]);
+
+/** Unknown top-level patch keys (reported, not merged). */
+function ignoredPatchKeys(patch) {
+  return Object.keys(patch).filter((k) => k !== "id" && !MERGEABLE_KEYS.has(k));
+}
+
 function mergeMission(base, patch) {
   const out = { ...base };
   for (const [key, value] of Object.entries(patch)) {
     if (key === "id") continue;
+    if (!MERGEABLE_KEYS.has(key)) continue; // whitelisted schema only
     if (ONE_LEVEL.has(key) && value && typeof value === "object" && !Array.isArray(value)) {
       out[key] = { ...(base[key] || {}) };
       for (const [k2, v2] of Object.entries(value)) {
@@ -965,10 +1072,19 @@ function sweepGraph(board, at) {
         if (!m.danglingRefSince) {
           m.danglingRefSince = at; // first sighting: keep forward references
         } else {
+          // QA fix (v0.4.1): name the dropped ids explicitly — the old wording
+          // ("N 项不存在") did not say WHICH references were removed.
+          const droppedIds = m.blockedBy.filter((dep) => !board.missions.some((x) => x && x.id === dep));
           m.blockedBy = m.blockedBy.filter((dep) => board.missions.some((x) => x && x.id === dep));
           delete m.danglingRefSince;
           m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
-          m.timeline.push({ at, event: "dangling_dropped", summary: `清理悬挂依赖引用（${before - m.blockedBy.length} 项不存在）` });
+          m.timeline.push({
+            at,
+            event: "dangling_dropped",
+            summary:
+              `清理悬挂依赖引用 ${before - m.blockedBy.length} 项（${droppedIds.join(", ")} 不存在）。` +
+              "前向引用允许跨一次写事务落地；若为误写请修订 blockedBy",
+          });
           changed = true;
         }
       } else if (m.danglingRefSince) {
@@ -1612,6 +1728,159 @@ function consumeEventFile(srcFile, missionId) {
 }
 
 /* ------------------------------------------------------------------ */
+/* sentinel health (v0.4.1, read-only view of <root>/sentinel/)        */
+/* ------------------------------------------------------------------ */
+
+const SENTINEL_HEARTBEAT_STALE_MS = 90000; // twin of bg-sentinel / bg-gate B3 rule
+
+function serverPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return Boolean(err && err.code === "EPERM");
+  }
+}
+
+/** Read-only health view; ANY failure returns {available:false} (never throws). */
+function sentinelHealth() {
+  try {
+    const dir = path.join(root, "sentinel");
+    const out = { available: true, family_size: 3, instances: [], shots_24h: [], abandoned: [], echo_tail: [] };
+    // family size preference comes from the published cfg (default 3)
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(root, "sentinel.cfg.json"), "utf8"));
+      const n = Number(cfg && cfg.family_size);
+      if (Number.isFinite(n)) out.family_size = Math.min(5, Math.max(1, Math.round(n)));
+    } catch {
+      /* keep default */
+    }
+    // instances: fresh slot files = on duty
+    const now = Date.now();
+    const names = fs.readdirSync(dir).filter((n) => /^instance-\d+\.json$/.test(n));
+    for (const n of names) {
+      try {
+        const f = path.join(dir, n);
+        const doc = JSON.parse(fs.readFileSync(f, "utf8"));
+        const hb = Date.parse(String(doc.heartbeatAt ?? ""));
+        let age = Number.isFinite(hb) ? now - hb : NaN;
+        if (!Number.isFinite(age)) age = now - fs.statSync(f).mtimeMs;
+        const alive = serverPidAlive(Number(doc.pid)) && Math.max(0, age) <= SENTINEL_HEARTBEAT_STALE_MS;
+        out.instances.push({
+          slot: Number(doc.slot ?? n.match(/^instance-(\d+)\./)?.[1] ?? -1),
+          pid: Number(doc.pid ?? 0),
+          alive,
+          heartbeat_age_s: Math.max(0, Math.round(age / 1000)),
+          started_at: doc.started_at ?? null,
+          took_over: Boolean(doc.took_over),
+        });
+      } catch {
+        /* skip bad slot file */
+      }
+    }
+    out.instances.sort((a, b) => a.slot - b.slot);
+    // fired entries (24h window), newest first
+    const cutoff = now - 24 * 3600 * 1000;
+    const firedDir = path.join(dir, "fired");
+    let entries = [];
+    try {
+      entries = fs
+        .readdirSync(firedDir)
+        .filter((n) => n.endsWith(".json"))
+        .map((n) => {
+          try {
+            const doc = JSON.parse(fs.readFileSync(path.join(firedDir, n), "utf8"));
+            return { doc, mtimeMs: fs.statSync(path.join(firedDir, n)).mtimeMs };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .filter((e) => e.mtimeMs >= cutoff);
+    } catch {
+      /* no fired dir */
+    }
+    entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    out.shots_24h = entries.slice(0, 10).map((e) => ({
+      key: e.doc.key ?? null,
+      category: e.doc.category ?? null,
+      at: e.doc.at ?? new Date(e.mtimeMs).toISOString(),
+      final: e.doc.final === true,
+    }));
+    // abandoned: missions with a final (cap) shot whose state is STILL suspicious.
+    // shots = total window shots for that mission (design §4.8 shows shots:3).
+    let board = null;
+    try {
+      board = JSON.parse(fs.readFileSync(boardFile(), "utf8"));
+    } catch {
+      board = null;
+    }
+    const isSuspicious = (id) => {
+      if (!board || !Array.isArray(board.missions)) return false;
+      const m = board.missions.find((x) => x && x.id === id);
+      if (!m) return false;
+      return (
+        ["done", "failed", "blocked", "question"].includes(m.status) &&
+        missionAck(m) === null &&
+        (m.dispatch && m.dispatch.mode) !== "workflow"
+      );
+    };
+    const byMission = new Map();
+    for (const e of entries) {
+      const id = e.doc.mission_id ? String(e.doc.mission_id) : null;
+      if (!id) continue;
+      const cur = byMission.get(id) || {
+        key: id,
+        category: e.doc.category,
+        shots: 0,
+        last_at: null,
+        hasFinal: false,
+      };
+      cur.shots += 1;
+      if (e.doc.final === true) cur.hasFinal = true;
+      const at = e.doc.at ?? new Date(e.mtimeMs).toISOString();
+      if (!cur.last_at || at > cur.last_at) cur.last_at = at;
+      byMission.set(id, cur);
+    }
+    out.abandoned = [...byMission.values()]
+      .filter((a) => a.hasFinal && isSuspicious(a.key))
+      .map((a) => {
+        let title = "";
+        try {
+          const m = board.missions.find((x) => x && x.id === a.key);
+          title = String((m && m.title) || "");
+        } catch {
+          /* keep empty */
+        }
+        return { key: a.key, category: a.category, shots: a.shots, last_at: a.last_at, mission_title: title };
+      });
+    // echo tail (≤3 newest summaries)
+    try {
+      const lines = fs
+        .readFileSync(path.join(dir, "echo.jsonl"), "utf8")
+        .split("\n")
+        .filter((x) => x.trim());
+      out.echo_tail = lines
+        .slice(-3)
+        .reverse()
+        .map((x) => {
+          try {
+            const o = JSON.parse(x);
+            return String(o.summary_head || "").slice(0, 160);
+          } catch {
+            return x.slice(0, 160);
+          }
+        });
+    } catch {
+      /* no echo file */
+    }
+    return out;
+  } catch {
+    return { available: false };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* tool: board                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -1668,6 +1937,12 @@ function toolBoard(args) {
       return upsertMission(patch); // v0.3.1 A1
     });
     const out = { ok: true, mission: withComputed(mission) };
+    // v0.4.1 merge whitelist: unknown keys are dropped, not stored.
+    const ignoredKeys = ignoredPatchKeys(patch);
+    if (ignoredKeys.length) {
+      out.ignored_keys = ignoredKeys;
+      out.note = `未知字段未入库（schema 白名单）：${ignoredKeys.join(", ")}`;
+    }
     // v0.3.1 (C6): closing over an unread mailbox / pending question does not
     // block, but the coordinator must see it.
     if (mission.status === "closed") {
@@ -1716,7 +1991,8 @@ function toolBoard(args) {
     if (filter) missions = missions.filter((m) => m && filter.includes(m.status));
     else missions = missions.filter((m) => m && m.status !== "closed");
     missions.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
-    return { missions: missions.map(withComputed) };
+    // v0.4.1: sentinel family health rides on list (read-only view of sentinel/)
+    return { missions: missions.map(withComputed), sentinel_health: sentinelHealth() };
   }
   if (action === "claim") {
     // v0.4 self-claiming (CAS): a pool worker claims a ready/drafted mission.
@@ -1960,6 +2236,16 @@ function toolReport(args) {
           hint_claim: `任务板有 ${outcome.readyToClaim} 项 ready 可领取：board(action="claim", mission_id=…, worker="<你的名字>")`,
         }
       : {};
+  // v0.4.1 QA fix (distinct warn keys): the three warns used to share one `warn`
+  // key, so a later warn silently overwrote an earlier one. Each keeps its own
+  // key now; `warn` remains as the combined text for backward compatibility.
+  const warnParts = [
+    outcome.draftedWarn,
+    outcome.claimWarn,
+    outcome.expectedToken && !outcome.token
+      ? "未携带 token；下次上报请带上派发 prompt 的 [token] 行"
+      : null,
+  ].filter(Boolean);
   return {
     ok: true,
     event_id: outcome.eventId,
@@ -1972,11 +2258,12 @@ function toolReport(args) {
     ...(truncatedNote ? { note: truncatedNote } : {}),
     ...(outcome.closed && outcome.note && !truncatedNote ? { note: outcome.note } : {}),
     ...(outcome.lessonsNote ? { lessons_note: outcome.lessonsNote } : {}),
-    ...(outcome.draftedWarn ? { warn: outcome.draftedWarn } : {}),
-    ...(outcome.claimWarn ? { warn: outcome.claimWarn } : {}),
+    ...(outcome.draftedWarn ? { warn_drafted: outcome.draftedWarn } : {}),
+    ...(outcome.claimWarn ? { warn_claim: outcome.claimWarn } : {}),
     ...(outcome.expectedToken && !outcome.token
-      ? { warn: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
+      ? { warn_token: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
       : {}),
+    ...(warnParts.length ? { warn: warnParts.join(" ") } : {}),
     ...readyToClaimExtras,
   };
 }
@@ -2288,6 +2575,7 @@ const MCP_DISALLOWED = [
   PREFIX + "lessons",
   PREFIX + "sandbox_apply",
   PREFIX + "sandbox_discard",
+  PREFIX + "agent_harvest",
 ];
 
 const ARCHETYPES = {
@@ -2755,19 +3043,15 @@ function toolSandboxApplyInner(args) {
   const board = loadBoard();
   const m = findMission(board, missionId);
   if (!m) throw new ToolError(`mission not found: ${missionId}`);
-  // 1. gates (single loadBoard).
-  if (m.status !== "done") {
-    throw new ToolError(`仅 done 状态可 apply，当前 ${m.status}`);
-  }
-  if (!(m.qa && typeof m.qa === "object" && m.qa.verdict === "pass")) {
-    throw new ToolError(
-      '缺少 pass 评审：先派 orch-reviewer 审 diff，再 board(upsert, mission={id, qa:{verdict:"pass",…}})',
-    );
-  }
   const sb = m.pack && m.pack.sandbox;
   if (!sb || sb.isolation !== "worktree") {
     throw new ToolError("该 mission 非沙箱派发");
   }
+  // v0.4.1 QA fix: the applied_at idempotent branch must run BEFORE the done/qa
+  // gates. After a successful apply the mission is closed, so a re-invocation
+  // used to die on "仅 done 状态可 apply" and the compensation path below was
+  // unreachable. Once applied_at exists the merge already happened — finishing
+  // the board transaction is always correct (crash after merge must still close).
   if (sb.applied_at) {
     // Idempotent re-entry + compensation: a crash after the merge must still
     // end with the board closed.
@@ -2786,6 +3070,15 @@ function toolSandboxApplyInner(args) {
       branch: sb.branch,
       status: m.status,
     };
+  }
+  // 1. gates (single loadBoard).
+  if (m.status !== "done") {
+    throw new ToolError(`仅 done 状态可 apply，当前 ${m.status}`);
+  }
+  if (!(m.qa && typeof m.qa === "object" && m.qa.verdict === "pass")) {
+    throw new ToolError(
+      '缺少 pass 评审：先派 orch-reviewer 审 diff，再 board(upsert, mission={id, qa:{verdict:"pass",…}})',
+    );
   }
   assertMergeTreeSupport(projectDir);
   const wtDir = path.resolve(String(sb.root));
@@ -3056,6 +3349,17 @@ function recommendedAction(m, unread, sessionId) {
 
 function toolResume(args) {
   const sessionId = String(args.session_id ?? "");
+  // v0.4.1: publish the coordinator session id for the sentinel family (dual-
+  // idle gate main signal + mailbox echo target). resume is the existing channel
+  // that carries the caller's session id; best effort, never fatal.
+  if (sessionId) {
+    try {
+      fs.mkdirSync(path.join(root, "sentinel"), { recursive: true });
+      atomicWriteFileSync(path.join(root, "sentinel", "coord-session.txt"), sessionId + "\n");
+    } catch {
+      /* best effort */
+    }
+  }
   const board = loadBoard();
   const openMissions = board.missions.filter((m) => m && m.status !== "closed");
   const missionsOut = [];
@@ -3099,6 +3403,23 @@ function toolResume(args) {
       action: `任务板有 ${readyUnclaimedAll.length} 项 ready 待领取：派池工自领取（第 18 章）或手动 board(upsert status=dispatched) 走普通派发`,
     });
   }
+  // v0.4.1: sentinel family understaffed or an abandoned condition → refill /
+  // takeover suggestion (priority 2, board-driven, no sentinel files written).
+  const health = sentinelHealth();
+  if (health.available) {
+    const live = health.instances.filter((i) => i.alive).length;
+    const understaffed = live < health.family_size;
+    if ((understaffed || health.abandoned.length) && openMissions.some((m) => m.status !== "ready")) {
+      actions.push({
+        mission_id: null,
+        priority: 2,
+        action:
+          `哨兵家族 ${live}/${health.family_size} 在岗、abandoned ${health.abandoned.length} 项：` +
+          `Bash(command="node ${SENTINEL_SCRIPT_DISPLAY} --once", run_in_background=true) 补员（同命令连发至满编）；` +
+          "abandoned 项按疑似唤醒失败接手。",
+      });
+    }
+  }
   actions.sort((a, b) => a.priority - b.priority);
 
   // v0.3: recent-session context from the mirror journal (read-only tails).
@@ -3128,6 +3449,9 @@ function toolResume(args) {
     // missions count, so a closed mission's leftover events no longer inflate.
     unread_total: openMissions.reduce((n, m) => n + countUnread(m.id), 0),
     actions_top3: actions.slice(0, 3),
+    // v0.4.1: full pool exposed so priority-2 suggestions (sentinel refill /
+    // abandoned takeover) remain visible when higher-priority actions crowd top3.
+    actions,
     // v0.4: ready missions with no owner (≤8 listed), count first.
     ready_unclaimed: readyUnclaimedAll.slice(0, 8).map((m) => ({
       id: m.id,
@@ -3137,6 +3461,190 @@ function toolResume(args) {
     ready_unclaimed_count: readyUnclaimedAll.length,
     prev_sessions: prevSessions,
     context_hint: contextHint,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* tool: agent_harvest (v0.4.1)                                        */
+/*                                                                     */
+/* Read-only subagent transcript harvester over the platform rollout    */
+/* model-io JSONL (<homedir>/.zcode/cli/rollout/model-io-<sessionId>.   */
+/* jsonl). Every record embeds the full conversation-so-far under       */
+/* request.messages, so the LAST complete record is the freshest view.  */
+/* Works across sessions (unlike TaskOutput) and needs no task id —     */
+/* the coordinator resolves a finished subagent by mission/agent id.    */
+/* Read-only: opens the rollout file, never writes anywhere.            */
+/* ------------------------------------------------------------------ */
+
+const HARVEST_DEFAULT_TAIL = 12;
+const HARVEST_MAX_TAIL = 100;
+const HARVEST_DEFAULT_CHARS = 8000;
+const HARVEST_MAX_CHARS = 48000;
+const HARVEST_LINE_CAP = 64 * 1024 * 1024; // refuse absurd records
+const HARVEST_SCAN_CHUNK = 1024 * 1024;
+
+function harvestRolloutDir() {
+  const envDir = String(process.env.ORCH_ROLLOUT_DIR || "").trim();
+  if (envDir) return path.resolve(envDir); // test seam only; default below
+  return path.join(os.homedir(), ".zcode", "cli", "rollout");
+}
+
+/** Last COMPLETE JSONL record (file ends with a newline → need the final two). */
+function readLastJsonLine(file, capBytes) {
+  const st = fs.statSync(file);
+  const size = st.size;
+  if (size === 0) return null;
+  const fd = fs.openSync(file, "r");
+  try {
+    const nls = [];
+    let pos = size;
+    while (pos > 0 && nls.length < 2) {
+      const n = Math.min(HARVEST_SCAN_CHUNK, pos);
+      const buf = Buffer.alloc(n);
+      fs.readSync(fd, buf, 0, n, pos - n);
+      for (let i = n - 1; i >= 0; i--) {
+        if (buf[i] === 10) {
+          nls.push(pos - n + i);
+          if (nls.length >= 2) break;
+        }
+      }
+      pos -= n;
+    }
+    let start;
+    let end;
+    if (nls.length >= 2) {
+      start = nls[1] + 1;
+      end = nls[0];
+    } else if (nls.length === 1) {
+      start = 0;
+      end = nls[0];
+    } else {
+      start = 0;
+      end = size; // single unterminated line
+    }
+    const len = end - start;
+    if (len <= 0) return null;
+    if (len > capBytes) {
+      throw new ToolError(`转录末行 ${len} 字节超出收割上限（${capBytes}）`);
+    }
+    const lb = Buffer.alloc(len);
+    fs.readSync(fd, lb, 0, len, start);
+    return JSON.parse(lb.toString("utf8"));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Flatten content (string | [{type:"text",text}|…]) to plain text. */
+function harvestText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (p && typeof p === "object" && typeof p.text === "string" ? p.text : ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return content == null ? "" : String(content);
+}
+
+function renderHarvestMessages(messages, includeTools, tail) {
+  const slice = messages.slice(-tail);
+  const lines = [];
+  for (const m of slice) {
+    if (!m || typeof m !== "object") continue;
+    const role = String(m.role || "?");
+    if (role === "system") {
+      lines.push("[system] " + harvestText(m.content).replace(/\s+/g, " ").slice(0, 160));
+    } else if (role === "user") {
+      lines.push("[user] " + harvestText(m.content).replace(/\s+/g, " ").slice(0, 400));
+    } else if (role === "assistant") {
+      const text = harvestText(m.content).replace(/\s+/g, " ").trim();
+      lines.push("[assistant] " + (text ? text.slice(0, 600) : "(无文本)"));
+      if (includeTools && Array.isArray(m.toolCalls)) {
+        for (const tc of m.toolCalls) {
+          if (!tc) continue;
+          let inputHead = "";
+          try {
+            inputHead = JSON.stringify(tc.input ?? {}).slice(0, 160);
+          } catch {
+            inputHead = "";
+          }
+          lines.push(`    → ${String(tc.name || "?")}(${inputHead})`);
+        }
+      }
+    } else if (role === "tool") {
+      const err = m.isError ? " ERROR" : "";
+      lines.push(
+        `[tool ${String(m.toolName || "?")}${err}] ` +
+          harvestText(m.content).replace(/\s+/g, " ").slice(0, 240),
+      );
+    } else {
+      lines.push(`[${role}] ` + harvestText(m.content).replace(/\s+/g, " ").slice(0, 240));
+    }
+  }
+  return { lines, count: slice.length, truncated: messages.length > slice.length };
+}
+
+function toolAgentHarvest(args) {
+  let tail = Math.floor(Number(args.tail));
+  if (!Number.isFinite(tail) || tail < 1) tail = HARVEST_DEFAULT_TAIL;
+  tail = Math.min(HARVEST_MAX_TAIL, tail);
+  let maxChars = Math.floor(Number(args.max_chars));
+  if (!Number.isFinite(maxChars) || maxChars < 200) maxChars = HARVEST_DEFAULT_CHARS;
+  maxChars = Math.min(HARVEST_MAX_CHARS, maxChars);
+  const includeTools = args.include_tools !== false;
+
+  let sessionId = String(args.session_id ?? "").trim();
+  if (!sessionId) {
+    const agentId = String(args.agent_id ?? "").trim();
+    if (agentId) sessionId = agentId.startsWith("sess_") ? agentId : `sess_subagent_agent_${agentId}`;
+  }
+  let missionId = null;
+  if (!sessionId && args.mission_id != null) {
+    missionId = safeSegment(args.mission_id, "mission_id");
+    const m = findMission(loadBoard(), missionId);
+    if (!m) throw new ToolError(`mission not found: ${missionId}`);
+    const aid = (m.dispatch && m.dispatch.agent_id) || null;
+    if (!aid) throw new ToolError(`mission ${missionId} 无 dispatch.agent_id（未派发或池工领取，无转录可收割）`);
+    sessionId = `sess_subagent_agent_${aid}`;
+  }
+  if (!sessionId) {
+    throw new ToolError('agent_harvest 需要 session_id / agent_id / mission_id 其一');
+  }
+
+  const file = path.join(harvestRolloutDir(), `model-io-${sessionId}.jsonl`);
+  if (!fs.existsSync(file)) {
+    throw new ToolError(
+      `未找到转录 model-io-${sessionId}.jsonl（rollout 目录 ${harvestRolloutDir()}）。` +
+        "未派发、池工领取、或平台未写 rollout 时无转录可收割；终态产出请以 report artifacts 为准",
+    );
+  }
+  let rec;
+  try {
+    rec = readLastJsonLine(file, HARVEST_LINE_CAP);
+  } catch (err) {
+    if (err instanceof ToolError) throw err;
+    throw new ToolError("转录读取失败：" + (err && err.message ? err.message : err));
+  }
+  if (!rec) throw new ToolError("转录文件为空或无完整记录");
+  const messages = Array.isArray(rec.request && rec.request.messages) ? rec.request.messages : [];
+  const rendered = renderHarvestMessages(messages, includeTools, tail);
+  let transcript = rendered.lines.join("\n");
+  const fullLen = transcript.length;
+  if (transcript.length > maxChars) transcript = "…（头部截断，保留尾部）\n" + transcript.slice(transcript.length - maxChars);
+
+  return {
+    ok: true,
+    session_id: sessionId,
+    mission_id: missionId,
+    source: displayPath(file),
+    completed_at: rec.completedAt ?? null,
+    model_id: (rec.model && rec.model.modelId) || (rec.response && rec.response.modelId) || null,
+    message_count: messages.length,
+    rendered_messages: rendered.count,
+    tail_truncated: rendered.truncated,
+    transcript_chars: fullLen,
+    transcript,
   };
 }
 
@@ -3154,6 +3662,7 @@ const TOOL_HANDLERS = {
   [PREFIX + "lessons"]: toolLessons,
   [PREFIX + "sandbox_apply"]: toolSandboxApply,
   [PREFIX + "sandbox_discard"]: toolSandboxDiscard,
+  [PREFIX + "agent_harvest"]: toolAgentHarvest,
 };
 
 const TOOLS = [
@@ -3541,6 +4050,39 @@ const TOOLS = [
       type: "object",
       required: ["mission_id"],
       properties: { mission_id: { type: "string" } },
+    },
+  },
+  {
+    name: PREFIX + "agent_harvest",
+    description:
+      "转录收割（只读）：按 mission/agent/session id 读取子代理的 rollout 转录尾部（末条 model-io 记录内嵌的全量对话），" +
+      "渲染为带角色标签的文本（user/assistant/工具调用行）。跨会话可用（TaskOutput 失效后的兜底）；" +
+      "终态产出仍以 report artifacts 为准。Harvest a subagent transcript tail (read-only).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mission_id: {
+          type: "string",
+          description: "按 mission 收割（取 dispatch.agent_id 映射 sess_subagent_agent_<id>）；三个定位参数缺一即可",
+        },
+        agent_id: { type: "string", description: "agent_<uuid>（自动加 sess_subagent_agent_ 前缀）" },
+        session_id: { type: "string", description: "完整会话 id（sess_…，已含前缀时原样使用）" },
+        tail: {
+          type: "number",
+          default: 12,
+          description: "渲染末尾 N 条消息（1-100，默认 12；早期消息省略）",
+        },
+        max_chars: {
+          type: "number",
+          default: 8000,
+          description: "transcript 字符上限（200-48000，默认 8000；超出保留尾部）",
+        },
+        include_tools: {
+          type: "boolean",
+          default: true,
+          description: "是否渲染 assistant 的工具调用行（→ ToolName(input…)）",
+        },
+      },
     },
   },
 ];

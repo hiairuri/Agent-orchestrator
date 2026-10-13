@@ -1,6 +1,6 @@
 ---
 name: agent-orchestrator
-description: "主控操作手册：把主控 agent 变成任务指挥官。当需要（a）派发/并行/分叉多个子代理并持续跟踪；（b）子代理后台跑、主控同时继续别的活；（c）子代理阻塞提问、主控作答后让它继续；（d）同会话或跨会话恢复中断的任务；（e）给不同子代理/角色选不同模型；（f）运行时创建自定义角色；（g）沉淀与复用编排教训（lessons）；（h）任务完成未签收时被哨兵叫醒；（i）跨会话引用近期会话现场（上下文镜像）；（j）把写代码任务隔离进 git worktree 沙箱并安全合并；（k）任务依赖编排与池工自领取；（l）多轮迭代流水线并行推进——任一情况都使用本技能。含三行契约派发、任务板与邮箱轮询、SendMessage 恢复与 steer、ResumeWorkflowRun/AmendWorkflow、含结果签收与疑似唤醒失败检测、前台派发后台闸门、lessons 经验沉淀、唤醒哨兵与上下文镜像。Stop 收工提醒处置。"
+description: "主控操作手册：把主控 agent 变成任务指挥官。当需要（a）派发/并行/分叉多个子代理并持续跟踪；（b）子代理后台跑、主控同时继续别的活；（c）子代理阻塞提问、主控作答后让它继续；（d）同会话或跨会话恢复中断的任务；（e）给不同子代理/角色选不同模型；（f）运行时创建自定义角色；（g）沉淀与复用编排教训（lessons）；（h）任务完成未签收时被哨兵家族叫醒（防完成通知丢失）；（i）跨会话引用近期会话现场（上下文镜像）；（j）把写代码任务隔离进 git worktree 沙箱并安全合并；（k）任务依赖编排与池工自领取；（l）多轮迭代流水线并行推进——任一情况都使用本技能。含三行契约派发、任务板与邮箱轮询、SendMessage 恢复与 steer、ResumeWorkflowRun/AmendWorkflow、含结果签收与疑似唤醒失败检测、前台派发后台闸门、lessons 经验沉淀、哨兵家族（错峰冗余补枪）与上下文镜像。Stop 收工提醒处置。"
 ---
 
 # agent-orchestrator：主控操作手册
@@ -31,7 +31,7 @@ description: "主控操作手册：把主控 agent 变成任务指挥官。当�
 1. `board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})` 建 mission——**original_prompt 必填**（跨会话恢复的种子）。
 2. `context_pack(mission_id, title, task, read_first, rules, upstream_context)` 生成任务包 + token + prompt_template。
 3. `Agent(description, subagent_type="agent-orchestrator:orch-worker", prompt=prompt_template + 任务要点, run_in_background=true)` 派发。
-4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台拉起唤醒哨兵**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务超时叫醒")`——全部签收它静默自毁，超时未签收它告警叫醒你（超时/重试/间隔默认取 userConfig，可 CLI 覆盖；详见第 14 章）。
+4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台连发 3 次拉起哨兵家族**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`——全部签收它们静默自毁，未签收会分级告警叫醒你（family/grace 默认取 userConfig；详见第 14 章）。
 5. **不等**：继续干别的活。同一消息里放多条 Agent 调用 = 并发（上限约 8）。
 6. 完成通知到达后：读通知里的输出文件路径（兜底）→ `mailbox(action=read)` 消费事件。
 7. 聚合落盘（结果写文件，只把摘要带进上下文）→ `board(upsert, mission={id, status:"closed"})`。（close 会自动补签收 ack；done 附带的候选 lessons 在此时 `lessons(action="promote")` 提炼晋升或放任 gc；本回合全部处置完且哨兵在值守，它会自行自毁，无需手动停）
@@ -100,7 +100,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | done 且 mission 为沙箱派发（pack.sandbox 存在） | board | 派 orch-reviewer 审 diff+越界 → `board(upsert, mission={id, qa:{verdict,…}})` → pass 则 `sandbox_apply(mission_id)`；fail 则 `sandbox_discard`（第 17 章） |
 | ready（无人领取的池任务） | board/resume | 不算未竟不告警；要动它就派池工自领取（第 18 章）或改走普通派发 |
 | 疑似唤醒失败（done/failed/blocked/question + dispatch.agent_id 非空 + 未签收） | board / Stop 清单 | `mailbox(read)` 接手结果 → 处置（answer/close 自动签收）；用户要求暂缓 → `board(action="ack", mission_id, note="deferred by user")`；workflow 模式不参与此判定 |
-| 哨兵告警（bg-sentinel exit 1 完成通知） | 通知 | 按疑似唤醒失败流程接手未签收项（mailbox(read) → answer/close，自动签收）；处置后可再派一个哨兵继续盯守 |
+| 哨兵告警（bg-sentinel exit 1 完成通知） | 通知 | 按疑似唤醒失败流程接手未签收项（mailbox(read) → answer/close，自动签收）；**处置后补员**——再发 1 次同命令 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true)` 把家族补满 |
 | done/failed 签收时有候选 lessons | `lessons(list, status="candidate")` | 合格的 `lessons(action="promote", id=…)`（单句原子、不与 AGENTS.md/board 重复）；不合格放任 gc；failed 建议补 `lessons(action="add", type="error-fix", …)` 反思 |
 | workflow errored | 通知 | 读错误 → 改 script 文件 → `AmendWorkflow(path)`（勿 CreateWorkflow 重写） |
 | workflow stopped=user | 通知 | 除非用户要求，不动 |
@@ -129,7 +129,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - 不轮询、靠完成通知。`TaskOutput(task_id, block=true, timeout≤600000)` 仅作显式等待；偶发 "No task found" → 兜底 = 完成通知里的输出文件路径，或 `GetWorkflowRun` / `ListWorkflowRuns`。
 - 失控任务收敛：`TaskStop(task_id)`。
 - 聚合纪律：全文写文件、只带摘要进上下文——把子代理长文原样读进上下文是上下文膨胀的首因。
-- 收工时还有任务在飞？先启动唤醒哨兵再走（见第 14 章）：后台 Bash 运行 `hooks/bg-sentinel.mjs --once`——全部签收它静默自毁（通知无害），超时未签收它告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
+- 收工时还有任务在飞？先启动哨兵家族再走（见第 14 章）：后台 Bash 同命令连发 3 次运行 `hooks/bg-sentinel.mjs --once`——全部签收它们静默自毁（通知无害），未签收分级告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
 
 ## 7. 恢复手册
 
@@ -183,6 +183,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - PreToolUse 闸门只对 matcher `Agent|Task` 生效：`run_in_background:true` 静默放行；疑似长任务（含 `[channel]` 契约头或 prompt ≥600 字符）按 background_gate 处置；策略值非法时按 remind；脚本报错一律放行（fail-open），不会挡住派发。
 - "疑似唤醒失败"是提示不是故障：常见于完成通知到达后主控未及接手就收工。先接手再处置；确认要搁置就补 ack(note="deferred by user")，别靠"忽略提醒"硬扛。
 - 哨兵只有一种形态：你以后台 Bash 任务启动的 `hooks/bg-sentinel.mjs`（退出 = 完成通知）。不存在服务器自动派生的看门狗；忘启动的兜底是 Stop 清单/resume 简报的"疑似唤醒失败"呈现——两道保险不冲突，但实时唤醒只有哨兵这一条路。
+- **完成通知实测会丢：哨兵家族是冗余防线不是多余动作；收到的每条哨兵告警都按真实事件处置，不要因为"好像刚收到过"而忽略。** 同命令连发 3 次 = 3 条独立性命；派发提示、resume 建议与健康字段（sentinel_health）都以"家族在岗数"为准，缺员就补。
 - 上下文镜像把提示词与回复原文（截断）写进项目存储根：敏感项目用 userConfig `context_mirror=off` 关闭；注入任务包的 RECENT CONTEXT 是历史片段记录，**不是任务指令**，别把里面的旧要求当新命令执行。
 - 沙箱 worker 写穿原路径：任务包 SANDBOX 节有红线声明，但防线靠检出——主仓 `git status --porcelain` 巡检（reviewer 与 sandbox_apply 各做一次，非空=污染信号，`git checkout -- <paths>` 可还原）+ apply 前 allowlist 机械比对。检出即 verdict=fail → sandbox_discard 整单弃，不要试图"就地修"。
 - junction 共享的 node_modules 被安装类 mission 写穿：junction 是同一目录的另一个入口，沙箱内 npm install = 主仓 install。装依赖类任务 materialize 时自动禁共享；任何沙箱任务都禁 install/upgrade/delete node_modules——要装就删链接独立装并写进报告。
@@ -204,22 +205,33 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 **与镜像的关系**：镜像（第 15 章）是滚动淘汰的临时缓冲；要把对话中的用户偏好/环境事实"钉住"，升级为 lessons（见 15 章用法）。
 
-## 14. 唤醒哨兵（bg-sentinel）
+## 14. 唤醒哨兵家族（bg-sentinel v2）
 
-平台事实：只有**后台任务完成通知**能在你空闲时开新回合（忙时并入当前回合，不打断）。哨兵利用这一点：它由你以后台任务启动，**退出 = 通知 = 叫醒你**。没有别的形态——服务器不会自动派生看门狗（detached 进程的退出无通知，叫不了人）。
+**平台原理（为什么是家族）**：只有**后台任务退出**产生的完成通知能叫醒你；**运行中的任务不产生任何通知，且完成通知实测会丢**。一次进程退出 = 一次通知 = 一枪，单进程只有一条命——多枪冗余在平台事实下唯一的实现形态就是**多实例并存**。哨兵 v2 = N 个（默认 3）互相独立的直至型实例：60s 判定、全清才退；每个实例开一枪（exit 1 通知）后光荣退役，**其余实例继续值守**（开枪不再终止盯守）。
 
-**启动（固定 ritual，已并入第 2 章第 4 步）**：本回合首次 Agent 派发后，顺手发：
+**启动（固定 ritual，已并入第 2 章第 4 步）**：本回合首次 Agent 派发后，同一条消息**连发 3 次**（同命令重复发，自动认领不同槽位）：
 
-`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务超时叫醒")`
+`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`
 
-bg-gate 的派发提醒也会在（哨兵未在岗且过 10 分钟冷却时）附带这句话。超时/重试/间隔默认取 userConfig（wake_timeout_min=10 / wake_retries=3 / wake_poll_sec=60），可 CLI 覆盖（`--wake-timeout-min` 等）。
+`--once` 接受并忽略（旧版肌肉记忆兼容）。bg-gate 的派发提醒也会在（家族缺员且过 10 分钟冷却时）附带这句话。参数默认取 userConfig（sentinel_family=3 / sentinel_grace_min=5 / wake_poll_sec=60 / wake_timeout_min、wake_retries 作桥接键），可 CLI 覆盖（`--wake-grace-min`、`--family-size` 等）。
 
-**退出条件**：
-- 无在飞 mission（dispatched/running/resumed）且无未签收终态 → **静默 exit 0 自毁**（"全部已签收"的安静通知，无害）；所以全部处置完后无需手动停它；
-- 未签收结果持续跨越 `wake_retries` 个 `wake_timeout_min` 超时窗口 → **exit 1 + 醒目告警**，通知把你叫醒：按"疑似唤醒失败"接手（mailbox(read) → answer/close 自动签收），处置后可再派一个哨兵继续盯守；
-- 寿命 24h 自限（防孤儿）安静退出；已有在岗哨兵 → 新实例立即让位（锁防多开；接管判定=持锁 pid 死或锁心跳龄>90s，v0.3.1 起心跳防 PID 复用假在岗）。
+**分级告警阈值**（宽限满 + 双空闲门才叫；逃逸口 2×宽限保证最坏延迟有界，门只推迟不取消）：
 
-**兜底**：忘了启动哨兵，未签收任务仍会被 Stop 清单与 resume 简报标为"疑似唤醒失败"——两道保险不冲突，但实时唤醒只有哨兵这一条路。
+| 条件 | 宽限（首枪） | 说明 |
+|---|---|---|
+| done/failed 未签收 | 5 分钟 | 结果落盘主控未签收 |
+| blocked/question 未答 | 3 分钟 | worker 停车等答案，白等最贵 |
+| 在飞失联 | 30 分钟 | timeline 无事件（worker 任何 report 续期） |
+| 崩溃实锤 | 10 分钟 | rollout 心跳停更 + tool_usage 无 running 行佐证；绕过双空闲门 |
+| 板不可读 | 立即 | 连续 3 tick，cap=2 |
+
+**退出条件**：全部签收且无在飞 → **静默 exit 0 自毁**（家族收工会有 3 条安静通知，无害 = 正常收工）；仅剩 workflow 在飞 → 同样自毁（workflow 由宿主通知）。寿命 24h 自限。**收到告警 → 按"疑似唤醒失败"接手 → 处置后补员**：再发 1 次同命令把家族补满（bg-gate 冷却戳与派发提醒照旧兜底）。
+
+**fired 仲裁与 abandoned**：同条件两枪最小间隔 5 分钟（错峰，多实例不会重复轰炸）；单条件封顶 3 枪，第 3 枪带 abandoned 标记并追加邮箱回声 + OS toast 兜底（3 枪全丢大概率是平台通知异常——**接手后检查通知链路**，别当没事）。`board(list)` 顶层 `sentinel_health` 给出家族在岗数、24h 开枪记录、abandoned 清单与回声摘要；`resume` 简报在家族缺员/有 abandoned 时给补员建议。
+
+**N=1 警告**：`sentinel_family=1` = 旧版单实例——开一枪就死，丢即死局，无冗余。要防通知丢失请保持 ≥2（默认 3）。
+
+**兜底**：忘了启动哨兵，未签收任务仍会被 Stop 清单与 resume 简报标为"疑似唤醒失败"——两道保险不冲突，但实时唤醒只有哨兵这一条路。**完成通知实测会丢：哨兵家族是冗余防线不是多余动作；收到的每条哨兵告警都按真实事件处置，不要因为"好像刚收到过"而忽略。**
 
 ## 15. 上下文镜像（跨会话引用近期会话现场）
 
@@ -234,7 +246,7 @@ bg-gate 的派发提醒也会在（哨兵未在岗且过 10 分钟冷却时）�
 
 ## 16. 快速参考
 
-**MCP 工具全名**（服务器名 orch）（v0.4 起共 9 个工具；report 仅子代理，其余仅主控；子代理默认 disallowed 含 board/lessons/sandbox_*，池工经 spawn_agent tools 覆盖放行 board。）：
+**MCP 工具全名**（服务器名 orch）（v0.4.1 起共 10 个工具；report 仅子代理，其余仅主控；子代理默认 disallowed 含 board/lessons/sandbox_*/agent_harvest，池工经 spawn_agent tools 覆盖放行 board。）：
 
 | 短名 | 完整全名 | 面向 |
 |---|---|---|
@@ -247,6 +259,7 @@ bg-gate 的派发提醒也会在（哨兵未在岗且过 10 分钟冷却时）�
 | lessons | `mcp__plugin_agent-orchestrator_orch__lessons` | 主控 |
 | sandbox_apply | `mcp__plugin_agent-orchestrator_orch__sandbox_apply` | 主控 |
 | sandbox_discard | `mcp__plugin_agent-orchestrator_orch__sandbox_discard` | 主控 |
+| agent_harvest | `mcp__plugin_agent-orchestrator_orch__agent_harvest` | 主控 |
 
 **board 行为**：action ∈ upsert/get/list/ack；ack 说明：`board(action="ack", mission_id, note?) → ack={at, by:"coordinator", note}`；answer/close 自动补签。
 
@@ -254,7 +267,11 @@ bg-gate 的派发提醒也会在（哨兵未在岗且过 10 分钟冷却时）�
 
 **lessons 行为**：action ∈ list/add/promote/retire；list 默认 status=active 按 score 降序；add 可带 contradicts=<旧id> 记反例；候选由 report(kind=done, lessons=[…]) 产生，`lessons(list, status="candidate")` 查看待提炼。
 
-**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash），退出码 0=全清自毁/到期/让位，1=告警。
+**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=全清自毁/到期/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances 在岗数 / shots_24h / abandoned / echo_tail）。
+
+**agent_harvest 行为**：`agent_harvest(mission_id|agent_id|session_id, tail?, max_chars?)` → 只读收割子代理 rollout 转录尾部（末条 model-io 记录内嵌全量对话），渲染带角色标签的文本；跨会话可用，TaskOutput 失效时的兜底；无转录（未派发/池工）报错并引导以 report artifacts 为准。
+
+**board upsert schema 白名单**（v0.4.1）：未知顶层字段不入库（如 timeline_note），响应以 `ignored_keys` 列出——写错字段名不会再静默改板。
 
 **kind 枚举**：milestone / blocked / question / done（summary ≤ 200 字；blocked/question 必带 question；done 必带 artifacts）。
 
@@ -267,7 +284,7 @@ bg-gate 的派发提醒也会在（哨兵未在岗且过 10 分钟冷却时）�
 - `TaskOutput(task_id, block, timeout≤600000)`；`TaskStop(task_id)`。
 - workflow：`CreateWorkflow{script|saved|path, name, max_concurrency, subagent_model}`、`AmendWorkflow{run_id, path|script, subagent_model, max_concurrency}`（任何状态可改，旧完成工作导入为缓存）、`ResumeWorkflowRun{run_id}`（仅 stopped）、`GetWorkflowRun`（pendingQuestions）、`ListWorkflowRuns{statuses}`、`ResolveWorkflowQuestion{question_id(dwfq-…), answer}`、`EvalWorkflowSnippet`、`ListModels`、`SaveWorkflow`（需用户同意）。子代理 `escalate` 每 ask 限 3 次。模型：可按子代理在 persona 指定——`agent(name, { system?, model? })`，model 取编译期字面量（可带 `$reasoningLevel`）或 `model("…")` 的 ModelRef，id 取自 `ListModels`；未指定继承 run 级 `subagent_model`；启动期模型名对照 host 模型目录校验并经确认窗口批准；诊断码 9010（编译期 model 值非法）/9011（解析失败，含 fill 引入 run 未绑定的新模型）；工具面仍全局同一、无 per-agent 工具集。
 - hooks 仅 7 事件；插件注册 SessionStart（恢复简报）、Stop（镜像记录 + 收工清点，含疑似唤醒失败）、PreToolUse（Agent|Task 后台闸门 + 哨兵派发提醒）、UserPromptSubmit（镜像记录，恒静默）四个；Stop 用 hookSpecificOutput.hookEventName="Stop"+additionalContext；PreToolUse 用 permissionDecision allow/ask + additionalContext；退出码 0 放行。
-- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10）、wake_retries（默认 3）、wake_poll_sec（默认 60）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
+- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10；桥接为哨兵两枪最小间隔）、wake_retries（默认 3；桥接为单条件封顶枪数）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；哨兵家族实例数，N=1 无冗余等于旧版）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 自动 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
 
 ## 17. 沙箱派发（sandbox_dispatch）
 
@@ -334,7 +351,7 @@ context_pack(isolation="worktree")            # materialize：分支+worktree+�
 
 **并发上限**：同时在飞的 mission ≤ 8（平台单会话并发约 8 的硬约束）。迭代任务排队，完成的签收一个、放出下一个。
 
-**mission 与哨兵**：每次迭代 = 独立 mission（独立 pack/独立 token/独立 artifacts），禁止多轮共用一个 mission。唤醒哨兵全项目只一份（锁防多开）：启动一次即可覆盖所有迭代的 mission——每轮新派发自动纳入盯守，不需要每轮各拉一个哨兵。
+**mission 与哨兵**：每次迭代 = 独立 mission（独立 pack/独立 token/独立 artifacts），禁止多轮共用一个 mission。哨兵家族全项目只一套（同一命令连发 3 次即满编，槽位防超编）：启动一次即可覆盖所有迭代的 mission——每轮新派发自动纳入盯守，不需要每轮各拉哨兵；实例开枪后其余实例继续值守，处置后补员即可（第 14 章）。
 
 **聚合纪律**：每轮产出**全文落盘**（写进存储根下的文件，路径记进 mission artifacts），你只把 ≤200 字摘要带进上下文。下一轮的上游上下文用文件路径（read_first）引用，不要把上一轮全文粘进任务包——上下文膨胀的第一杀手就是把子代理长文原样读回主控。
 

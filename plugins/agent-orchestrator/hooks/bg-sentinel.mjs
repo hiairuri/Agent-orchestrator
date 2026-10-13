@@ -1,43 +1,66 @@
 #!/usr/bin/env node
 /**
- * agent-orchestrator bg-sentinel（签收驱动的唤醒哨兵）。零依赖单文件，Node >= 18。
+ * agent-orchestrator bg-sentinel v2（直至型错峰冗余哨兵家族）。零依赖单文件，Node >= 18。
  *
- * 唯一启动方式：主控以宿主后台任务运行（rev.b：无 detached 看门狗模式——平台事实：
- * detached 进程不是宿主任务，退出不产生通知，无法唤醒）：
+ * 唯一启动方式：主控以宿主后台任务运行（平台事实：只有宿主后台任务退出才产生完成通知；
+ * detached 进程退出无通知；单进程只有一次退出 = 只有一枪——多枪冗余只能靠多实例并存）：
  *   Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true)
+ * 同命令连发 N 次（默认 3）= 错峰哨兵家族；--once 接受并忽略（0.3.1 肌肉记忆兼容）。
  * 退出 = 完成通知：主控空闲时开新回合、忙时并入当前回合。
  *
- * 语义："完成后激活轮询，设超时；超时且主控未签收，则尝试叫醒主控；达重试次数后放弃并报错。"
+ * v2 语义（直至型，60s 判定、全清才退）：
+ *   - 启动即认领最低空闲槽位 <存储根>/sentinel/instance-<k>.json（wx 原子创建）；
+ *     全满且全部新鲜 → exit 0 静默让位（家族拒绝超编）。
+ *   - 错峰：槽位 k 首个 tick 前 sleep k×stagger_sec；此后 poll 周期加 k×5% 抖动。
+ *   - 心跳：每 tick 改写自己的槽位文件；接管判定 = pid 死或心跳龄 >90s（B3 沿用）。
+ *   - 状态分级条件（每 mission 至多一条，C3 > C1 > C2）：
+ *       C1-T done/failed 未签收    宽限 wake_grace_min(5)    refire 5  cap 3
+ *       C1-A blocked/question 未签收 宽限 answer_grace_min(3)  refire 5  cap 3
+ *       C2  在飞失联（timeline 龄期） 宽限 stall_grace_min(30)  refire 5  cap 3
+ *       C3  崩溃实锤（rollout model-io 停更 + tool_usage 佐证/无佐证 ×3 保守档）
+ *                                   宽限 crash_grace_min(10)  绕过双空闲门  cap 3
+ *       C0  board 连续 3 tick 不可读 立即                      refire 5  cap 2
+ *   - 双空闲门（C1/C2）：子代理等待中 ∧ 主控信号停滞（tool_usage 主 / rollout 副 /
+ *     journal 三 / board 四 / 全缺失按空闲）；逃逸口 = anchor 龄期 ≥ 2×宽限 无视门开枪
+ *     ——门只可能推迟开枪，不可能取消开枪。
+ *   - 开枪仲裁：共享 fired 日志 + wx 认领（refire_gap_min 内他人已开枪 → 跳过；
+ *     cap_window_min 内满 wake_cap 枪 → 封顶；第 cap 枪条目 final:true = abandoned）。
+ *   - 回声：本地 echo.jsonl + 平台邮箱信封（六字段 + 写前自校验 + tmp+rename 毒丸规避）
+ *     + abandoned 时 OS toast 兜底（fire-and-forget）。
+ *   - 全清（无在飞非 workflow 且无未签收终态）→ 删自己槽位文件 → exit 0 静默自毁；
+ *     仅剩 workflow 在飞 → B4 文案自毁（workflow 由宿主完成通知，无需盯守）。
+ *   - 寿命 ≥ max_lifetime_min（默认 24h）→ exit 0 安静退出。
  *
- * 退出条件：
- *   - 无在飞 mission（dispatched/running/resumed，workflow 模式除外）且无未签收终态
- *       → exit 0；仅剩 workflow 在飞时文案为"workflow 托管中，其余已签收"（B4）
- *   - 未签收结果持续跨越 wake_retries 个 wake_timeout_min 超时窗口
- *       → exit 1 + 醒目告警 summary（叫醒主控）
- *   - 非 workflow 在飞任务龄期（timeline 末事件起算）≥ retries×timeout（B1，含
- *       resumed/running 崩死盲区）→ exit 1 告警
- *   - board 连续 3 tick 不可读（缺失/损坏）→ exit 1 "任务板不可读"（B2）
- *   - 寿命 ≥ max_lifetime（默认 24h）→ exit 0 安静行
+ * 信号红线：对 board.json / spool 绝对只读；自有落盘全部在 <存储根>/sentinel/ 与
+ * 平台邮箱 unread/；db.sqlite 仅 node:sqlite 以只读打开且仅查 tool_usage（动态
+ * import 特性探测，Node < 22.5 或打开失败自动降级——绝不因信号缺失而永不叫人）。
+ * 纯本地零网络（powershell toast 为 abandoned 最后一级人工兜底，失败静默）。
  *
- * v0.3.1 修复：B1 在飞龄期告警；B2 坏板 3 tick 告警；B3 锁心跳（每 tick touch，
- *   接管判定=pid 死或心跳龄>90s）；B4 workflow 口径；B5 result_at 回退链
- *   （timeline→updated_at→board mtime→直接告警）；B6 每 tick 重读 sentinel.cfg.json；
- *   B7 时钟跳变 elapsed 负值钳 0。
- *
- * 配置优先级：CLI > <存储根>/sentinel.cfg.json（server 启动时从 userConfig 写出）> 内建默认。
- * 对 board.json/spool 只读；落盘只写 sentinel.lock。
+ * 配置优先级：CLI > <存储根>/sentinel.cfg.json（server 启动时写出，每 tick 重读 B6）
+ *   > 0.3.1 桥接键 > 内建默认。桥接：refire_gap_min←wake_timeout_min、wake_cap←wake_retries。
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import child_process from "node:child_process";
 
-const DEFAULT_POLL_SEC = 60;
-const DEFAULT_TIMEOUT_MIN = 10;
-const DEFAULT_RETRIES = 3;
-const DEFAULT_LIFETIME_MIN = 1440; // 24h 自限，防孤儿
+/* node:sqlite 动态探测（Node < 22.5 无此模块属预期路径；失败 → 全部 db 信号降级） */
+let SQLITE = null;
+try {
+  const m = await import("node:sqlite");
+  if (m && typeof m.DatabaseSync === "function") SQLITE = m;
+} catch {
+  SQLITE = null; // 降级链：rollout 单信号 + 门常开，绝不让哨兵哑火
+}
+
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 const IN_FLIGHT_STATUSES = ["dispatched", "running", "resumed"];
 const HEARTBEAT_STALE_MS = 90000; // B3: 心跳龄 >90s 视为不在岗
-const BOARD_BAD_TICKS_LIMIT = 3; // B2: 连续不可读 tick 上限
+const BOARD_BAD_TICKS_LIMIT = 3; // B2/C0: 连续不可读 tick 上限
+const ECHO_MAX_LINES = 256; // >256 行滚动截半
+const PRUNE_AGE_MS = 24 * 3600 * 1000; // fired/echo 条目 24h 物理清理
+const PRUNE_EVERY_MS = 30 * 60 * 1000; // 每 30 分钟 prune 一次
+const FIRED_TAIL_BYTES = 4096; // rollout 末行读取窗口
 
 function parseArg(argv, flag) {
   for (let i = 0; i < argv.length; i++) {
@@ -47,6 +70,7 @@ function parseArg(argv, flag) {
   return undefined;
 }
 
+/** CLI > cfg[key] > 内建默认（clamp）。 */
 function numArg(argv, flag, cfg, cfgKey, def, min, max) {
   const raw = parseArg(argv, flag);
   const s = raw === undefined ? "" : String(raw).trim();
@@ -59,13 +83,37 @@ function numArg(argv, flag, cfg, cfgKey, def, min, max) {
   return def; // 内建默认兜底
 }
 
+/** CLI > cfg[新键] > cfg[桥接键]（0.3.1 参数桥）> 内建默认。 */
+function numArgBridge(argv, flag, cfg, cfgKey, bridgeKey, def, min, max) {
+  const raw = parseArg(argv, flag);
+  const s = raw === undefined ? "" : String(raw).trim();
+  if (s && !s.startsWith("${")) {
+    const n = Number(s);
+    if (Number.isFinite(n)) return Math.min(max, Math.max(min, n));
+  }
+  const c = Number(cfg ? cfg[cfgKey] : NaN);
+  if (Number.isFinite(c)) return Math.min(max, Math.max(min, c));
+  const b = bridgeKey ? Number(cfg ? cfg[bridgeKey] : NaN) : NaN;
+  if (Number.isFinite(b)) return Math.min(max, Math.max(min, b));
+  return def;
+}
+
+/** 存储根发现：root.txt 指针优先；指针目标目录不存在（悬空，如已清理的测试根）
+ *  → 回退默认根，绝不重建悬空路径。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
   try {
     const pointer = path.join(defaultRoot, "root.txt");
     if (fs.existsSync(pointer)) {
       const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) return custom;
+      if (custom) {
+        try {
+          const st = fs.statSync(custom);
+          if (st.isDirectory()) return custom;
+        } catch {
+          /* 悬空指针 → 回退默认根 */
+        }
+      }
     }
   } catch {
     /* fall through */
@@ -102,7 +150,6 @@ function wakeFailureInfo(m) {
   if (!suspected) return { suspected: false, result_at: null, minutes: null };
   const resultAt = lastResultAt(m);
   const ms = resultAt == null ? NaN : Date.parse(resultAt);
-  // B7: clock jumps must not produce negative ages.
   const minutes = Number.isFinite(ms) ? Math.max(0, Math.floor((Date.now() - ms) / 60000)) : null;
   return { suspected: true, result_at: resultAt == null ? null : resultAt, minutes };
 }
@@ -143,8 +190,8 @@ function lastActivityMs(m) {
 function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
   if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
+  if (min < 60) return `${Math.floor(min)} 分钟前`;
+  return `${Math.floor(min / 60)} 小时 ${Math.floor(min % 60)} 分钟前`;
 }
 
 /** 读 board：null = 本 tick 无正据（文件缺失/读取/解析失败）——计数并连续跟踪。 */
@@ -170,6 +217,679 @@ function pidAlive(pid) {
   }
 }
 
+/* ================================================================== */
+/* 信号模块（rev.b 定案）：rollout 心跳 / tool_usage / 双空闲链           */
+/* ================================================================== */
+
+function signalsOf(cfg) {
+  const s = cfg && cfg.signals && typeof cfg.signals === "object" ? cfg.signals : {};
+  return {
+    rolloutDir: String(s.rollout_dir || "") || path.join(os.homedir(), ".zcode", "cli", "rollout"),
+    toolUsageDb: String(s.tool_usage_db || "") || path.join(os.homedir(), ".zcode", "cli", "db", "db.sqlite"),
+    coordSessionFile: String(s.coord_session_file || "") || path.join("sentinel", "coord-session.txt"),
+    mailboxRoot: String(s.mailbox_root || "") || process.env.ZCODE_MAILBOX_ROOT || path.join(os.homedir(), ".zcode", "mailbox"),
+    toastOnAbandon: s.toast_on_abandon !== false,
+  };
+}
+
+/** node:sqlite 只读查询；返回行数组，任何失败 → null（= 信号不可用，降级）。
+ *  红线：mode 只读、仅 tool_usage 表、参数化、禁一切写。 */
+function toolUsageQuery(dbPath, sql, param) {
+  if (!SQLITE) return null;
+  let db = null;
+  try {
+    db = new SQLITE.DatabaseSync(dbPath, { readOnly: true });
+    return db.prepare(sql).all(param);
+  } catch {
+    return null;
+  } finally {
+    try {
+      if (db) db.close();
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+/** 佐证信号：该子会话是否存在 status='running' 行。true/false；null=不可用。 */
+function toolUsageHasRunning(dbPath, sessionId) {
+  const rows = toolUsageQuery(
+    dbPath,
+    "SELECT 1 FROM tool_usage WHERE session_id = ? AND status = 'running' LIMIT 1",
+    sessionId,
+  );
+  return rows === null ? null : rows.length > 0;
+}
+
+/** 主控活跃主信号：MAX(started_at)（epoch ms）；无行 → null（无信号）。 */
+function toolUsageLastStartedAt(dbPath, sessionId) {
+  const rows = toolUsageQuery(
+    dbPath,
+    "SELECT MAX(started_at) AS mx FROM tool_usage WHERE session_id = ?",
+    sessionId,
+  );
+  if (rows === null) return null;
+  const mx = rows.length ? Number(rows[0] && rows[0].mx) : NaN;
+  return Number.isFinite(mx) ? mx : null;
+}
+
+/**
+ * 活体心跳（C3 主信号）：rollout model-io-<sessionId>.jsonl 的 max(mtime, 末行 completedAt)。
+ * 文件缺失/读取失败 → null（降级：本 tick 无 C3，C2 独立评估——绝不告警"找不到心跳文件"，
+ * modelIOReset 重写窗口的瞬时异常同样落在这里，天然跳过）。
+ */
+function rolloutHeartbeatMs(rolloutDir, sessionId) {
+  const file = path.join(rolloutDir, `model-io-${sessionId}.jsonl`);
+  let mtimeMs = NaN;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+  let completedMs = NaN;
+  try {
+    const size = fs.statSync(file).size;
+    const len = Math.min(FIRED_TAIL_BYTES, size);
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(file, "r");
+    try {
+      fs.readSync(fd, buf, 0, len, size - len);
+    } finally {
+      fs.closeSync(fd);
+    }
+    const lines = buf.toString("utf8").split("\n").filter((x) => x.trim());
+    if (lines.length) {
+      try {
+        const last = JSON.parse(lines[lines.length - 1]);
+        const c = Date.parse(String((last && last.completedAt) ?? ""));
+        if (Number.isFinite(c)) completedMs = c;
+      } catch {
+        /* 末行截断/坏行 → 回退 mtime */
+      }
+    }
+  } catch {
+    /* 读尾失败 → 回退 mtime */
+  }
+  const ms = Math.max(Number.isFinite(mtimeMs) ? mtimeMs : 0, Number.isFinite(completedMs) ? completedMs : 0);
+  return ms > 0 ? ms : null;
+}
+
+/** 主会话 id：<root>/sentinel/coord-session.txt（server resume 通道刷新）。 */
+function coordSessionId(rootDir, signals) {
+  const f = path.isAbsolute(signals.coordSessionFile)
+    ? signals.coordSessionFile
+    : path.join(rootDir, signals.coordSessionFile);
+  try {
+    const v = fs.readFileSync(f, "utf8").trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 双空闲门（§4.2 主/副/三/四/降级链）：true = 主控活跃（门关），false = 空闲（门开）。
+ * 全信号缺失 → 按空闲（false）——绝不让哨兵因信号缺失而永不叫人。
+ */
+function coordBusy(rootDir, signals, boardMtimeMs, idleMs) {
+  const sid = coordSessionId(rootDir, signals);
+  const now = Date.now();
+  // 主：tool_usage —— 有 running 行 = 活跃；无行且 MAX(started_at) 龄期 ≥ idle = 空闲
+  if (sid && SQLITE) {
+    if (toolUsageHasRunning(signals.toolUsageDb, sid) === true) return true;
+    const mx = toolUsageLastStartedAt(signals.toolUsageDb, sid);
+    if (mx != null) return Math.max(0, now - mx) < idleMs; // B7
+  }
+  // 副：rollout 主会话 model-io mtime/completedAt
+  if (sid) {
+    const hb = rolloutHeartbeatMs(signals.rolloutDir, sid);
+    if (hb != null) return Math.max(0, now - hb) < idleMs;
+  }
+  // 三：journal mtime（插件自有镜像）
+  if (sid) {
+    try {
+      const jm = fs.statSync(path.join(rootDir, "context", `journal-${sid}.jsonl`)).mtimeMs;
+      return Math.max(0, now - jm) < idleMs;
+    } catch {
+      /* 缺失 → 下一级 */
+    }
+  }
+  // 四（保守代理）：board mtime 距今 < idle 视为"可能活跃"
+  if (Number.isFinite(boardMtimeMs)) {
+    return Math.max(0, now - boardMtimeMs) < idleMs;
+  }
+  // 降级：全不可用 → 按空闲（门常开）
+  return false;
+}
+
+/* ================================================================== */
+/* 家族槽位                                                             */
+/* ================================================================== */
+
+function slotDoc(startedAt, slot, tookOver, prev) {
+  return {
+    pid: process.pid,
+    slot,
+    started_at: new Date(startedAt).toISOString(),
+    heartbeatAt: new Date().toISOString(),
+    ...(tookOver ? { took_over: true } : {}),
+    ...(tookOver ? { prev: prev ?? null } : {}),
+  };
+}
+
+function slotFresh(doc, mtimeMs) {
+  if (!doc || !Number.isFinite(doc.pid) || !pidAlive(doc.pid)) return false;
+  const hb = Date.parse(String(doc.heartbeatAt ?? ""));
+  let age = Number.isFinite(hb) ? Date.now() - hb : NaN; // B7
+  if (!Number.isFinite(age)) {
+    age = Number.isFinite(mtimeMs) ? Date.now() - mtimeMs : Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, age) <= HEARTBEAT_STALE_MS;
+}
+
+/** 启动清理：把心跳过期且 pid 已死的槽位文件删除（供认领；返回被删文档供 prev 记录）。 */
+function pruneStaleSlots(sentDir, familySize) {
+  const stale = new Map();
+  for (let k = 0; k < familySize; k++) {
+    const f = path.join(sentDir, `instance-${k}.json`);
+    let doc = null;
+    let mtimeMs = NaN;
+    try {
+      doc = JSON.parse(fs.readFileSync(f, "utf8"));
+    } catch {
+      continue;
+    }
+    try {
+      mtimeMs = fs.statSync(f).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (!slotFresh(doc, mtimeMs) && !pidAlive(doc.pid)) {
+      try {
+        fs.unlinkSync(f);
+        stale.set(k, doc);
+      } catch {
+        /* ENOENT/EPERM best effort */
+      }
+    }
+  }
+  return stale;
+}
+
+/** 认领最低空闲槽位；返回 {slot, tookOver, prev}；全满且全部新鲜 → slot=-1（静默让位）。 */
+function claimSlot(sentDir, familySize, startedAt, staleDocs) {
+  for (let k = 0; k < familySize; k++) {
+    const f = path.join(sentDir, `instance-${k}.json`);
+    let doc = null;
+    try {
+      doc = JSON.parse(fs.readFileSync(f, "utf8"));
+    } catch {
+      doc = null; // 不存在或坏文件 → 走 wx 创建
+    }
+    if (doc) {
+      let mtimeMs = NaN;
+      try {
+        mtimeMs = fs.statSync(f).mtimeMs;
+      } catch {
+        /* gone between read and stat → wx below */
+      }
+      if (slotFresh(doc, mtimeMs)) continue; // 他人新鲜在岗 → 下一槽位
+      // 接管（pid 死或心跳龄 >90s）：改写并记录 prev
+      try {
+        fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, true, doc)) + "\n");
+        return { slot: k, tookOver: true, prev: doc };
+      } catch {
+        continue;
+      }
+    }
+    const prev = staleDocs && staleDocs.has(k) ? staleDocs.get(k) : null;
+    const tookOver = Boolean(prev);
+    try {
+      fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, tookOver, prev)) + "\n", { flag: "wx" });
+      return { slot: k, tookOver, prev };
+    } catch {
+      /* EEXIST：竞争败者 → 下一槽位 */
+    }
+  }
+  return { slot: -1, tookOver: false, prev: null };
+}
+
+function touchSlot(sentDir, slot, startedAt, tookOver, prev) {
+  try {
+    // 心跳 touch 保留接管痕迹（可观测性，B3 同款）
+    fs.writeFileSync(
+      path.join(sentDir, `instance-${slot}.json`),
+      JSON.stringify(slotDoc(startedAt, slot, tookOver, prev)) + "\n",
+    );
+  } catch {
+    /* best effort */
+  }
+}
+
+function releaseSlot(sentDir, slot) {
+  try {
+    fs.unlinkSync(path.join(sentDir, `instance-${slot}.json`));
+  } catch {
+    /* ENOENT best effort */
+  }
+}
+
+/* ================================================================== */
+/* fired 协议（开枪仲裁 + 封顶放弃）                                     */
+/* ================================================================== */
+
+function firedDir(rootDir) {
+  return path.join(rootDir, "sentinel", "fired");
+}
+
+function firedEntries(rootDir, key, category) {
+  const dir = firedDir(rootDir);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  const prefix = `${key}--${category}--`;
+  const out = [];
+  for (const n of names) {
+    if (!n.startsWith(prefix)) continue;
+    try {
+      const doc = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8"));
+      const at = Date.parse(String((doc && doc.at) ?? ""));
+      out.push({ file: n, doc, atMs: Number.isFinite(at) ? at : 0 });
+    } catch {
+      /* 坏条目跳过 */
+    }
+  }
+  out.sort((a, b) => b.atMs - a.atMs); // 新 → 旧
+  return out;
+}
+
+/** 仲裁：Δ 内他人已开枪 → false；cap 窗口内满额 → false；否则 true。 */
+function firedEligible(rootDir, cond, cfg) {
+  const entries = firedEntries(rootDir, cond.key, cond.category);
+  const now = Date.now();
+  if (entries.length && now - entries[0].atMs < cfg.refireGapMs) return false;
+  const inWindow = entries.filter((e) => now - e.atMs < cfg.capWindowMs).length;
+  if (inWindow >= condCap(cond, cfg)) return false;
+  return true;
+}
+
+function condCap(cond, cfg) {
+  return cond.cap || cfg.cap;
+}
+
+/**
+ * wx 认领一枪；返回认领成功的条目数组（失败者剔除）。写前数一遍现存条目，
+ * 本次是第 cap 枪 → 条目带 final:true（放弃标记，不再另写文件）。
+ */
+function claimShots(rootDir, due, cfg, slot) {
+  const dir = firedDir(rootDir);
+  const claimed = [];
+  for (const c of due) {
+    const entries = firedEntries(rootDir, c.key, c.category);
+    const now = Date.now();
+    if (entries.length && now - entries[0].atMs < cfg.refireGapMs) continue;
+    const inWindow = entries.filter((e) => now - e.atMs < cfg.capWindowMs).length;
+    const cap = condCap(c, cfg);
+    if (inWindow >= cap) continue;
+    const isFinal = inWindow + 1 >= cap;
+    const doc = {
+      key: c.key,
+      category: c.category,
+      ...(c.key === "__board__" ? {} : { mission_id: c.key }),
+      at: new Date(now).toISOString(),
+      by_pid: process.pid,
+      slot,
+      final: isFinal,
+      summary_head: buildSummary([c], cfg).replace(/\s+/g, " ").slice(0, 200),
+    };
+    const name = `${c.key}--${c.category}--${now}--${process.pid}.json`;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, name), JSON.stringify(doc) + "\n", { flag: "wx" });
+      claimed.push({ ...c, final: isFinal });
+    } catch {
+      /* EEXIST：双实例同 tick 竞争，恰一成功；败者本轮放弃 */
+    }
+  }
+  return claimed;
+}
+
+/** fired 条目唯一清理条款：>24h 由任意实例启动/每 30 分钟 unlink（catch ENOENT）。 */
+function pruneFired(rootDir) {
+  const dir = firedDir(rootDir);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".json"));
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const n of names) {
+    try {
+      const f = path.join(dir, n);
+      const st = fs.statSync(f);
+      if (now - st.mtimeMs > PRUNE_AGE_MS) fs.unlinkSync(f);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+/* ================================================================== */
+/* 回声（本地 + 平台邮箱 + OS toast 兜底）                                */
+/* ================================================================== */
+
+function echoFile(rootDir) {
+  return path.join(rootDir, "sentinel", "echo.jsonl");
+}
+
+/** 本地回声：退出路径追加一行；>256 行滚动截半；坏行跳过。 */
+function appendEcho(rootDir, claims, summary, extra) {
+  const f = echoFile(rootDir);
+  try {
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const line =
+      JSON.stringify({
+        at: new Date().toISOString(),
+        key: claims.map((c) => c.key).join(","),
+        category: claims.map((c) => c.category).join(","),
+        final: claims.some((c) => c.final),
+        ...(extra && extra.toast_attempted ? { toast_attempted: true } : {}),
+        summary_head: String(summary).replace(/\s+/g, " ").slice(0, 300),
+      }) + "\n";
+    let raw = "";
+    try {
+      raw = fs.readFileSync(f, "utf8");
+    } catch {
+      /* 首行 */
+    }
+    let lines = raw.split("\n").filter((x) => x.trim());
+    lines.push(line.trim());
+    if (lines.length > ECHO_MAX_LINES) lines = lines.slice(lines.length - Math.floor(ECHO_MAX_LINES / 2));
+    fs.writeFileSync(f, lines.join("\n") + "\n");
+  } catch {
+    /* 回声绝不弄挂开枪路径 */
+  }
+}
+
+function pruneEcho(rootDir) {
+  const f = echoFile(rootDir);
+  try {
+    const raw = fs.readFileSync(f, "utf8");
+    const cutoff = Date.now() - PRUNE_AGE_MS;
+    const kept = raw
+      .split("\n")
+      .filter((x) => x.trim())
+      .filter((x) => {
+        try {
+          const t = Date.parse(String(JSON.parse(x).at));
+          return Number.isFinite(t) ? t >= cutoff : true;
+        } catch {
+          return true; // 坏行留待滚动淘汰
+        }
+      });
+    fs.writeFileSync(f, kept.join("\n") + (kept.length ? "\n" : ""));
+  } catch {
+    /* best effort */
+  }
+}
+
+/**
+ * 平台邮箱回声信封（六字段缺一不可）+ 写前自校验 + tmp+rename 原子落盘。
+ * 平台 drain 对坏文件会阻塞整次消费（毒丸）——校验失败放弃外写（本地回声仍在）；
+ * 任何 fs 失败静默——回声是保底通道，绝不允许它把开枪路径搞挂。
+ */
+function buildEnvelope(claims, summary, coordId, slot) {
+  const name = `orch-sentinel-${Date.now()}-${process.pid}`;
+  return {
+    version: 1, // number，必须严格 === 1
+    messageId: name,
+    fromSessionId: `orch-sentinel-slot${slot}`,
+    toSessionId: coordId,
+    content: String(summary).replace(/\s+/g, " ").slice(0, 500),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function validateEnvelope(env) {
+  if (!env || typeof env !== "object") return false;
+  if (env.version !== 1 || typeof env.version !== "number") return false;
+  for (const k of ["messageId", "fromSessionId", "toSessionId", "content", "createdAt"]) {
+    if (typeof env[k] !== "string" || !env[k]) return false;
+  }
+  return true;
+}
+
+function mailboxEcho(rootDir, claims, summary, cfg, slot) {
+  try {
+    const signals = signalsOf(cfg);
+    const coordId = coordSessionId(rootDir, signals);
+    if (!coordId) return false; // 无主会话 id → 只留本地回声
+    const env = buildEnvelope(claims, summary, coordId, slot);
+    const serialized = JSON.stringify(env, null, 2) + "\n";
+    let roundtrip = null;
+    try {
+      roundtrip = JSON.parse(serialized);
+    } catch {
+      return false;
+    }
+    if (!validateEnvelope(roundtrip)) return false; // 自校验失败 → 弃写
+    const dir = path.join(signals.mailboxRoot, coordId, "unread");
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = path.join(dir, `.${env.messageId}.${process.pid}.tmp`);
+    fs.writeFileSync(tmp, serialized);
+    fs.renameSync(tmp, path.join(dir, `${env.messageId}.json`));
+    return true;
+  } catch {
+    return false; // 静默：保底通道故障不追责
+  }
+}
+
+/** OS toast（第三通道，仅 abandoned final 枪）：powershell WinRT，fire-and-forget。 */
+function toastAbandon(cfg) {
+  try {
+    const signals = signalsOf(cfg);
+    if (!signals.toastOnAbandon) return false;
+    const ps = [
+      '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
+      '$t=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
+      '$x=$t.GetElementsByTagName("text")',
+      '$x.Item(0).AppendChild($t.CreateTextNode("agent-orchestrator 哨兵")) | Out-Null',
+      '$x.Item(1).AppendChild($t.CreateTextNode("有任务连续告警未获处置（abandoned），请接手任务板")) | Out-Null',
+      '$n=[Windows.UI.Notifications.ToastNotification]::new($t)',
+      '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("agent-orchestrator").Show($n)',
+    ].join("; ");
+    child_process
+      .spawn("powershell.exe", ["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], {
+        detached: true,
+        stdio: "ignore",
+      })
+      .on("error", () => {})
+      .unref();
+    return true; // 尝试记录（可测）；弹窗成败不承责
+  } catch {
+    return false;
+  }
+}
+
+/* ================================================================== */
+/* 条件分类 classify（§4.1：每 mission 至多一条，C3 > C1 > C2）           */
+/* ================================================================== */
+
+function classify(board, boardMtimeMs, cfg, rootDir, signals) {
+  const conds = [];
+  const missions = Array.isArray(board.missions) ? board.missions : [];
+  const isWorkflow = (m) => (m.dispatch && m.dispatch.mode) === "workflow";
+  const now = Date.now();
+  for (const m of missions) {
+    if (!m || typeof m !== "object") continue;
+    if (!IN_FLIGHT_STATUSES.includes(m.status) && !RESULT_STATUSES.includes(m.status)) continue; // ready/drafted/skipped/closed 不产生条件
+    if (isWorkflow(m)) continue; // B4：workflow 由宿主通知
+    const agentId = (m.dispatch && m.dispatch.agent_id) || null;
+    const inFlight = IN_FLIGHT_STATUSES.includes(m.status);
+    const title = String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30);
+
+    // C3 崩溃实锤（仅 agent 模式在飞；绕过双空闲门）
+    if (inFlight && agentId) {
+      const hb = rolloutHeartbeatMs(signals.rolloutDir, `sess_subagent_agent_${agentId}`);
+      if (hb != null) {
+        const ageMs = Math.max(0, now - hb); // B7
+        const running = SQLITE ? toolUsageHasRunning(signals.toolUsageDb, `sess_subagent_agent_${agentId}`) : null;
+        // 佐证无 running 行 → 实锤宽限；有行（可能长工具）或佐证不可用 → 保守档 ×3
+        const thresholdMs = running === false ? cfg.crashGraceMs : cfg.crashGraceMs * 3;
+        if (ageMs >= thresholdMs) {
+          conds.push({
+            key: String(m.id),
+            category: "crash",
+            mission: m,
+            title,
+            status: m.status,
+            anchorMs: hb,
+            graceMs: cfg.crashGraceMs,
+            ageMs,
+            bypassGate: true,
+          });
+          continue; // 一 mission 一条件（取最严）
+        }
+      }
+      // rollout 缺失/未到期 → 本 mission 落 C2（降级链终端，绝不告警"找不到心跳文件"）
+    }
+
+    // C1 未签收终态（board 正据，沿用 wakeFailureInfo 口径）
+    const wake = wakeFailureInfo(m);
+    if (wake.suspected) {
+      const isAnswer = m.status === "blocked" || m.status === "question";
+      const graceMs = isAnswer ? cfg.answerGraceMs : cfg.wakeGraceMs;
+      const t = resultTimeMs(m, boardMtimeMs);
+      // B5：null（时间完全不可考）→ 直接到期
+      const anchorMs = t == null ? now - graceMs : t;
+      conds.push({
+        key: String(m.id),
+        category: isAnswer ? "unclaimed_answer" : "unclaimed_terminal",
+        mission: m,
+        title,
+        status: m.status,
+        anchorMs,
+        graceMs,
+        resultAt: wake.result_at,
+        resultAgeMin: Number.isFinite(anchorMs) ? Math.floor((now - anchorMs) / 60000) : null,
+        bypassGate: false,
+      });
+      continue;
+    }
+
+    // C2 在飞失联（仅 agent 模式；池工无 dispatch 的兜底是租约回收）
+    if (inFlight && agentId) {
+      let la = lastActivityMs(m);
+      if (la == null && Number.isFinite(boardMtimeMs)) la = boardMtimeMs; // 备：board mtime
+      if (la == null) continue; // 均无 → 不判（不误报）
+      conds.push({
+        key: String(m.id),
+        category: "inflight_stall",
+        mission: m,
+        title,
+        status: m.status,
+        anchorMs: la,
+        graceMs: cfg.stallGraceMs,
+        stallAgeMin: Math.floor(Math.max(0, now - la) / 60000),
+        bypassGate: false,
+      });
+    }
+  }
+  return conds;
+}
+
+function matured(c) {
+  return Math.max(0, Date.now() - c.anchorMs) >= c.graceMs; // B7
+}
+
+function gateOpen(rootDir, c, signals, boardMtimeMs, cfg) {
+  if (c.bypassGate) return true; // C3/C0 恒 true
+  return !coordBusy(rootDir, signals, boardMtimeMs, cfg.coordIdleMs);
+}
+
+function escaped(c) {
+  return Math.max(0, Date.now() - c.anchorMs) >= 2 * c.graceMs; // 无条件开枪的逃逸口
+}
+
+/* ================================================================== */
+/* 告警汇总（四类文案分组；v0.3.1 骨架沿用 + "疑似崩溃"/"放弃通告" 两段）  */
+/* ================================================================== */
+
+function buildSummary(claims, cfg) {
+  let summary = "";
+  const rowsOf = (cat) =>
+    claims
+      .filter((c) => c.category === cat)
+      .slice(0, 5)
+      .map((c) => `- [${c.key}] ${c.title}｜${c.status}${c.resultAt ? `｜结果于 ${fmtAge(c.resultAgeMin)}` : ""}｜未签收`);
+
+  const terminalRows = [...rowsOf("unclaimed_terminal"), ...rowsOf("unclaimed_answer")];
+  if (terminalRows.length) {
+    summary +=
+      "[orch-sentinel] 唤醒失败告警：以下任务结果已落盘但主控迟迟未签收" +
+      "（超过分级宽限：done 5 分钟 / blocked-question 3 分钟刻度）。" +
+      "请立即 mailbox(read) 接手并 answer/close（自动签收）；" +
+      "处置后可重新以后台任务运行 hooks/bg-sentinel.mjs --once 继续盯守：\n" +
+      terminalRows.join("\n");
+  }
+
+  const stallRows = claims
+    .filter((c) => c.category === "inflight_stall")
+    .slice(0, 5)
+    .map(
+      (c) =>
+        `- [${c.key}] ${c.title}｜${c.status}｜无事件已 ${fmtAge(c.stallAgeMin)}｜在飞`,
+    );
+  if (stallRows.length) {
+    summary +=
+      (summary ? "\n\n" : "") +
+      `[orch-sentinel] 在飞任务龄期告警：以下任务连续无任何事件` +
+      `（无事件已 ≥ stall_grace_min=${Math.round(cfg.stallGraceMs / 60000)} 分钟，worker 任何 report 即续期）。` +
+      "请 TaskOutput(task_id)/ListWorkflowRuns 核查；确认死亡则 board 改 failed 并重派：\n" +
+      stallRows.join("\n");
+  }
+
+  const crashRows = claims
+    .filter((c) => c.category === "crash")
+    .slice(0, 5)
+    .map(
+      (c) =>
+        `- [${c.key}] ${c.title}｜${c.status}｜心跳停更 ${fmtAge(Math.floor(c.ageMs / 60000))}｜在飞`,
+    );
+  if (crashRows.length) {
+    summary +=
+      (summary ? "\n\n" : "") +
+      `[orch-sentinel] 疑似崩溃告警：以下在飞任务的 rollout 心跳已停更` +
+      `（model-io ≥ ${Math.round(cfg.crashGraceMs / 60000)} 分钟无 API 调用；tool_usage 佐证缺失时按 ×3 保守档），` +
+      "子代理进程疑似已死。请 TaskOutput(task_id)/ListWorkflowRuns 核查；确认死亡则 board 改 failed 并重派：\n" +
+      crashRows.join("\n");
+  }
+
+  const boardRows = claims.filter((c) => c.category === "board_unreadable");
+  if (boardRows.length) {
+    summary +=
+      (summary ? "\n\n" : "") +
+      `[orch-sentinel] 任务板不可读告警：连续 ${BOARD_BAD_TICKS_LIMIT} 次轮询读取 board.json 失败` +
+      `（缺失/损坏）。请检查存储根下的 board.json；修复前哨兵无法盯守。`;
+  }
+
+  if (claims.some((c) => c.final)) {
+    summary +=
+      (summary ? "\n\n" : "") +
+      `[orch-sentinel] 放弃通告：以上条件已连续 ${cfg.cap} 枪仍未获处置，哨兵停止再叫（abandoned，见 board list 的 sentinel_health）。` +
+      "3 枪全丢大概率是平台完成通知异常——请检查通知链路，并按疑似唤醒失败接手所有未签收项。";
+  }
+  return summary;
+}
+
+/* ================================================================== */
+/* 主循环                                                               */
+/* ================================================================== */
+
 function main() {
   const argv = process.argv.slice(2);
   const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
@@ -178,10 +898,22 @@ function main() {
     rootRaw && !String(rootRaw).startsWith("${") ? path.resolve(String(rootRaw)) : locateRoot(projectDir);
   fs.mkdirSync(root, { recursive: true });
 
-  const boardPath = path.join(root, "board.json");
   const cfgPath = path.join(root, "sentinel.cfg.json");
-  const lockPath = path.join(root, "sentinel.lock");
+  const legacyLockPath = path.join(root, "sentinel.lock");
+  const sentDir = path.join(root, "sentinel");
   const startedAt = Date.now();
+
+  // 隐藏测试缝：信封自校验负例（content 置非字符串）→ 必须拒绝外写。退出码 0。
+  if (parseArg(argv, "--self-test-envelope") !== undefined) {
+    const bad = { ...buildEnvelope([], "x", "sess_x", 0), content: null };
+    const okRejected = !validateEnvelope(JSON.parse(JSON.stringify(bad)));
+    const good = buildEnvelope([], "hello", "sess_x", 0);
+    const okAccepted = validateEnvelope(JSON.parse(JSON.stringify(good)));
+    process.stdout.write(
+      JSON.stringify({ bad_rejected: okRejected, good_accepted: okAccepted }) + "\n",
+    );
+    process.exit(okRejected && okAccepted ? 0 : 1);
+  }
 
   // B6: cfg is re-read every tick (CLI args still win over the file).
   const readCfg = () => {
@@ -192,118 +924,124 @@ function main() {
     }
   };
 
-  // --- 锁：wx 原子创建；持锁者存活且心跳新鲜 → 静默让位；pid 死或心跳龄>90s → 接管（B3） ---
-  let tookOver = false; // 心跳 touch 时保留接管痕迹（可观测性）
-  const lockDoc = () => ({
-    pid: process.pid,
-    started_at: new Date(startedAt).toISOString(),
-    heartbeatAt: new Date().toISOString(),
-    ...(tookOver ? { took_over: true } : {}),
-  });
-  const lockFresh = (doc, mtimeMs) => {
-    if (!doc || !Number.isFinite(doc.pid) || !pidAlive(doc.pid)) return false;
-    const hb = Date.parse(String(doc.heartbeatAt ?? ""));
-    let age = Number.isFinite(hb) ? Date.now() - hb : NaN; // B7
-    if (!Number.isFinite(age)) {
-      age = Number.isFinite(mtimeMs) ? Date.now() - mtimeMs : Number.POSITIVE_INFINITY;
-    }
-    return Math.max(0, age) <= HEARTBEAT_STALE_MS;
-  };
-  try {
-    fs.writeFileSync(lockPath, JSON.stringify(lockDoc()) + "\n", { flag: "wx" });
-  } catch {
-    let holder = null;
-    let holderMtime = NaN;
-    try {
-      holder = JSON.parse(fs.readFileSync(lockPath, "utf8"));
-    } catch {
-      /* 坏锁 */
-    }
-    try {
-      holderMtime = fs.statSync(lockPath).mtimeMs;
-    } catch {
-      /* gone */
-    }
-    if (lockFresh(holder, holderMtime)) process.exit(0);
-    try {
-      tookOver = true;
-      fs.writeFileSync(
-        lockPath,
-        JSON.stringify({ ...lockDoc(), prev: holder ?? null }) + "\n",
-      );
-    } catch {
-      process.exit(0);
-    }
-  }
-
-  // B3: heartbeat touch every tick (mtime + heartbeatAt advance together).
-  const touchLock = () => {
-    try {
-      fs.writeFileSync(lockPath, JSON.stringify(lockDoc()) + "\n");
-    } catch {
-      /* best effort */
-    }
+  const resolveCfg = () => {
+    const c = readCfg();
+    return {
+      raw: c,
+      pollMs: numArg(argv, "--poll-sec", c, "wake_poll_sec", 60, 1, 3600) * 1000,
+      lifetimeMs:
+        numArg(argv, "--max-lifetime-min", c, "max_lifetime_min", 1440, 0.01, 43200) * 60000,
+      wakeGraceMs: numArgBridge(argv, "--wake-grace-min", c, "wake_grace_min", null, 5, 0.01, 1440) * 60000,
+      answerGraceMs: numArgBridge(argv, "--answer-grace-min", c, "answer_grace_min", null, 3, 0.01, 1440) * 60000,
+      stallGraceMs: numArgBridge(argv, "--stall-grace-min", c, "stall_grace_min", null, 30, 0.01, 1440) * 60000,
+      crashGraceMs: numArgBridge(argv, "--crash-grace-min", c, "crash_grace_min", null, 10, 0.01, 1440) * 60000,
+      coordIdleMs: numArgBridge(argv, "--coord-idle-min", c, "coord_idle_min", null, 3, 0.01, 1440) * 60000,
+      refireGapMs: numArgBridge(argv, "--refire-gap-min", c, "refire_gap_min", "wake_timeout_min", 5, 0.01, 1440) * 60000,
+      cap: Math.round(numArgBridge(argv, "--wake-cap", c, "wake_cap", "wake_retries", 3, 1, 100)),
+      capWindowMs: numArgBridge(argv, "--cap-window-min", c, "cap_window_min", null, 120, 1, 10080) * 60000,
+      familySize: Math.round(numArgBridge(argv, "--family-size", c, "family_size", null, 3, 1, 5)),
+      staggerSec: numArgBridge(argv, "--stagger-sec", c, "stagger_sec", null, 20, 0, 600),
+    };
   };
 
-  const finish = (code, summary) => {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {
-      /* best effort */
-    }
-    if (summary) process.stdout.write(summary + "\n");
+  const finish = (code, summaryOut) => {
+    releaseSlot(sentDir, slot);
+    if (summaryOut) process.stdout.write(summaryOut + "\n");
     process.exit(code);
   };
 
-  let unreadableTicks = 0;
+  // --- 家族槽位认领：失败（全满且全部新鲜）→ exit 0 静默让位，无输出 ---
+  fs.mkdirSync(sentDir, { recursive: true });
+  const first = resolveCfg();
+  const staleDocs = pruneStaleSlots(sentDir, first.familySize);
+  const claimed = claimSlot(sentDir, first.familySize, startedAt, staleDocs);
+  const slot = claimed.slot;
+  if (slot < 0) process.exit(0);
+  let tookOverClaim = claimed.tookOver;
+  let tookOverPrevClaim = claimed.prev;
+
+  let boardFailTicks = 0;
+  let boardFailSince = 0;
+  let lastPruneAt = 0;
+  let firstTick = true;
+  let tickTimer = null;
+  let tookOver = tookOverClaim; // 接管痕迹：touch 时保留（V2 可观测性）
+  let tookOverPrev = tookOverPrevClaim;
 
   const tick = () => {
-    const cfg = readCfg(); // B6
-    const pollMs = numArg(argv, "--poll-sec", cfg, "wake_poll_sec", DEFAULT_POLL_SEC, 1, 3600) * 1000;
-    const timeoutMs =
-      numArg(argv, "--wake-timeout-min", cfg, "wake_timeout_min", DEFAULT_TIMEOUT_MIN, 0.01, 1440) * 60000;
-    const retries = Math.round(numArg(argv, "--wake-retries", cfg, "wake_retries", DEFAULT_RETRIES, 1, 100));
-    const lifetimeMs =
-      numArg(argv, "--max-lifetime-min", cfg, "max_lifetime_min", DEFAULT_LIFETIME_MIN, 0.01, 43200) * 60000;
+    const cfg = resolveCfg(); // B6
+    const signals = signalsOf(cfg.raw);
 
-    touchLock(); // B3
+    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev);
 
-    if (Date.now() - startedAt >= lifetimeMs) {
+    if (Date.now() - startedAt >= cfg.lifetimeMs) {
       finish(0, "[orch-sentinel] 哨兵达到最大寿命，静默退出。");
       return;
     }
 
+    // prune：首 tick 或每 30 分钟（fired/echo 24h + legacy 锁一次性清理）
+    if (firstTick || Date.now() - lastPruneAt >= PRUNE_EVERY_MS) {
+      pruneFired(root);
+      pruneEcho(root);
+      try {
+        fs.unlinkSync(legacyLockPath); // 0.3.1 单锁遗产：只删不写
+      } catch {
+        /* ENOENT */
+      }
+      lastPruneAt = Date.now();
+      firstTick = false;
+    }
+
     let boardMtime = NaN;
     try {
-      boardMtime = fs.statSync(boardPath).mtimeMs;
+      boardMtime = fs.statSync(path.join(root, "board.json")).mtimeMs;
     } catch {
       /* missing board counts as unreadable below */
     }
     const board = readBoardSafe(root);
     if (board === null) {
-      unreadableTicks += 1; // B2
-      if (unreadableTicks >= BOARD_BAD_TICKS_LIMIT) {
-        finish(
-          1,
-          `[orch-sentinel] 任务板不可读告警：连续 ${unreadableTicks} 次轮询读取 board.json 失败` +
-            `（缺失/损坏）。请检查存储根 ${root} 下的 board.json；修复前哨兵无法盯守，现退出。`,
-        );
-        return;
+      if (boardFailTicks === 0) boardFailSince = Date.now(); // C0 anchor
+      boardFailTicks += 1; // B2
+      if (boardFailTicks >= BOARD_BAD_TICKS_LIMIT) {
+        const due = [
+          {
+            key: "__board__",
+            category: "board_unreadable",
+            title: "",
+            status: "",
+            anchorMs: boardFailSince,
+            graceMs: 0,
+            bypassGate: true,
+            cap: 2,
+          },
+        ];
+        const eligible = due.filter((c) => firedEligible(root, c, cfg));
+        const claims = claimShots(root, eligible, cfg, slot);
+        if (claims.length) {
+          const summary = buildSummary(claims, cfg);
+          const finalShot = claims.some((c) => c.final);
+          let toastAttempted = false;
+          if (finalShot) toastAttempted = toastAbandon(cfg.raw);
+          mailboxEcho(root, claims, summary, cfg.raw, slot);
+          appendEcho(root, claims, summary, { toast_attempted: toastAttempted });
+          finish(1, summary);
+          return;
+        }
       }
-      setTimeout(tick, pollMs); // 无正据不决策，但只容忍有限次数
+      tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05)); // 无正据不决策，但只容忍有限次数
       return;
     }
-    unreadableTicks = 0;
+    boardFailTicks = 0;
 
+    const conds = classify(board, boardMtime, cfg, root, signals);
     const missions = Array.isArray(board.missions) ? board.missions : [];
     const isWorkflow = (m) => (m.dispatch && m.dispatch.mode) === "workflow";
     const inFlightAll = missions.filter((m) => m && IN_FLIGHT_STATUSES.includes(m.status));
-    const inFlight = inFlightAll.filter((m) => !isWorkflow(m)); // B4: workflow 由宿主通知
-    const workflowInFlight = inFlightAll.filter(isWorkflow);
-    const suspected = missions.filter((m) => wakeFailureInfo(m).suspected);
+    const inFlightNW = inFlightAll.filter((m) => !isWorkflow(m));
+    const workflowNW = inFlightAll.filter(isWorkflow);
 
-    if (!inFlight.length && !suspected.length) {
-      if (workflowInFlight.length) {
+    if (!conds.length && !inFlightNW.length) {
+      if (workflowNW.length) {
         // B4: workflow runs are hosted (the platform notifies on completion);
         // never claim "all results claimed" when workflow missions remain.
         finish(0, "[orch-sentinel] workflow 托管中，其余已签收，哨兵自毁。（workflow 由宿主完成通知，无需盯守）");
@@ -313,70 +1051,33 @@ function main() {
       return;
     }
 
-    const windowMs = timeoutMs * retries;
-
-    // 未签收终态：超时窗口计数（B5 回退链；null → 直接告警）。
-    let wakeDue = false;
-    let oldest = Number.POSITIVE_INFINITY;
-    for (const m of suspected) {
-      const t = resultTimeMs(m, boardMtime);
-      if (t == null) {
-        wakeDue = true; // B5: 时间完全不可考 → 直接计告警
-        continue;
+    const due = conds.filter(
+      (c) => matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),
+    );
+    if (due.length) {
+      const claims = claimShots(root, due, cfg, slot);
+      if (claims.length) {
+        const summary = buildSummary(claims, cfg);
+        const finalShot = claims.some((c) => c.final);
+        let toastAttempted = false;
+        if (finalShot) toastAttempted = toastAbandon(cfg.raw); // 仅 abandoned：OS toast 人工兜底
+        mailboxEcho(root, claims, summary, cfg.raw, slot); // 第二通道（毒丸规避）
+        appendEcho(root, claims, summary, { toast_attempted: toastAttempted }); // 本地回声（含 toast 记录）
+        finish(1, summary); // 开枪 = 退出 = 通知；本实例一条命
+        return;
       }
-      const elapsed = Math.max(0, Date.now() - t); // B7
-      if (t < oldest) oldest = t;
-      if (elapsed >= windowMs) wakeDue = true;
     }
 
-    // B1: 非 workflow 在飞任务龄期告警（崩死在 running/resumed 的盲区）。
-    const stuck = [];
-    for (const m of inFlight) {
-      const t = lastActivityMs(m);
-      const ageMs = t == null ? Number.POSITIVE_INFINITY : Math.max(0, Date.now() - t); // B7
-      if (ageMs >= windowMs) stuck.push({ m, ageMs });
-    }
-
-    if (wakeDue || stuck.length) {
-      const rows = suspected.slice(0, 5).map((m) => {
-        const w = wakeFailureInfo(m);
-        const title = String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30);
-        const age = w.result_at ? `｜结果于 ${fmtAge(w.minutes)}` : "";
-        return `- [${m.id}] ${title}｜${m.status}${age}｜未签收`;
-      });
-      let summary = "";
-      if (wakeDue) {
-        const oldestTxt = Number.isFinite(oldest)
-          ? `（每 ${Math.round(timeoutMs / 60000)} 分钟计一次超时，共 ${retries} 次）`
-          : "（结果时间不可考，直接告警）";
-        summary +=
-          "[orch-sentinel] 唤醒失败告警：以下任务结果已落盘但主控迟迟未签收" +
-          oldestTxt +
-          "。请立即 mailbox(read) 接手并 answer/close（自动签收）；" +
-          "处置后可重新以后台任务运行 hooks/bg-sentinel.mjs --once 继续盯守：\n" +
-          rows.join("\n");
-      }
-      if (stuck.length) {
-        const stuckRows = stuck.slice(0, 5).map(({ m, ageMs }) => {
-          const title = String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30);
-          const minutes = Math.floor(ageMs / 60000);
-          return `- [${m.id}] ${title}｜${m.status}｜无事件已 ${fmtAge(minutes)}｜在飞`;
-        });
-        summary +=
-          (summary ? "\n\n" : "") +
-          `[orch-sentinel] 在飞任务龄期告警：以下任务连续无任何事件` +
-          `（龄期 ≥ wake_retries×超时窗 = ${Math.round(windowMs / 60000)} 分钟，进程疑似已死）。` +
-          "请 TaskOutput(task_id)/ListWorkflowRuns 核查；确认死亡则 board 改 failed 并重派：\n" +
-          stuckRows.join("\n");
-      }
-      finish(1, summary);
-      return;
-    }
-
-    setTimeout(tick, pollMs);
+    tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
   };
 
-  tick();
+  // 错峰：槽位 k 首个 tick 前 sleep k×stagger_sec（认领已在上方完成，可测、可让位）
+  const initialDelay = slot * first.staggerSec * 1000;
+  if (initialDelay > 0) {
+    tickTimer = setTimeout(tick, initialDelay);
+  } else {
+    tick();
+  }
 }
 
 try {

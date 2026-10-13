@@ -5,7 +5,7 @@
  * stdin : {tool_name, tool_input, ...}; args: --policy remind|ask|off, --exempt csv,
  *         --sentinel-hint on|off (from ${user_config.wake_sentinel})
  * stdout: strict JSON hookSpecificOutput only when intervening; silence = allow.
- * Fail-open: any error exits 0 with no output. Never denies in v0.2/v0.3.
+ * Fail-open: any error exits 0 with no output. Never denies in v0.2–v0.4.1.
  *
  * v0.3: background dispatches additionally carry a "launch the wake sentinel"
  * nudge (once, when no sentinel is on duty and the 10-minute cooldown has
@@ -13,6 +13,12 @@
  * --policy off stays fully silent; --exempt path unchanged.
  * v0.3.1: on-duty detection requires a fresh lock heartbeat (B3, anti PID-reuse);
  * the foreground nudge is gated by --sentinel-hint too (B8).
+ * v0.4.1: on-duty detection reads the sentinel v2 family directory (fresh
+ * instance-<k>.json slots; the legacy sentinel.lock still counts during the
+ * upgrade window). Dispatch-contract check: a background dispatch whose prompt
+ * carries [channel]/[token] lines is matched against the board — an unregistered
+ * or mismatched contract gets a remind-only warning (worker reports would be
+ * rejected), never a denial.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -21,7 +27,7 @@ import { fileURLToPath } from "node:url";
 const MIN_PROMPT_CHARS = 600;
 // v0.3.1 (B3): a live pid alone no longer proves the sentinel is on duty —
 // PID reuse can fake liveness. Same heartbeat rule as bg-sentinel's takeover:
-// alive = holder pid alive AND lock heartbeat (heartbeatAt, fallback mtime)
+// alive = holder pid alive AND heartbeat (heartbeatAt, fallback mtime)
 // no older than 90s.
 const HEARTBEAT_STALE_MS = 90000;
 
@@ -58,13 +64,20 @@ function onOffHint(raw) {
   return String(raw ?? "").trim() !== "off";
 }
 
+/** 存储根发现：root.txt 指针优先；指针目标目录不存在（悬空）→ 回退默认根。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
   try {
     const pointer = path.join(defaultRoot, "root.txt");
     if (fs.existsSync(pointer)) {
       const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) return custom;
+      if (custom) {
+        try {
+          if (fs.statSync(custom).isDirectory()) return custom;
+        } catch {
+          /* 悬空指针 → 回退默认根 */
+        }
+      }
     }
   } catch {
     /* fall through to default */
@@ -81,21 +94,43 @@ function pidAlive(pid) {
   }
 }
 
+function freshHeartbeat(doc, file) {
+  if (!doc || !Number.isFinite(doc.pid) || !pidAlive(doc.pid)) return false;
+  const hb = Date.parse(String(doc.heartbeatAt ?? ""));
+  let age = Number.isFinite(hb) ? Date.now() - hb : NaN; // B7 clamp below
+  if (!Number.isFinite(age)) {
+    try {
+      age = Date.now() - fs.statSync(file).mtimeMs;
+    } catch {
+      return false;
+    }
+  }
+  return Math.max(0, age) <= HEARTBEAT_STALE_MS;
+}
+
+/**
+ * v0.4.1: sentinel v2 family on-duty = any fresh instance-<k>.json slot under
+ * <root>/sentinel/. Upgrade window: a fresh legacy sentinel.lock also counts
+ * (0.3.1 sentinel still running). Absolute read-only against the board.
+ */
 function sentinelAlive(rootDir) {
   try {
-    const lockPath = path.join(rootDir, "sentinel.lock");
-    const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
-    if (!lock || !Number.isFinite(lock.pid) || !pidAlive(lock.pid)) return false;
-    const hb = Date.parse(String(lock.heartbeatAt ?? ""));
-    let age = Number.isFinite(hb) ? Date.now() - hb : NaN; // B7 clamp below
-    if (!Number.isFinite(age)) {
+    const sentDir = path.join(rootDir, "sentinel");
+    const names = fs.readdirSync(sentDir).filter((n) => /^instance-\d+\.json$/.test(n));
+    for (const n of names) {
+      const f = path.join(sentDir, n);
       try {
-        age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        if (freshHeartbeat(JSON.parse(fs.readFileSync(f, "utf8")), f)) return true;
       } catch {
-        return false;
+        /* bad slot file → next */
       }
     }
-    return Math.max(0, age) <= HEARTBEAT_STALE_MS;
+  } catch {
+    /* no sentinel dir → legacy check below */
+  }
+  try {
+    const lockPath = path.join(rootDir, "sentinel.lock");
+    return freshHeartbeat(JSON.parse(fs.readFileSync(lockPath, "utf8")), lockPath);
   } catch {
     return false;
   }
@@ -122,10 +157,55 @@ function markHint(rootDir) {
 
 function sentinelHintText() {
   const p = SENTINEL_SCRIPT.split(path.sep).join("/");
-  return (
-    `派发完成 → 记得在同一回合后台拉起唤醒哨兵：Bash(command="node ${p} --once", run_in_background=true)。` +
-    "全部结果签收后它静默自毁；超时仍未签收会以告警叫醒你。"
-  );
+  return `派发完成 → 记得后台拉起哨兵家族（建议 3 实例错峰冗余，防完成通知丢失）：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次即可（同命令重复发，自动认领不同槽位）。全部签收它们静默自毁；未签收会分级告警（blocked/question 3 分钟、done 5 分钟、在飞失联 30 分钟、崩溃实锤 10 分钟）。`;
+}
+
+/**
+ * v0.4.1 dispatch-contract registration check (remind-only, fail-open).
+ * Returns "" when fine, else a short warning sentence. Rules:
+ *   - prompt has neither [channel] nor [token] → "" (not a contract dispatch).
+ *   - [token] absent but [channel] present → nudge to include the token.
+ *   - [token] not registered on any non-closed mission → warn (reports rejected).
+ *   - token registered but its mission id ≠ [channel] → mismatch warn.
+ * Board read-only; any error → "" (never block dispatch).
+ */
+function contractWarn(prompt, rootDir) {
+  try {
+    const text = typeof prompt === "string" ? prompt : "";
+    if (!text) return "";
+    const ch = /^\s*\[channel\]\s*(\S+)/m.exec(text);
+    const tk = /^\s*\[token\]\s*(\S+)/m.exec(text);
+    if (!ch && !tk) return "";
+    const channel = ch ? String(ch[1]) : "";
+    const token = tk ? String(tk[1]) : "";
+    if (!token) {
+      return `派发契约头缺 [token] 行（channel=${channel || "?"}）：worker 上报会被拒收，请补 context_pack 返回的 token。`;
+    }
+    let board = null;
+    try {
+      board = JSON.parse(fs.readFileSync(path.join(rootDir, "board.json"), "utf8"));
+    } catch {
+      return ""; // board missing/unreadable → 不拦不猜（fail-open）
+    }
+    const missions = board && Array.isArray(board.missions) ? board.missions : [];
+    const hit = missions.find(
+      (m) =>
+        m &&
+        m.dispatch &&
+        typeof m.dispatch === "object" &&
+        String(m.dispatch.token || "") === token &&
+        m.status !== "closed",
+    );
+    if (!hit) {
+      return `派发契约头未匹配任何在册 mission（token=${token} 未登记或已 closed）：worker 的 report 将被 isError 拒收。请先 context_pack 建 mission 记 dispatch，或核对 token 后再派发。`;
+    }
+    if (channel && String(hit.id) !== channel) {
+      return `派发契约头不匹配：token=${token} 属于 mission ${hit.id}，而 [channel] 写的是 ${channel}——worker 的 report 会对不上频道，请修正后重发。`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 function longTaskWhy(ti) {
@@ -142,6 +222,7 @@ function main() {
   const toolName = String(input.tool_name || "");
   if (toolName !== "Agent" && toolName !== "Task") return;
   const ti = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
+  const prompt = typeof ti.prompt === "string" ? ti.prompt : "";
 
   const policy = normalizePolicy(parseArg(process.argv.slice(2), "--policy"));
   if (policy === "off") return; // 完全静默（含哨兵提示）
@@ -151,19 +232,25 @@ function main() {
   const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
   const rootDir = locateRoot(projectDir);
   const sentinelOnDuty = sentinelAlive(rootDir);
+  // v0.4.1: contract registration check runs for every dispatch that carries a
+  // contract head, regardless of gate policy details (remind-only).
+  const contractMsg = contractWarn(prompt, rootDir);
 
   if (ti.run_in_background === true) {
-    if (!hintEnabled) return;
-    if (sentinelOnDuty) return; // 哨兵在岗：不打扰
-    if (!hintDue(rootDir)) return; // 冷却期内：不打扰
-    markHint(rootDir);
+    const extras = [];
+    if (contractMsg) extras.push("[agent-orchestrator] " + contractMsg);
+    if (hintEnabled && !sentinelOnDuty && hintDue(rootDir)) {
+      markHint(rootDir);
+      extras.push("[agent-orchestrator] " + sentinelHintText());
+    }
+    if (!extras.length) return;
     process.stdout.write(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
-          permissionDecisionReason: "bg-gate: sentinel hint",
-          additionalContext: "[agent-orchestrator] " + sentinelHintText(),
+          permissionDecisionReason: "bg-gate: dispatch contract / sentinel hint",
+          additionalContext: extras.join(" "),
         },
       }),
     );
@@ -180,13 +267,14 @@ function main() {
   if (tokens.some((t) => subagentType.includes(t))) return;
 
   const why = longTaskWhy(ti);
-  if (!why) return;
+  if (!why && !contractMsg) return;
 
   // v0.3.1 (B8): the sentinel nudge in the remind/ask paths is governed by the
   // same --sentinel-hint switch as the background path — wake_sentinel=off must
   // strip the nudge from every path.
   const sentinelSuffix =
     hintEnabled && !sentinelOnDuty ? " " + sentinelHintText() : "";
+  const contractSuffix = contractMsg ? " [agent-orchestrator] " + contractMsg : "";
 
   if (policy === "ask") {
     process.stdout.write(
@@ -195,8 +283,9 @@ function main() {
           hookEventName: "PreToolUse",
           permissionDecision: "ask",
           permissionDecisionReason:
-            `bg-gate：前台子代理派发疑似长任务（${why}）。后台运行可避免占用主控回合、` +
-            `避免被用户消息取消整回合连带取消子代理；确认是短任务可直接放行。`,
+            `bg-gate：前台子代理派发疑似长任务（${why || "含派发契约头"}）。后台运行可避免占用主控回合、` +
+            `避免被用户消息取消整回合连带取消子代理；确认是短任务可直接放行。` +
+            contractSuffix,
           ...(sentinelSuffix ? { additionalContext: sentinelSuffix } : {}),
         },
       }),
@@ -213,6 +302,7 @@ function main() {
         additionalContext:
           "[agent-orchestrator] 该前台子代理派发疑似长任务。前台会占住主控回合，且用户一条消息会取消" +
           "整回合、连带取消子代理——长任务建议 run_in_background=true。确认是快查可忽略本提醒。" +
+          contractSuffix +
           sentinelSuffix,
       },
     }),
