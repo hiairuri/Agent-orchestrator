@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
@@ -62,6 +62,20 @@
       "default": "60",
       "required": false
     },
+    "sentinel_family": {
+      "type": "string",
+      "title": "哨兵家族实例数 / Sentinel family size",
+      "description": "哨兵 v2 家族规模（1-5，默认 3）：同命令连发 N 次后台任务 = N 条独立性命错峰补枪，防完成通知丢失。N=1 无冗余等于旧版单实例（丢一枪即死局）。/ Sentinel v2 family size (1-5, default 3): N independent background instances fire staggered backup shots against lost completion notifications. N=1 has no redundancy (old single-instance behavior).",
+      "default": "3",
+      "required": false
+    },
+    "sentinel_grace_min": {
+      "type": "string",
+      "title": "哨兵首枪宽限（分钟）/ Sentinel first-shot grace",
+      "description": "done 未签收的首枪宽限分钟数（默认 5）。blocked/question 自动取 3（停车等答案最贵）、在飞失联 30、崩溃实锤 10——三类按状态分级派生默认，不受本值影响，均可 CLI/cfg 单独覆盖。/ First-shot grace for unclaimed done results (default 5). blocked/question auto-uses 3, in-flight stall 30, crash 10 — tiered defaults independent of this value, each overridable via CLI/cfg.",
+      "default": "5",
+      "required": false
+    },
     "context_mirror": {
       "type": "string",
       "title": "上下文镜像开关 / Context mirror",
@@ -74,6 +88,20 @@
       "title": "镜像单条截断长度 / Mirror truncation",
       "description": "单条记录截断字符数，格式 \"user,assistant\" 或单值两用；默认 \"2000,4000\"。非数字部分回退默认。/ Per-entry truncation as \"user,assistant\" or a single value for both. Default \"2000,4000\". Non-numeric parts fall back to defaults.",
       "default": "2000,4000",
+      "required": false
+    },
+    "sandbox_default": {
+      "type": "string",
+      "title": "沙箱派发默认策略 / Sandbox default",
+      "description": "context_pack 未显式传 isolation 时的默认值：none=不隔离（默认）；worktree=每次派发默认建 git worktree 沙箱。其他值按 none 处理。运行中仍可按任务显式覆盖。/ Default isolation for context_pack when not given: none (default) or worktree (every dispatch gets a git worktree sandbox). Unknown values fall back to none.",
+      "default": "none",
+      "required": false
+    },
+    "claim_lease_min": {
+      "type": "string",
+      "title": "自领取租约分钟数 / Claim lease minutes",
+      "description": "board claim 自领取的默认租约分钟数（worker 每次 report 自动续租，超时任务回 ready 可再领取）。默认 30，最小 1，非数字回退默认。/ Default lease minutes for board claim self-claiming (renewed on every worker report; expired leases return the mission to ready). Default 30, min 1.",
+      "default": "30",
       "required": false
     }
   }

@@ -32,7 +32,15 @@ function locateRoot(projectDir) {
     const pointer = path.join(defaultRoot, "root.txt");
     if (fs.existsSync(pointer)) {
       const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) return custom;
+      if (custom) {
+        // v0.4.1: a dangling pointer (deleted test root / moved storage) must not
+        // drag hook writes onto a nonexistent path — fall back to the default.
+        try {
+          if (fs.statSync(custom).isDirectory()) return custom;
+        } catch {
+          /* dangling → fall through to default root */
+        }
+      }
     }
   } catch {
     /* fall through */

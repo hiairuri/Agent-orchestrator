@@ -27,6 +27,7 @@ import path from "node:path";
 const MAX_OUTPUT_CHARS = 1500;
 // v0.3.1 (C2): "resumed" joins the open set — a resumed mission whose worker
 // died used to vanish from the stop-time accounting.
+// v0.4 口径：ready（无人领取的池任务）不算未竟——不进 OPEN 集合，领取成功即 running 才计入。
 const OPEN_STATUSES = ["dispatched", "running", "blocked", "question", "resumed"];
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 
@@ -178,7 +179,14 @@ function recordMirrorIfEnabled(input, argv) {
       const pointer = path.join(defaultRoot, "root.txt");
       if (fs.existsSync(pointer)) {
         const custom = fs.readFileSync(pointer, "utf8").trim();
-        if (custom) rootDir = custom;
+        // v0.4.1: dangling pointer (deleted test root) → default root, never recreate.
+        if (custom) {
+          try {
+            if (fs.statSync(custom).isDirectory()) rootDir = custom;
+          } catch {
+            /* dangling → fall through */
+          }
+        }
       }
     } catch {
       /* fall through */
@@ -254,7 +262,15 @@ function locateRoot(projectDir) {
     const pointer = path.join(defaultRoot, "root.txt");
     if (fs.existsSync(pointer)) {
       const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) return custom;
+      if (custom) {
+        // v0.4.1: a dangling pointer (deleted test root / moved storage) must not
+        // drag hook writes onto a nonexistent path — fall back to the default.
+        try {
+          if (fs.statSync(custom).isDirectory()) return custom;
+        } catch {
+          /* dangling → fall through to default root */
+        }
+      }
     }
   } catch {
     /* fall through to default */

@@ -3,24 +3,36 @@
  * agent-orchestrator MCP server ("orch").
  *
  * Transport: stdio, newline-delimited JSON-RPC 2.0 (one request/response per line).
- * Dependencies: none — Node.js >= 18 builtins only (fs / path / crypto / readline).
+ * Dependencies: none — Node.js >= 18 builtins only (fs / path / crypto / readline /
+ * child_process). child_process (v0.4) is used EXCLUSIVELY to invoke the local git
+ * CLI; every git operation is a local object-database operation and NO remote
+ * argv (push/pull/fetch/clone/remote/submodule) may ever appear in this file.
  * Network: this process performs no network I/O of any kind; storage is local files.
  *
  * Session tool full names are prefixed with: mcp__plugin_agent-orchestrator_orch__
- *   board | report | mailbox | spawn_agent | context_pack | resume | lessons
+ *   board | report | mailbox | spawn_agent | context_pack | resume | lessons |
+ *   sandbox_apply | sandbox_discard | agent_harvest     (v0.4.1: 10 tools total)
  *
  * Storage layout (under the resolved root, default <project>/.zcode/orchestrator):
  *   board.json
- *   root.txt                     (pointer to a custom root, written for hook scripts)
+ *   root.txt                     (pointer to a custom root, written for hook scripts;
+ *                                 v0.4.1: NOT written for temp-dir test roots, and a
+ *                                 dangling pointer is removed + falls back to default)
  *   spool/<mission_id>/unread/<15-digit-zero-padded-epochMs>-<8hex>.json
  *   spool/<mission_id>/read/     (same names; consumed via rename)
  *   spool/<mission_id>/answers/<seq>-answer.json
  *   packs/<mission_id>/pack.md | pack-v1.md .. pack-vN.md
+ *   sandboxes/<mission_id>/      (v0.4 git worktree sandboxes; removed by
+ *                                 sandbox_apply / sandbox_discard only)
  *   archive/board-<ts>.json      (closed missions moved here by mailbox gc)
  *   memory/lessons.jsonl         (v0.3 learning memory: one lesson per line)
  *   context/journal-<sessionId>.jsonl  (v0.3 context mirror, written by hooks)
- *   sentinel.cfg.json            (v0.3 wake-sentinel config bridge, read-only here)
- *   sentinel.lock                (v0.3 sentinel lock, owned by bg-sentinel.mjs)
+ *   sentinel.cfg.json            (v0.3 wake-sentinel config bridge, read-only here;
+ *                                 v0.4.1: full v2 key set + signals block)
+ *   sentinel/                    (v0.4.1 sentinel v2 family: instance-<k>.json slots,
+ *                                 fired/ shot claims, echo.jsonl, coord-session.txt —
+ *                                 owned by bg-sentinel.mjs; the server is READ-ONLY here
+ *                                 except coord-session.txt which it refreshes)
  *   .lock/owner.json             (v0.3.1 root lock: {holder,pid,heartbeatAt}; all
  *                                 board read-modify-write sections run under it)
  *
@@ -38,14 +50,53 @@
  *   C4 gc archives stale unread events too; resume unread_total excludes closed.
  *   C5 report to a closed mission stores the event but leaves the board untouched.
  *   C6 closing with unread events / a pending question adds a warn to the response.
+ *
+ * v0.4.0 (sandbox dispatch / dependency graph / parallel-iteration playbook):
+ *   - context_pack gains isolation/oob_allowlist/share_node_modules; isolation=
+ *     "worktree" materializes a git worktree sandbox under <root>/sandboxes/<id>
+ *     (branch orch/<mission_id>, pack path rewriting, SANDBOX section, optional
+ *     node_modules junction) — git subprocesses run inside the root lock.
+ *   - New tools sandbox_apply / sandbox_discard: gated merge-back (done + qa.
+ *     verdict=pass + clean main repo + allowlist + merge-tree precheck) and
+ *     zero-damage discard. Subagents see neither (MCP_DISALLOWED).
+ *   - Dependency graph: mission.blockedBy/owner/claim/skippedReason, statuses
+ *     "ready"/"skipped", fixpoint sweepGraph on every board write (unlock,
+ *     cascade skip, lease回收, dangling cleanup), board action=claim (in-lock
+ *     CAS + lease), report renews the lease and hints ready_to_claim.
+ *
+ * v0.4.1 (sentinel v2 / harvest / robustness):
+ *   - writeSentinelCfg publishes the full v2 key set + signals block; new argv
+ *     --sentinel-family / --sentinel-grace-min (0.3.1 keys stay as bridges).
+ *   - sentinelHealth(root): read-only view of <root>/sentinel/ attached to board
+ *     list responses (instances / shots_24h / abandoned / echo_tail); resume
+ *     gains a family-refill + abandoned-takeover action.
+ *   - coord-session.txt refreshed from the resume tool's session_id channel.
+ *   - agent_harvest: read-only subagent transcript harvester over the rollout
+ *     model-io JSONL (last complete record's request.messages tail).
+ *   - mergeMission whitelist: unknown top-level keys are dropped (reported in
+ *     the upsert response as ignored_keys) instead of stored verbatim.
+ *   - root.txt redesign: temp-dir test roots never write the global pointer; a
+ *     dangling pointer is self-healed (removed) and readers fall back to default.
+ *   - QA fixes: sandbox_apply idempotent branch moved ahead of the done/qa
+ *     gates; report warn responses use distinct keys; dangling-dep timeline
+ *     wording names the dropped ids.
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import readline from "node:readline";
+import child_process from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.3.1";
+const SERVER_VERSION = "0.4.1";
+// v0.4.1: display path of the sentinel script (server suggests the refill
+// command; forward slashes for copy-paste into Bash on Windows).
+const SENTINEL_SCRIPT_DISPLAY = path
+  .join(path.dirname(fileURLToPath(import.meta.url)), "..", "hooks", "bg-sentinel.mjs")
+  .split(path.sep)
+  .join("/");
 const BOARD_VERSION = 2; // marker only; readers never validate this value
 const PROTOCOL_VERSION_FALLBACK = "2024-11-05";
 const PREFIX = "mcp__plugin_agent-orchestrator_orch__";
@@ -59,9 +110,14 @@ const STATUSES = [
   "question",
   "done",
   "failed",
+  "skipped",
+  "ready",
   "resumed",
   "closed",
 ];
+// Dependency-graph semantics: closed counts as satisfied, skipped counts as a
+// failure signal (cascades), everything else is pending.
+const DEP_GREEN_STATUSES = ["done", "skipped", "closed"];
 
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
@@ -365,11 +421,33 @@ function resolveRoot() {
 const root = resolveRoot();
 fs.mkdirSync(root, { recursive: true });
 
-// When an explicit custom root differs from the default, publish a pointer file
-// under the default root so hook scripts can find the same storage.
-if (path.resolve(root) !== path.resolve(defaultRoot)) {
+// root.txt bridge (v0.4.1 redesign):
+//   1. Temp-dir roots (os.tmpdir) never publish the pointer — test servers with
+//      "--root <mkdtemp>" must not repoint the project's hooks at a soon-to-be-
+//      deleted directory. Real custom roots (user storage_dir) still publish.
+//   2. Self-heal: when running on the default root, a root.txt whose target no
+//      longer exists (deleted test dir / moved storage) is removed, and hook
+//      readers fall back to the default root via the same liveness check.
+const isTempRoot = (() => {
+  const tmp = path.resolve(os.tmpdir());
+  const r = path.resolve(root);
+  const rel = path.relative(tmp, r);
+  return rel !== "" && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+})();
+if (!isTempRoot && path.resolve(root) !== path.resolve(defaultRoot)) {
   fs.mkdirSync(defaultRoot, { recursive: true });
   atomicWriteFileSync(path.join(defaultRoot, "root.txt"), root + "\n", defaultRoot);
+}
+if (path.resolve(root) === path.resolve(defaultRoot)) {
+  try {
+    const pointer = path.join(defaultRoot, "root.txt");
+    if (fs.existsSync(pointer)) {
+      const target = fs.readFileSync(pointer, "utf8").trim();
+      if (!target || !fs.existsSync(target)) fs.unlinkSync(pointer); // dangling → self-heal
+    }
+  } catch {
+    /* best effort */
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -392,14 +470,40 @@ function numArg(argv, flag, def, min, max) {
  * wake-sentinel settings to <root>/sentinel.cfg.json so the separately started
  * bg-sentinel.mjs (host background Bash task) can pick them up. CLI > cfg file
  * > builtin defaults, resolved inside the sentinel itself.
+ *
+ * v0.4.1: full v2 key set (sentinel family / staggered graces / fired
+ * arbitration) + the rev.b signals block. 0.3.1 keys keep their names and
+ * meanings as bridge sources (refire_gap_min←wake_timeout_min,
+ * wake_cap←wake_retries — the bridging itself happens in the sentinel).
  */
 function writeSentinelCfg() {
   try {
     const argv = process.argv.slice(2);
     const cfg = {
+      // —— 0.3.1 existing three keys: kept verbatim (bridge sources) ——
       wake_timeout_min: numArg(argv, "--wake-timeout-min", 10, 1, 1440),
       wake_retries: Math.round(numArg(argv, "--wake-retries", 3, 1, 100)),
       wake_poll_sec: numArg(argv, "--poll-sec", 60, 1, 3600),
+      // —— v2 keys (defaults = recommended values) ——
+      wake_grace_min: numArg(argv, "--sentinel-grace-min", 5, 0.01, 1440),
+      answer_grace_min: numArg(argv, "--answer-grace-min", 3, 0.01, 1440),
+      stall_grace_min: numArg(argv, "--stall-grace-min", 30, 0.01, 1440),
+      crash_grace_min: numArg(argv, "--crash-grace-min", 10, 0.01, 1440),
+      coord_idle_min: numArg(argv, "--coord-idle-min", 3, 0.01, 1440),
+      refire_gap_min: numArg(argv, "--refire-gap-min", 5, 0.01, 1440),
+      wake_cap: Math.round(numArg(argv, "--wake-cap", 3, 1, 100)),
+      cap_window_min: numArg(argv, "--cap-window-min", 120, 1, 10080),
+      family_size: Math.round(numArg(argv, "--sentinel-family", 3, 1, 5)),
+      stagger_sec: numArg(argv, "--stagger-sec", 20, 0, 600),
+      max_lifetime_min: numArg(argv, "--max-lifetime-min", 1440, 0.01, 43200),
+      // —— rev.b signals block: empty string = sentinel-side default ——
+      signals: {
+        rollout_dir: "", // default <homedir>/.zcode/cli/rollout
+        tool_usage_db: "", // default <homedir>/.zcode/cli/db/db.sqlite (ro, tool_usage only)
+        coord_session_file: "sentinel/coord-session.txt",
+        mailbox_root: "", // default ZCODE_MAILBOX_ROOT ?? <homedir>/.zcode/mailbox
+        toast_on_abandon: true,
+      },
     };
     atomicWriteFileSync(path.join(root, "sentinel.cfg.json"), JSON.stringify(cfg, null, 2) + "\n");
   } catch (err) {
@@ -407,6 +511,277 @@ function writeSentinelCfg() {
   }
 }
 writeSentinelCfg();
+
+/* ------------------------------------------------------------------ */
+/* v0.4 startup parameters: sandbox default isolation + claim lease    */
+/* ------------------------------------------------------------------ */
+
+/** String argv option: empty / "${" template / unknown -> default. */
+function strArg(argv, flag, def) {
+  const raw = parseArgValue(argv, flag);
+  const s = raw === undefined ? "" : String(raw).trim();
+  if (!s || s.startsWith("${")) return def;
+  return s;
+}
+
+// Only "worktree" opts in; everything else (${/empty/invalid) falls back to none.
+const sandboxDefaultArg =
+  strArg(process.argv.slice(2), "--sandbox-default", "none") === "worktree" ? "worktree" : "none";
+// Lease minutes for board action=claim; report renewals use the same value.
+const claimLeaseMinDefault = numArg(process.argv.slice(2), "--claim-lease-min", 30, 1, 1440);
+
+/* ------------------------------------------------------------------ */
+/* git subprocess block (v0.4 sandbox dispatch)                        */
+/*                                                                     */
+/* child_process is used EXCLUSIVELY for the local git CLI. Every git  */
+/* operation below is a local object-database operation (branch /      */
+/* worktree / merge-tree / merge / diff / status). REMOTE OPERATIONS   */
+/* ARE FORBIDDEN: the argv words push/pull/fetch/clone/remote/submodule*/
+/* must never appear in this file (statically asserted by SB9).        */
+/* Git sections always run inside the caller's withRootLock critical   */
+/* section (same lock as the board writes around them); the git call   */
+/* itself is capped at 60s.                                            */
+/* ------------------------------------------------------------------ */
+
+const GIT_TIMEOUT_MS = 60000;
+// merge-tree --write-tree was introduced in git 2.38; older git cannot precheck.
+const GIT_MIN_MINOR_FOR_MERGE_TREE = 38;
+let gitMergeTreeSupported = null; // process-level probe cache
+
+/** The ONLY git exit in this codebase (sync, UTF-8, hard timeout). */
+function gitRun(cwd, args, timeoutMs = GIT_TIMEOUT_MS) {
+  return child_process.execFileSync("git", args, { cwd, encoding: "utf8", timeout: timeoutMs });
+}
+
+/** True when git exits 0 (output discarded). */
+function gitOk(cwd, args) {
+  try {
+    gitRun(cwd, args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** merge-tree precheck support probe (git >= 2.38), cached for the process. */
+function assertMergeTreeSupport(cwd) {
+  if (gitMergeTreeSupported != null) {
+    if (!gitMergeTreeSupported) throwMergeTreeUnsupported();
+    return;
+  }
+  let version = "";
+  try {
+    version = String(gitRun(cwd, ["--version"]));
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new ToolError("git 不可用：沙箱派发需要本机 git");
+    }
+    throw new ToolError("git --version 探测失败：" + (err && err.message ? err.message : err));
+  }
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(version);
+  gitMergeTreeSupported = Boolean(
+    m &&
+      (Number(m[1]) > 2 ||
+        (Number(m[1]) === 2 && Number(m[2] || 0) >= GIT_MIN_MINOR_FOR_MERGE_TREE)),
+  );
+  if (!gitMergeTreeSupported) throwMergeTreeUnsupported(version.trim());
+}
+
+function throwMergeTreeUnsupported(version = "") {
+  throw new ToolError(
+    `git 版本过低${version ? "（" + version + "）" : ""}：merge-tree 冲突预检需要 git ≥ 2.38，` +
+      "请升级本机 git 后再使用沙箱派发（其余特性不受影响）",
+  );
+}
+
+function branchExists(cwd, branch) {
+  return gitOk(cwd, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch]);
+}
+
+/** Parse `git worktree list --porcelain` into absolute path strings. */
+function worktreeListPaths(cwd) {
+  let out = "";
+  try {
+    out = String(gitRun(cwd, ["worktree", "list", "--porcelain"]));
+  } catch {
+    return [];
+  }
+  const paths = [];
+  for (const line of out.split("\n")) {
+    if (line.startsWith("worktree ")) paths.push(path.resolve(line.slice("worktree ".length).trim()));
+  }
+  return paths;
+}
+
+/** `git status --porcelain` output ("" when clean). */
+function porcelainStatus(cwd) {
+  return String(gitRun(cwd, ["status", "--porcelain"]));
+}
+
+/** `git diff --name-only <from>..<to>` as a trimmed line list. */
+function listDiffNames(cwd, from, to) {
+  return String(gitRun(cwd, ["diff", "--name-only", from + ".." + to]))
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Extract the conflicted file list from `merge-tree --write-tree` output:
+ * the first line is the tree oid; conflict messages follow
+ * ("CONFLICT (content): Merge conflict in <path>"). Falls back to all
+ * non-oid lines when nothing parses.
+ */
+function parseMergeTreeConflicts(output) {
+  const lines = String(output ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const files = [];
+  for (const line of lines.slice(1)) {
+    const m = /^CONFLICT \([^)]*\):\s*.*?\s+in\s+(.+)$/.exec(line);
+    if (m) files.push(m[1]);
+  }
+  if (!files.length) {
+    for (const line of lines.slice(1)) if (!/^[0-9a-f]{40,64}$/.test(line)) files.push(line);
+  }
+  return [...new Set(files)];
+}
+
+/**
+ * Prefix replacement rewrite: every occurrence of projectDir (backslash and
+ * forward-slash forms) becomes the sandbox root in the matching form. Applied
+ * to task/read_first/upstream_context/rules strings of sandboxed packs.
+ */
+function rewritePathStrings(value, projectDir, sandboxRoot) {
+  let out = String(value ?? "");
+  if (!out) return out;
+  const projBk = path.resolve(projectDir);
+  const projFw = projBk.split(path.sep).join("/");
+  const sandBk = path.resolve(sandboxRoot);
+  const sandFw = sandBk.split(path.sep).join("/");
+  if (projBk !== sandBk) {
+    out = out.split(projBk).join(sandBk);
+    out = out.split(projFw).join(sandFw);
+  }
+  return out;
+}
+
+/** install-like heuristic (node_modules junction must NOT be shared then). */
+function isInstallLikeTask(text) {
+  return /npm\s+(install|i|ci)|pnpm\s+(add|install)|yarn\s+(add|install)|安装依赖|装依赖|node_modules/i.test(
+    String(text ?? ""),
+  );
+}
+
+const sandboxesRoot = () => path.join(root, "sandboxes");
+
+/**
+ * Materialize a git worktree sandbox for a mission (idempotent re-pack safe):
+ * branch orch/<mission_id> at HEAD, worktree at <root>/sandboxes/<mission_id>,
+ * optional node_modules junction, then the caller rewrites pack paths.
+ * Runs inside the caller's root lock. Throws ToolError on every gate failure
+ * (non-git project / empty repo / git missing / git too old).
+ */
+function materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionDecision }) {
+  assertMergeTreeSupport(projectDir);
+  let inside = "";
+  try {
+    inside = String(gitRun(projectDir, ["rev-parse", "--is-inside-work-tree"])).trim();
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new ToolError("git 不可用：沙箱派发需要本机 git");
+    }
+    throw new ToolError('非 git 项目：写型隔离需要 git，请先 git init 并完成首次提交，或改用 isolation="none"');
+  }
+  if (inside !== "true") {
+    throw new ToolError('非 git 项目：写型隔离需要 git，请先 git init 并完成首次提交，或改用 isolation="none"');
+  }
+  let baseCommit;
+  try {
+    baseCommit = String(gitRun(projectDir, ["rev-parse", "HEAD"])).trim();
+  } catch {
+    throw new ToolError("空仓库（无提交）：先 commit 再用沙箱派发");
+  }
+  try {
+    gitRun(projectDir, ["worktree", "prune"]); // self-heal stale metadata before dispatch
+  } catch {
+    /* best effort */
+  }
+  const branch = "orch/" + missionId;
+  const wtDir = path.join(sandboxesRoot(), missionId);
+  assertInside(root, wtDir);
+  fs.mkdirSync(path.dirname(wtDir), { recursive: true });
+  const registered = worktreeListPaths(projectDir).includes(path.resolve(wtDir));
+  if (branchExists(projectDir, branch) && registered) {
+    // reuse: re-pack idempotency
+  } else if (branchExists(projectDir, branch)) {
+    gitRun(projectDir, ["worktree", "add", wtDir, branch]); // attach to existing branch
+  } else {
+    gitRun(projectDir, ["worktree", "add", "-b", branch, wtDir, baseCommit]);
+  }
+  // node_modules junction: same-directory second entry; never copied. Any
+  // failure (e.g. cross-volume) silently degrades to junction_shared:false.
+  let junctionShared = false;
+  if (junctionDecision) {
+    const projectNm = path.join(projectDir, "node_modules");
+    const wtNm = path.join(wtDir, "node_modules");
+    if (fs.existsSync(projectNm)) {
+      if (fs.existsSync(wtNm)) {
+        junctionShared = true; // already linked (re-pack)
+      } else {
+        try {
+          fs.symlinkSync(projectNm, wtNm, "junction");
+          junctionShared = true;
+        } catch {
+          junctionShared = false; // degrade, never fail the dispatch
+        }
+      }
+    }
+  }
+  const at = nowIso();
+  const sandbox = {
+    isolation: "worktree",
+    root: wtDir,
+    branch,
+    base_commit: baseCommit,
+    junction_shared: junctionShared,
+    oob_allowlist: Array.isArray(oobAllowlist) ? oobAllowlist.map(String) : [],
+    created_at: at,
+    applied_at: null,
+    applied_commit: null,
+    discarded_at: null,
+  };
+  upsertMission({
+    id: missionId,
+    pack: { sandbox },
+    timeline: [
+      { at, event: "sandbox:create", summary: `worktree ${displayPath(wtDir)}（分支 ${branch}，基于 ${baseCommit.slice(0, 10)}）` },
+    ],
+  });
+  return sandbox;
+}
+
+/** SANDBOX section lines for buildPackMarkdown (design §1.3 step 9, verbatim). */
+function buildSandboxLines({ sandboxRoot, branch, baseCommit, junctionShared }) {
+  return [
+    "## SANDBOX（沙箱环境——你的可写工作区）",
+    `- 工作区：${sandboxRoot}（git worktree，分支 ${branch}，基于 ${baseCommit}）`,
+    "- 本包 READ FIRST / CONTEXT / TASK 中出现的项目路径已改写为本工作区路径；若仍有未改写的原仓路径，到工作区内相同相对路径读取",
+    `- 红线：绝不写原项目路径（${projectDir}）——写穿主仓会被主仓 status 巡检与 reviewer 越界审查检出，整单丢弃（sandbox_discard）`,
+    `- node_modules：${junctionShared ? "junction 共享——只读使用，禁止 install/upgrade/delete（会写穿主仓）；需装依赖先删除该链接独立安装并在报告注明" : "未提供（本工作区无 node_modules）"}`,
+    `- done 上报必附：git diff --stat ${baseCommit} 与 git diff --name-only ${baseCommit} 的输出各存一个文件，路径进 artifacts`,
+  ];
+}
+
+/** Best-effort removal of a leftover node_modules junction (link only). */
+function removeJunctionLink(wtDir) {
+  try {
+    fs.rmSync(path.join(wtDir, "node_modules"), { force: true, recursive: true });
+  } catch {
+    /* best effort */
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* ack / suspected wake-failure helpers                                */
@@ -548,17 +923,52 @@ function newMission(id) {
       answered_at: null,
     },
     ack: null,
+    // v0.4 dependency graph / sandbox review defaults (lazy migration: old
+    // missions without these keys are interpreted as no-dependency / unclaimed).
+    blockedBy: [],
+    owner: null,
+    claim: null,
+    qa: null,
+    skippedReason: null,
     timeline: [],
   };
 }
 
 // Top-level keys whose object values are merged one level deep instead of replaced.
-const ONE_LEVEL = new Set(["dispatch", "blocked", "pack"]);
+const ONE_LEVEL = new Set(["dispatch", "blocked", "pack", "qa"]);
+
+// v0.4.1 merge whitelist (QA finding: upsert used to store unknown keys such as
+// "timeline_note" verbatim — schema drift). Anything outside this set is dropped
+// from the patch and reported back as ignored_keys. Read-only/owned keys (ack /
+// owner / claim) are stripped earlier; id/timeline bookkeeping is handled by
+// upsertMission itself.
+const MERGEABLE_KEYS = new Set([
+  "title",
+  "original_prompt",
+  "agent_type",
+  "model",
+  "status",
+  "dispatch",
+  "pack",
+  "artifacts",
+  "output_files",
+  "blocked",
+  "blockedBy",
+  "qa",
+  "skippedReason",
+  "timeline",
+]);
+
+/** Unknown top-level patch keys (reported, not merged). */
+function ignoredPatchKeys(patch) {
+  return Object.keys(patch).filter((k) => k !== "id" && !MERGEABLE_KEYS.has(k));
+}
 
 function mergeMission(base, patch) {
   const out = { ...base };
   for (const [key, value] of Object.entries(patch)) {
     if (key === "id") continue;
+    if (!MERGEABLE_KEYS.has(key)) continue; // whitelisted schema only
     if (ONE_LEVEL.has(key) && value && typeof value === "object" && !Array.isArray(value)) {
       out[key] = { ...(base[key] || {}) };
       for (const [k2, v2] of Object.entries(value)) {
@@ -605,8 +1015,140 @@ function upsertMission(patch, opts = {}) {
   }
   if (idx >= 0) board.missions[idx] = merged;
   else board.missions.push(merged);
+  // v0.4: the dependency graph is swept synchronously inside the same critical
+  // section (every board write is a "done transaction"): unlock / cascade skip /
+  // lease回收 / dangling cleanup. Empty graph cost = one O(N) pass.
+  if (opts.sweep !== false) sweepGraph(board, merged.updated_at);
+  // v0.4: worker reports renew an existing claim lease (same critical section).
+  if (opts.renewClaim && merged.claim && typeof merged.claim === "object") {
+    merged.claim.leaseUntil = opts.renewClaim.leaseUntil;
+  }
   saveBoard(board);
   return merged;
+}
+
+/**
+ * v0.4 dependency-graph sweep — fixpoint over the whole board. All mutations are
+ * in place; every transition writes its own timeline entry. Returns
+ * {unlocked, skipped, leaseExpired} for observability.
+ *   - unlock: drafted + blockedBy all done/skipped/closed -> ready
+ *   - cascade skip: drafted/ready + any upstream failed/skipped -> skipped
+ *   - lease回收: running + claim.leaseUntil in the past -> ready (owner/claim cleared)
+ *   - dangling: blockedBy entries pointing at missing missions are dropped once
+ */
+function sweepGraph(board, at) {
+  const unlocked = [];
+  const skipped = [];
+  const leaseExpired = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const m of board.missions) {
+      if (!m) continue;
+      // 租约回收: an expired lease returns the mission to ready (no timer needed —
+      // every write path sweeps, so the next touch after expiry recycles it).
+      // Applies to every claimed running mission, blockedBy or not.
+      if (m.status === "running" && m.claim && typeof m.claim === "object") {
+        const until = Date.parse(String(m.claim.leaseUntil ?? ""));
+        if (Number.isFinite(until) && until < Date.now()) {
+          m.owner = null;
+          m.claim = null;
+          m.status = "ready";
+          m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+          m.timeline.push({ at, event: "lease_expired", summary: "租约超时未续 → 回 ready 可再领取" });
+          leaseExpired.push(m.id);
+          changed = true;
+        }
+      }
+      if (!Array.isArray(m.blockedBy) || !m.blockedBy.length) continue;
+      // Dangling reference handling. Forward references are legal (§2.5: the
+      // dependency may be created after the dependent), so the FIRST sweep that
+      // sees a dangling id only marks it (danglingRefSince); the NEXT sweep
+      // drops it with a timeline event (design case D4). Without the deferral a
+      // forward-referenced cycle (D3) would be invisible to the cycle check.
+      const before = m.blockedBy.length;
+      const hasDangling = m.blockedBy.some((dep) => !board.missions.some((x) => x && x.id === dep));
+      if (hasDangling) {
+        if (!m.danglingRefSince) {
+          m.danglingRefSince = at; // first sighting: keep forward references
+        } else {
+          // QA fix (v0.4.1): name the dropped ids explicitly — the old wording
+          // ("N 项不存在") did not say WHICH references were removed.
+          const droppedIds = m.blockedBy.filter((dep) => !board.missions.some((x) => x && x.id === dep));
+          m.blockedBy = m.blockedBy.filter((dep) => board.missions.some((x) => x && x.id === dep));
+          delete m.danglingRefSince;
+          m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+          m.timeline.push({
+            at,
+            event: "dangling_dropped",
+            summary:
+              `清理悬挂依赖引用 ${before - m.blockedBy.length} 项（${droppedIds.join(", ")} 不存在）。` +
+              "前向引用允许跨一次写事务落地；若为误写请修订 blockedBy",
+          });
+          changed = true;
+        }
+      } else if (m.danglingRefSince) {
+        delete m.danglingRefSince; // deps materialized before the drop deadline
+      }
+      const deps = m.blockedBy.map((dep) => board.missions.find((x) => x && x.id === dep));
+      const failedDeps = deps.filter((d) => d && (d.status === "failed" || d.status === "skipped"));
+      if (
+        (m.status === "drafted" || m.status === "ready") &&
+        failedDeps.length
+      ) {
+        m.status = "skipped";
+        m.skippedReason = "upstream_failed";
+        m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+        m.timeline.push({
+          at,
+          event: "skip:upstream_failed",
+          summary: "上游 " + failedDeps.map((d) => d.id).join(","),
+        });
+        skipped.push(m.id);
+        changed = true;
+        continue;
+      }
+      if (
+        m.status === "drafted" &&
+        deps.length &&
+        deps.every((d) => d && DEP_GREEN_STATUSES.includes(d.status))
+      ) {
+        m.status = "ready";
+        m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+        m.timeline.push({ at, event: "unlock", summary: "blockedBy 全绿 → ready 可领取" });
+        unlocked.push(m.id);
+        changed = true;
+      }
+    }
+  }
+  return { unlocked, skipped, leaseExpired };
+}
+
+/**
+ * v0.4 cycle detection for blockedBy changes. The graph view uses the NEW
+ * blockedBy for `id` and the stored ones for everyone else; a cycle exists iff
+ * `id` is reachable from one of its own (new) dependencies. Returns the path
+ * from the dependency back to id (for the error message) or null.
+ */
+function detectCycle(board, id, blockedBy) {
+  if (!Array.isArray(blockedBy)) return null;
+  if (blockedBy.includes(id)) return [id]; // one-step self loop
+  const depsOf = (mid) => {
+    if (mid === id) return blockedBy;
+    const m = board.missions.find((x) => x && x.id === mid);
+    const list = m && Array.isArray(m.blockedBy) ? m.blockedBy : [];
+    return list.filter((d) => d !== mid);
+  };
+  const seen = new Set();
+  const stack = blockedBy.map((d) => ({ node: d, path: [d] }));
+  while (stack.length) {
+    const { node, path } = stack.pop();
+    if (node === id) return path; // dep -> ... -> id
+    if (seen.has(node)) continue;
+    seen.add(node);
+    for (const d of depsOf(node)) stack.push({ node: d, path: [...path, d] });
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1186,6 +1728,159 @@ function consumeEventFile(srcFile, missionId) {
 }
 
 /* ------------------------------------------------------------------ */
+/* sentinel health (v0.4.1, read-only view of <root>/sentinel/)        */
+/* ------------------------------------------------------------------ */
+
+const SENTINEL_HEARTBEAT_STALE_MS = 90000; // twin of bg-sentinel / bg-gate B3 rule
+
+function serverPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return Boolean(err && err.code === "EPERM");
+  }
+}
+
+/** Read-only health view; ANY failure returns {available:false} (never throws). */
+function sentinelHealth() {
+  try {
+    const dir = path.join(root, "sentinel");
+    const out = { available: true, family_size: 3, instances: [], shots_24h: [], abandoned: [], echo_tail: [] };
+    // family size preference comes from the published cfg (default 3)
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(root, "sentinel.cfg.json"), "utf8"));
+      const n = Number(cfg && cfg.family_size);
+      if (Number.isFinite(n)) out.family_size = Math.min(5, Math.max(1, Math.round(n)));
+    } catch {
+      /* keep default */
+    }
+    // instances: fresh slot files = on duty
+    const now = Date.now();
+    const names = fs.readdirSync(dir).filter((n) => /^instance-\d+\.json$/.test(n));
+    for (const n of names) {
+      try {
+        const f = path.join(dir, n);
+        const doc = JSON.parse(fs.readFileSync(f, "utf8"));
+        const hb = Date.parse(String(doc.heartbeatAt ?? ""));
+        let age = Number.isFinite(hb) ? now - hb : NaN;
+        if (!Number.isFinite(age)) age = now - fs.statSync(f).mtimeMs;
+        const alive = serverPidAlive(Number(doc.pid)) && Math.max(0, age) <= SENTINEL_HEARTBEAT_STALE_MS;
+        out.instances.push({
+          slot: Number(doc.slot ?? n.match(/^instance-(\d+)\./)?.[1] ?? -1),
+          pid: Number(doc.pid ?? 0),
+          alive,
+          heartbeat_age_s: Math.max(0, Math.round(age / 1000)),
+          started_at: doc.started_at ?? null,
+          took_over: Boolean(doc.took_over),
+        });
+      } catch {
+        /* skip bad slot file */
+      }
+    }
+    out.instances.sort((a, b) => a.slot - b.slot);
+    // fired entries (24h window), newest first
+    const cutoff = now - 24 * 3600 * 1000;
+    const firedDir = path.join(dir, "fired");
+    let entries = [];
+    try {
+      entries = fs
+        .readdirSync(firedDir)
+        .filter((n) => n.endsWith(".json"))
+        .map((n) => {
+          try {
+            const doc = JSON.parse(fs.readFileSync(path.join(firedDir, n), "utf8"));
+            return { doc, mtimeMs: fs.statSync(path.join(firedDir, n)).mtimeMs };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .filter((e) => e.mtimeMs >= cutoff);
+    } catch {
+      /* no fired dir */
+    }
+    entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    out.shots_24h = entries.slice(0, 10).map((e) => ({
+      key: e.doc.key ?? null,
+      category: e.doc.category ?? null,
+      at: e.doc.at ?? new Date(e.mtimeMs).toISOString(),
+      final: e.doc.final === true,
+    }));
+    // abandoned: missions with a final (cap) shot whose state is STILL suspicious.
+    // shots = total window shots for that mission (design §4.8 shows shots:3).
+    let board = null;
+    try {
+      board = JSON.parse(fs.readFileSync(boardFile(), "utf8"));
+    } catch {
+      board = null;
+    }
+    const isSuspicious = (id) => {
+      if (!board || !Array.isArray(board.missions)) return false;
+      const m = board.missions.find((x) => x && x.id === id);
+      if (!m) return false;
+      return (
+        ["done", "failed", "blocked", "question"].includes(m.status) &&
+        missionAck(m) === null &&
+        (m.dispatch && m.dispatch.mode) !== "workflow"
+      );
+    };
+    const byMission = new Map();
+    for (const e of entries) {
+      const id = e.doc.mission_id ? String(e.doc.mission_id) : null;
+      if (!id) continue;
+      const cur = byMission.get(id) || {
+        key: id,
+        category: e.doc.category,
+        shots: 0,
+        last_at: null,
+        hasFinal: false,
+      };
+      cur.shots += 1;
+      if (e.doc.final === true) cur.hasFinal = true;
+      const at = e.doc.at ?? new Date(e.mtimeMs).toISOString();
+      if (!cur.last_at || at > cur.last_at) cur.last_at = at;
+      byMission.set(id, cur);
+    }
+    out.abandoned = [...byMission.values()]
+      .filter((a) => a.hasFinal && isSuspicious(a.key))
+      .map((a) => {
+        let title = "";
+        try {
+          const m = board.missions.find((x) => x && x.id === a.key);
+          title = String((m && m.title) || "");
+        } catch {
+          /* keep empty */
+        }
+        return { key: a.key, category: a.category, shots: a.shots, last_at: a.last_at, mission_title: title };
+      });
+    // echo tail (≤3 newest summaries)
+    try {
+      const lines = fs
+        .readFileSync(path.join(dir, "echo.jsonl"), "utf8")
+        .split("\n")
+        .filter((x) => x.trim());
+      out.echo_tail = lines
+        .slice(-3)
+        .reverse()
+        .map((x) => {
+          try {
+            const o = JSON.parse(x);
+            return String(o.summary_head || "").slice(0, 160);
+          } catch {
+            return x.slice(0, 160);
+          }
+        });
+    } catch {
+      /* no echo file */
+    }
+    return out;
+  } catch {
+    return { available: false };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* tool: board                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -1197,8 +1892,10 @@ function toolBoard(args) {
         ? args.mission
         : null;
     if (!patchRaw) throw new ToolError('board upsert requires "mission" object');
-    // ack is read-only: it is only written by the ack action or auto-ack rules.
-    const { ack: _ignored, ...patch } = patchRaw;
+    // ack/owner/claim are read-only: ack is written by the ack action or the
+    // auto-ack rules; owner/claim are owned by board claim / report renewal /
+    // lease回收 (v0.4). All three are stripped from caller patches.
+    const { ack: _ignored, owner: _ownerIgnored, claim: _claimIgnored, ...patch } = patchRaw;
     if (patch.status !== undefined && !STATUSES.includes(patch.status)) {
       throw new ToolError(
         `invalid status: ${JSON.stringify(patch.status)}; allowed: ${STATUSES.join(", ")}`,
@@ -1211,8 +1908,41 @@ function toolBoard(args) {
     ) {
       throw new ToolError("mission.model must be a string or null");
     }
-    const mission = withRootLock(() => upsertMission(patch)); // v0.3.1 A1
+    if (patch.skippedReason !== undefined && patch.skippedReason !== null) {
+      if (typeof patch.skippedReason !== "string") {
+        throw new ToolError("mission.skippedReason must be a string or null");
+      }
+    }
+    const mission = withRootLock(() => {
+      // v0.4 (D3): reject dependency cycles BEFORE touching the board. An empty
+      // array is an explicit clear and cannot cycle; a new mission with an
+      // auto-generated id cannot reference itself either.
+      if (patch.blockedBy !== undefined) {
+        if (
+          !Array.isArray(patch.blockedBy) ||
+          patch.blockedBy.some((d) => typeof d !== "string" || !d.trim())
+        ) {
+          throw new ToolError("mission.blockedBy must be an array of mission ids");
+        }
+        if (patch.id != null) {
+          const targetId = safeSegment(patch.id, "mission id");
+          const cycle = detectCycle(loadBoard(), targetId, patch.blockedBy.map(String));
+          if (cycle) {
+            throw new ToolError(
+              `blockedBy 构成环：<${[targetId, ...cycle].join(" → ")}>；依赖必须是 DAG（board 未改动）`,
+            );
+          }
+        }
+      }
+      return upsertMission(patch); // v0.3.1 A1
+    });
     const out = { ok: true, mission: withComputed(mission) };
+    // v0.4.1 merge whitelist: unknown keys are dropped, not stored.
+    const ignoredKeys = ignoredPatchKeys(patch);
+    if (ignoredKeys.length) {
+      out.ignored_keys = ignoredKeys;
+      out.note = `未知字段未入库（schema 白名单）：${ignoredKeys.join(", ")}`;
+    }
     // v0.3.1 (C6): closing over an unread mailbox / pending question does not
     // block, but the coordinator must see it.
     if (mission.status === "closed") {
@@ -1261,9 +1991,71 @@ function toolBoard(args) {
     if (filter) missions = missions.filter((m) => m && filter.includes(m.status));
     else missions = missions.filter((m) => m && m.status !== "closed");
     missions.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
-    return { missions: missions.map(withComputed) };
+    // v0.4.1: sentinel family health rides on list (read-only view of sentinel/)
+    return { missions: missions.map(withComputed), sentinel_health: sentinelHealth() };
   }
-  throw new ToolError(`unknown board action: ${JSON.stringify(action)} (use upsert|get|list|ack)`);
+  if (action === "claim") {
+    // v0.4 self-claiming (CAS): a pool worker claims a ready/drafted mission.
+    // Conditions: owner===null (or missing) && status ∈ {drafted, ready} &&
+    // blockedBy all green. Success flips to running + writes the lease. The
+    // whole CAS runs inside the root lock, so cross-process races resolve to
+    // exactly one winner.
+    if (args.mission_id == null) throw new ToolError('board claim requires "mission_id"');
+    const id = safeSegment(args.mission_id, "mission_id");
+    const worker = String(args.worker ?? "").trim();
+    if (!worker) throw new ToolError('board claim requires "worker"');
+    let leaseMinutes = claimLeaseMinDefault;
+    if (args.lease_minutes != null) {
+      const n = Math.floor(Number(args.lease_minutes));
+      if (!Number.isFinite(n) || n < 1) throw new ToolError("lease_minutes must be a number >= 1");
+      leaseMinutes = n;
+    }
+    return withRootLock(() => {
+      const board = loadBoard();
+      sweepGraph(board, nowIso()); // recycle expired leases before the CAS reads state
+      const m = findMission(board, id);
+      if (!m) throw new ToolError(`mission not found: ${id}`);
+      if (m.owner) {
+        throw new ToolError(`已被领取（owner=${m.owner}）：不可重复领取`);
+      }
+      if (m.status !== "drafted" && m.status !== "ready") {
+        throw new ToolError(`状态不可领取（status=${m.status}）：仅 drafted/ready 可 claim`);
+      }
+      const deps = Array.isArray(m.blockedBy) ? m.blockedBy : [];
+      const pending = deps.filter((d) => {
+        const dm = findMission(board, d);
+        return !dm || !dm.status || !DEP_GREEN_STATUSES.includes(dm.status);
+      });
+      if (pending.length) {
+        throw new ToolError(`依赖未就绪：blockedBy 未绿项 ${pending.join(", ")}`);
+      }
+      const at = nowIso();
+      const token =
+        m.dispatch && m.dispatch.token ? String(m.dispatch.token) : hex(4);
+      const leaseUntil = new Date(Date.parse(at) + leaseMinutes * 60000).toISOString();
+      m.owner = worker;
+      m.claim = { worker, token, claimedAt: at, leaseUntil };
+      m.status = "running";
+      m.dispatch = m.dispatch && typeof m.dispatch === "object" ? m.dispatch : {};
+      if (!m.dispatch.token) m.dispatch.token = token; // report 校验依赖它
+      m.updated_at = at;
+      m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+      m.timeline.push({ at, event: "claim", summary: `${worker} 领取（租约至 ${leaseUntil}）` });
+      saveBoard(board);
+      return {
+        ok: true,
+        mission_id: id,
+        worker,
+        token,
+        pack_path: m.pack && m.pack.path ? m.pack.path : null,
+        lease_until: leaseUntil,
+        task: { title: m.title || "" },
+        next_hint:
+          "先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。",
+      };
+    });
+  }
+  throw new ToolError(`unknown board action: ${JSON.stringify(action)} (use upsert|get|list|ack|claim)`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1354,10 +2146,28 @@ function toolReport(args) {
       ...(Array.isArray(mission.timeline) ? mission.timeline : []),
       { at, event: `report:${kind}`, summary },
     ];
+    // v0.4: any report from the (lease-holding) worker renews the claim lease
+    // in the same critical section. A foreign worker still renews (design) but
+    // gets a warn naming the actual holder.
+    let claimWarn = null;
+    const renewOpts = {};
+    if (mission.claim && typeof mission.claim === "object") {
+      renewOpts.renewClaim = {
+        leaseUntil: new Date(Date.parse(at) + claimLeaseMinDefault * 60000).toISOString(),
+      };
+      if (mission.claim.worker && mission.claim.worker !== worker) {
+        claimWarn = `该 mission 租约属于 ${mission.claim.worker}，请确认自己领的是这一项`;
+      }
+    }
     const updated = upsertMission(
       patch,
-      kind === "blocked" || kind === "question" ? { clearAck: true } : {},
+      kind === "blocked" || kind === "question" ? { clearAck: true, ...renewOpts } : renewOpts,
     );
+
+    // v0.4: surface claimable work to pool workers (n>0 only).
+    const readyToClaim = loadBoard().missions.filter(
+      (x) => x && x.status === "ready" && !x.owner,
+    ).length;
 
     // v0.3.1 (C5): a done report straight out of "drafted" is allowed but odd
     // enough to flag.
@@ -1414,9 +2224,28 @@ function toolReport(args) {
       lessonsNote,
       expectedToken,
       token,
+      readyToClaim,
+      claimWarn,
     };
   });
 
+  const readyToClaimExtras =
+    outcome.readyToClaim > 0
+      ? {
+          ready_to_claim: outcome.readyToClaim,
+          hint_claim: `任务板有 ${outcome.readyToClaim} 项 ready 可领取：board(action="claim", mission_id=…, worker="<你的名字>")`,
+        }
+      : {};
+  // v0.4.1 QA fix (distinct warn keys): the three warns used to share one `warn`
+  // key, so a later warn silently overwrote an earlier one. Each keeps its own
+  // key now; `warn` remains as the combined text for backward compatibility.
+  const warnParts = [
+    outcome.draftedWarn,
+    outcome.claimWarn,
+    outcome.expectedToken && !outcome.token
+      ? "未携带 token；下次上报请带上派发 prompt 的 [token] 行"
+      : null,
+  ].filter(Boolean);
   return {
     ok: true,
     event_id: outcome.eventId,
@@ -1429,10 +2258,13 @@ function toolReport(args) {
     ...(truncatedNote ? { note: truncatedNote } : {}),
     ...(outcome.closed && outcome.note && !truncatedNote ? { note: outcome.note } : {}),
     ...(outcome.lessonsNote ? { lessons_note: outcome.lessonsNote } : {}),
-    ...(outcome.draftedWarn ? { warn: outcome.draftedWarn } : {}),
+    ...(outcome.draftedWarn ? { warn_drafted: outcome.draftedWarn } : {}),
+    ...(outcome.claimWarn ? { warn_claim: outcome.claimWarn } : {}),
     ...(outcome.expectedToken && !outcome.token
-      ? { warn: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
+      ? { warn_token: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
       : {}),
+    ...(warnParts.length ? { warn: warnParts.join(" ") } : {}),
+    ...readyToClaimExtras,
   };
 }
 
@@ -1741,6 +2573,9 @@ const MCP_DISALLOWED = [
   PREFIX + "context_pack",
   PREFIX + "resume",
   PREFIX + "lessons",
+  PREFIX + "sandbox_apply",
+  PREFIX + "sandbox_discard",
+  PREFIX + "agent_harvest",
 ];
 
 const ARCHETYPES = {
@@ -1951,6 +2786,7 @@ function buildPackMarkdown(opts) {
     workerName,
     lessonLines,
     recentLines,
+    sandboxLines,
   } = opts;
   const L = [];
   L.push(`# 任务包：${title}（${missionId}）`);
@@ -1977,6 +2813,11 @@ function buildPackMarkdown(opts) {
   L.push("- 受阻/目标矛盾/必败门禁：立即 report(kind=blocked, question=…)，不硬扛不造假");
   for (const r of rules) L.push(`- ${r}`);
   L.push("");
+  // v0.4: the SANDBOX section sits between RULES and LESSONS (design §1.3 step 9).
+  if (sandboxLines && sandboxLines.length) {
+    for (const line of sandboxLines) L.push(line);
+    L.push("");
+  }
   if (lessonLines && lessonLines.length) {
     L.push("## LESSONS（相关经验教训，供避坑；与任务无关可忽略）");
     for (const line of lessonLines) L.push(line);
@@ -2014,17 +2855,62 @@ function toolContextPack(args) {
 function toolContextPackInner(args) {
   const missionId = safeSegment(args.mission_id, "mission_id");
   const title = String(args.title ?? "").trim();
-  const task = String(args.task ?? "").trim();
+  let task = String(args.task ?? "").trim();
   if (!title) throw new ToolError('context_pack requires "title"');
   if (!task) throw new ToolError('context_pack requires "task"');
   let variants = args.variants == null ? 1 : Math.floor(Number(args.variants));
   if (!Number.isFinite(variants)) variants = 1;
   if (variants < 1 || variants > 8) throw new ToolError("variants must be between 1 and 8");
-  const readFirst = Array.isArray(args.read_first) ? args.read_first.map(String) : [];
-  const rules = Array.isArray(args.rules) ? args.rules.map(String) : [];
+  let readFirst = Array.isArray(args.read_first) ? args.read_first.map(String) : [];
+  let rules = Array.isArray(args.rules) ? args.rules.map(String) : [];
   const axes = Array.isArray(args.variant_axes) ? args.variant_axes.map(String) : [];
-  const upstream = args.upstream_context == null ? "" : String(args.upstream_context);
+  let upstream = args.upstream_context == null ? "" : String(args.upstream_context);
   const returnFormat = args.return_format == null ? "" : String(args.return_format);
+
+  // v0.4 sandbox dispatch parameters.
+  const isolation =
+    args.isolation != null ? String(args.isolation) : sandboxDefaultArg === "worktree" ? "worktree" : "none";
+  if (isolation !== "worktree" && isolation !== "none") {
+    throw new ToolError(
+      'context_pack isolation must be "worktree" or "none" (缺省取 userConfig sandbox_default)',
+    );
+  }
+  const oobAllowlist = Array.isArray(args.oob_allowlist)
+    ? args.oob_allowlist.map(String).filter((s) => s.trim())
+    : [];
+  let sandboxInfo = null;
+  let sandboxLines = null;
+  let sandboxWarn = null;
+  if (isolation === "worktree") {
+    const installLike = isInstallLikeTask(title + "\n" + task);
+    let junctionDecision;
+    if (args.share_node_modules === true) {
+      junctionDecision = true;
+      if (installLike) {
+        sandboxWarn = "安装类任务共享 junction 会写穿主仓 node_modules，已按你的要求创建，风险自担";
+      }
+    } else if (args.share_node_modules === false) {
+      junctionDecision = false;
+    } else {
+      // auto: share only when the main repo has node_modules and the task does
+      // not look like a dependency-install task (install would write through).
+      junctionDecision =
+        fs.existsSync(path.join(projectDir, "node_modules")) && !installLike;
+    }
+    sandboxInfo = materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionDecision });
+    // Path rewriting: project root -> sandbox root, both slash forms.
+    const rewrite = (s) => rewritePathStrings(s, projectDir, sandboxInfo.root);
+    task = rewrite(task);
+    readFirst = readFirst.map(rewrite);
+    rules = rules.map(rewrite);
+    upstream = rewrite(upstream);
+    sandboxLines = buildSandboxLines({
+      sandboxRoot: sandboxInfo.root,
+      branch: sandboxInfo.branch,
+      baseCommit: sandboxInfo.base_commit,
+      junctionShared: sandboxInfo.junction_shared,
+    });
+  }
 
   const existing = findMission(loadBoard(), missionId);
   const token =
@@ -2070,6 +2956,7 @@ function toolContextPackInner(args) {
         workerName: `${workerBare}#1`,
         lessonLines,
         recentLines,
+        sandboxLines,
       }),
     );
     packPaths.push(file);
@@ -2093,6 +2980,7 @@ function toolContextPackInner(args) {
           workerName: `${workerBare}#${k}`,
           lessonLines,
           recentLines,
+          sandboxLines,
         }),
       );
       packPaths.push(file);
@@ -2124,8 +3012,234 @@ function toolContextPackInner(args) {
   if (variants > 1) {
     result.prompt_templates = packPaths.map((p, i) => promptFor(p, `${workerBare}#${i + 1}`));
   }
+  if (sandboxInfo) {
+    result.sandbox = {
+      root: displayPath(sandboxInfo.root),
+      branch: sandboxInfo.branch,
+      base_commit: sandboxInfo.base_commit,
+      junction_shared: sandboxInfo.junction_shared,
+    };
+    if (sandboxWarn) result.warn = sandboxWarn;
+  }
   return result;
 }
+
+/* ------------------------------------------------------------------ */
+/* tools: sandbox_apply / sandbox_discard (v0.4)                       */
+/*                                                                     */
+/* Both run ENTIRELY inside withRootLock: the board reads/writes and   */
+/* the git subprocess sections share one critical section (design      */
+/* §1.4/§1.5). Git segments are capped at 60s; the root-lock stale     */
+/* window (30s) is covered by single-coordinator + idempotent re-entry. */
+/* ------------------------------------------------------------------ */
+
+function toolSandboxApply(args) {
+  return withRootLock(() => toolSandboxApplyInner(args));
+}
+
+function toolSandboxApplyInner(args) {
+  const missionId = safeSegment(args.mission_id, "mission_id");
+  const allowDirty = args.allow_dirty === true;
+  const board = loadBoard();
+  const m = findMission(board, missionId);
+  if (!m) throw new ToolError(`mission not found: ${missionId}`);
+  const sb = m.pack && m.pack.sandbox;
+  if (!sb || sb.isolation !== "worktree") {
+    throw new ToolError("该 mission 非沙箱派发");
+  }
+  // v0.4.1 QA fix: the applied_at idempotent branch must run BEFORE the done/qa
+  // gates. After a successful apply the mission is closed, so a re-invocation
+  // used to die on "仅 done 状态可 apply" and the compensation path below was
+  // unreachable. Once applied_at exists the merge already happened — finishing
+  // the board transaction is always correct (crash after merge must still close).
+  if (sb.applied_at) {
+    // Idempotent re-entry + compensation: a crash after the merge must still
+    // end with the board closed.
+    if (m.status !== "closed") {
+      const at = nowIso();
+      m.status = "closed";
+      if (!missionAck(m)) m.ack = { at, by: "sandbox_apply", note: "auto: applied" };
+      m.updated_at = at;
+      saveBoard(board);
+    }
+    return {
+      ok: true,
+      already_applied: true,
+      mission_id: missionId,
+      applied_commit: sb.applied_commit ?? null,
+      branch: sb.branch,
+      status: m.status,
+    };
+  }
+  // 1. gates (single loadBoard).
+  if (m.status !== "done") {
+    throw new ToolError(`仅 done 状态可 apply，当前 ${m.status}`);
+  }
+  if (!(m.qa && typeof m.qa === "object" && m.qa.verdict === "pass")) {
+    throw new ToolError(
+      '缺少 pass 评审：先派 orch-reviewer 审 diff，再 board(upsert, mission={id, qa:{verdict:"pass",…}})',
+    );
+  }
+  assertMergeTreeSupport(projectDir);
+  const wtDir = path.resolve(String(sb.root));
+  const branch = String(sb.branch);
+  const baseCommit = String(sb.base_commit ?? "");
+  // 2. main-repo pollution gate (porcelain survey). allow_dirty is the manual
+  // escape hatch; the qa gate has NO escape hatch.
+  const porcelain = porcelainStatus(projectDir);
+  if (porcelain.trim() && !allowDirty) {
+    throw new ToolError(
+      "主仓工作树不干净：可能是 worker 写穿污染（git checkout -- <paths> 可还原），" +
+        "也可能是你自己的未提交改动——确认后 stash/提交/还原，或确认为己方改动时传 allow_dirty=true 重试\n" +
+        porcelain.trim(),
+    );
+  }
+  // 3. mechanical out-of-bounds detection (allowlist prefix match; empty =
+  // everything allowed).
+  const allow = Array.isArray(sb.oob_allowlist)
+    ? sb.oob_allowlist.map(String).filter((s) => s.trim())
+    : [];
+  const changed = listDiffNames(projectDir, baseCommit, branch);
+  const violations = allow.length
+    ? changed.filter((p) => !allow.some((pre) => p === pre || p.startsWith(pre)))
+    : [];
+  if (violations.length) {
+    throw new ToolError(
+      `越界改动 ${violations.length} 项（不在 allowlist）：\n` +
+        violations.join("\n") +
+        "\n评审 verdict 应改为 fail（走 sandbox_discard 整单弃），或修订 oob_allowlist 后重审再 apply",
+    );
+  }
+  // 4. conflict precheck: in-memory merge, never touches the working tree.
+  try {
+    gitRun(projectDir, ["merge-tree", "--write-tree", "HEAD", branch]);
+  } catch (err) {
+    if (err && err.status === 1) {
+      const out = String(err.stdout || "");
+      const conflictFiles = parseMergeTreeConflicts(out);
+      throw new ToolError(
+        "合并存在冲突，未触主仓。派合并代理 mission 处理：context_pack(mission_id=<新id>, task=\"把 " +
+          branch +
+          " 合入主线并解决冲突\", isolation=\"worktree\", read_first=[四件套文件…])；" +
+          "四件套=merge-base(git merge-base HEAD <branch>) + 主线侧 diff(git diff <merge-base>..HEAD) + " +
+          "分支侧 diff(git diff <merge-base>..<branch>) + 冲突文件内容(git show <rev>:<path> 两侧)。" +
+          "解决后复审再 apply。\nconflict_files: " +
+          JSON.stringify(conflictFiles),
+      );
+    }
+    throw new ToolError(
+      "merge-tree 冲突预检失败：" + (err && err.message ? err.message : err),
+    );
+  }
+  // 5. clean merge (no-ff, fixed message) and capture the applied commit.
+  gitRun(projectDir, ["merge", "--no-ff", "--no-edit", "-m", `orch: apply ${missionId}`, branch]);
+  const appliedCommit = String(gitRun(projectDir, ["rev-parse", "HEAD"])).trim();
+  // 6. worktree teardown (junction removed first so nothing can write through
+  // it mid-teardown; rmSync on a junction unlinks the link, never the target).
+  let worktreeRemoved = true;
+  removeJunctionLink(wtDir);
+  try {
+    gitRun(projectDir, ["worktree", "remove", wtDir]);
+  } catch {
+    // git refuses to delete a dirty worktree (uncommitted leftovers) — never
+    // --force here: unreviewed content must not be silently destroyed.
+    worktreeRemoved = false;
+    throw new ToolError(
+      "沙箱内有未提交残留：内容不在任何 diff/commit 中，reviewer 未审；" +
+        "确认不要则 sandbox_discard 强弃，或先在沙箱内提交并重走评审",
+    );
+  }
+  removeJunctionLink(wtDir); // 补刀 in case worktree remove left the link
+  // 7. board transaction (direct object mutation, same lock, not mergeMission):
+  // closed + auto-ack + applied markers + timeline.
+  const at = nowIso();
+  m.status = "closed";
+  m.ack = { at, by: "sandbox_apply", note: "auto: applied" };
+  sb.applied_at = at;
+  sb.applied_commit = appliedCommit;
+  m.updated_at = at;
+  m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+  m.timeline.push({
+    at,
+    event: "sandbox:apply",
+    summary: `applied ${appliedCommit.slice(0, 10)}（merge ${branch} → 主线，worktree 已移除）`,
+  });
+  saveBoard(board);
+  // 8. response.
+  return {
+    ok: true,
+    mission_id: missionId,
+    applied_commit: appliedCommit,
+    branch,
+    worktree_removed: worktreeRemoved,
+    status: "closed",
+    ack: m.ack,
+  };
+}
+
+function toolSandboxDiscard(args) {
+  return withRootLock(() => toolSandboxDiscardInner(args));
+}
+
+function toolSandboxDiscardInner(args) {
+  const missionId = safeSegment(args.mission_id, "mission_id");
+  const board = loadBoard();
+  const m = findMission(board, missionId);
+  if (!m) throw new ToolError(`mission not found: ${missionId}`);
+  // 1. gate: sandbox record present (non-sandbox missions are never touched).
+  const sb = m.pack && m.pack.sandbox;
+  if (!sb || sb.isolation !== "worktree") {
+    throw new ToolError("该 mission 无沙箱记录");
+  }
+  const wtDir = path.resolve(String(sb.root));
+  const branch = String(sb.branch);
+  assertMergeTreeSupport(projectDir);
+  // 2. self-heal stale metadata, then force-remove the registered worktree
+  // (discard semantics = abandon; --force here and ONLY here — the main repo
+  // is untouched either way).
+  try {
+    gitRun(projectDir, ["worktree", "prune"]);
+  } catch {
+    /* best effort */
+  }
+  let worktreeRemoved = false;
+  removeJunctionLink(wtDir);
+  if (worktreeListPaths(projectDir).includes(wtDir)) {
+    gitRun(projectDir, ["worktree", "remove", "--force", wtDir]);
+    worktreeRemoved = true;
+  } else if (fs.existsSync(wtDir)) {
+    // Unregistered leftover directory: still sandbox-only storage.
+    fs.rmSync(wtDir, { recursive: true, force: true });
+    worktreeRemoved = true;
+  }
+  removeJunctionLink(wtDir);
+  // 3. branch -D (missing branch is fine — idempotent).
+  let branchDeleted = false;
+  try {
+    gitRun(projectDir, ["branch", "-D", branch]);
+    branchDeleted = true;
+  } catch {
+    /* already gone */
+  }
+  // 4. board: discarded marker + timeline; status untouched (done stays done —
+  // the coordinator decides close vs re-dispatch).
+  const at = nowIso();
+  sb.discarded_at = at;
+  m.updated_at = at;
+  m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+  m.timeline.push({ at, event: "sandbox:discard", summary: `弃 ${branch} 与 worktree（主仓零改动）` });
+  saveBoard(board);
+  // 5. response (idempotent: second call succeeds with false flags).
+  return {
+    ok: true,
+    mission_id: missionId,
+    branch_deleted: branchDeleted,
+    worktree_removed: worktreeRemoved,
+    note: "主仓零改动；mission 状态未变，可重派或 close",
+  };
+}
+
+
 
 /* ------------------------------------------------------------------ */
 /* tool: resume                                                        */
@@ -2214,6 +3328,20 @@ function recommendedAction(m, unread, sessionId) {
       action: `drafted 未派发：context_pack 生成任务包后 Agent(run_in_background=true) 派发，再 board(upsert) 记 dispatch`,
     });
   }
+  // v0.4 dependency-graph branches: an unclaimed ready mission is nobody's
+  // emergency (pool semantics); skipped is a terminal cascade outcome.
+  if (m.status === "ready" && !m.owner) {
+    out.push({
+      priority: 9,
+      action: "等待自领取或手动派发（第 18 章）：派池工 board(action=\"claim\")，或 board(upsert status=\"dispatched\") 走普通派发",
+    });
+  }
+  if (m.status === "skipped") {
+    out.push({
+      priority: 2,
+      action: `上游失败被跳过：复核后 board(upsert, mission={id:"${m.id}", status:"closed"}) 归档，或修订 blockedBy 后重置为 drafted 重规划`,
+    });
+  }
   if (!out.length) out.push({ priority: 9, action: "无需动作" });
   out.sort((a, b) => a.priority - b.priority);
   return { primary: out[0].action, actions: out };
@@ -2221,6 +3349,17 @@ function recommendedAction(m, unread, sessionId) {
 
 function toolResume(args) {
   const sessionId = String(args.session_id ?? "");
+  // v0.4.1: publish the coordinator session id for the sentinel family (dual-
+  // idle gate main signal + mailbox echo target). resume is the existing channel
+  // that carries the caller's session id; best effort, never fatal.
+  if (sessionId) {
+    try {
+      fs.mkdirSync(path.join(root, "sentinel"), { recursive: true });
+      atomicWriteFileSync(path.join(root, "sentinel", "coord-session.txt"), sessionId + "\n");
+    } catch {
+      /* best effort */
+    }
+  }
   const board = loadBoard();
   const openMissions = board.missions.filter((m) => m && m.status !== "closed");
   const missionsOut = [];
@@ -2254,6 +3393,33 @@ function toolResume(args) {
     });
     for (const a of rec.actions) actions.push({ mission_id: m.id, priority: a.priority, action: a.action });
   }
+  // v0.4: pool missions waiting for a claim are surfaced here (not in the Stop
+  // checklist / sentinel — ready is deliberately outside their open sets).
+  const readyUnclaimedAll = openMissions.filter((m) => m.status === "ready" && !m.owner);
+  if (readyUnclaimedAll.length) {
+    actions.push({
+      mission_id: null,
+      priority: 2,
+      action: `任务板有 ${readyUnclaimedAll.length} 项 ready 待领取：派池工自领取（第 18 章）或手动 board(upsert status=dispatched) 走普通派发`,
+    });
+  }
+  // v0.4.1: sentinel family understaffed or an abandoned condition → refill /
+  // takeover suggestion (priority 2, board-driven, no sentinel files written).
+  const health = sentinelHealth();
+  if (health.available) {
+    const live = health.instances.filter((i) => i.alive).length;
+    const understaffed = live < health.family_size;
+    if ((understaffed || health.abandoned.length) && openMissions.some((m) => m.status !== "ready")) {
+      actions.push({
+        mission_id: null,
+        priority: 2,
+        action:
+          `哨兵家族 ${live}/${health.family_size} 在岗、abandoned ${health.abandoned.length} 项：` +
+          `Bash(command="node ${SENTINEL_SCRIPT_DISPLAY} --once", run_in_background=true) 补员（同命令连发至满编）；` +
+          "abandoned 项按疑似唤醒失败接手。",
+      });
+    }
+  }
   actions.sort((a, b) => a.priority - b.priority);
 
   // v0.3: recent-session context from the mirror journal (read-only tails).
@@ -2283,8 +3449,202 @@ function toolResume(args) {
     // missions count, so a closed mission's leftover events no longer inflate.
     unread_total: openMissions.reduce((n, m) => n + countUnread(m.id), 0),
     actions_top3: actions.slice(0, 3),
+    // v0.4.1: full pool exposed so priority-2 suggestions (sentinel refill /
+    // abandoned takeover) remain visible when higher-priority actions crowd top3.
+    actions,
+    // v0.4: ready missions with no owner (≤8 listed), count first.
+    ready_unclaimed: readyUnclaimedAll.slice(0, 8).map((m) => ({
+      id: m.id,
+      title: m.title || "",
+      blocked_by: Array.isArray(m.blockedBy) ? m.blockedBy : [],
+    })),
+    ready_unclaimed_count: readyUnclaimedAll.length,
     prev_sessions: prevSessions,
     context_hint: contextHint,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* tool: agent_harvest (v0.4.1)                                        */
+/*                                                                     */
+/* Read-only subagent transcript harvester over the platform rollout    */
+/* model-io JSONL (<homedir>/.zcode/cli/rollout/model-io-<sessionId>.   */
+/* jsonl). Every record embeds the full conversation-so-far under       */
+/* request.messages, so the LAST complete record is the freshest view.  */
+/* Works across sessions (unlike TaskOutput) and needs no task id —     */
+/* the coordinator resolves a finished subagent by mission/agent id.    */
+/* Read-only: opens the rollout file, never writes anywhere.            */
+/* ------------------------------------------------------------------ */
+
+const HARVEST_DEFAULT_TAIL = 12;
+const HARVEST_MAX_TAIL = 100;
+const HARVEST_DEFAULT_CHARS = 8000;
+const HARVEST_MAX_CHARS = 48000;
+const HARVEST_LINE_CAP = 64 * 1024 * 1024; // refuse absurd records
+const HARVEST_SCAN_CHUNK = 1024 * 1024;
+
+function harvestRolloutDir() {
+  const envDir = String(process.env.ORCH_ROLLOUT_DIR || "").trim();
+  if (envDir) return path.resolve(envDir); // test seam only; default below
+  return path.join(os.homedir(), ".zcode", "cli", "rollout");
+}
+
+/** Last COMPLETE JSONL record (file ends with a newline → need the final two). */
+function readLastJsonLine(file, capBytes) {
+  const st = fs.statSync(file);
+  const size = st.size;
+  if (size === 0) return null;
+  const fd = fs.openSync(file, "r");
+  try {
+    const nls = [];
+    let pos = size;
+    while (pos > 0 && nls.length < 2) {
+      const n = Math.min(HARVEST_SCAN_CHUNK, pos);
+      const buf = Buffer.alloc(n);
+      fs.readSync(fd, buf, 0, n, pos - n);
+      for (let i = n - 1; i >= 0; i--) {
+        if (buf[i] === 10) {
+          nls.push(pos - n + i);
+          if (nls.length >= 2) break;
+        }
+      }
+      pos -= n;
+    }
+    let start;
+    let end;
+    if (nls.length >= 2) {
+      start = nls[1] + 1;
+      end = nls[0];
+    } else if (nls.length === 1) {
+      start = 0;
+      end = nls[0];
+    } else {
+      start = 0;
+      end = size; // single unterminated line
+    }
+    const len = end - start;
+    if (len <= 0) return null;
+    if (len > capBytes) {
+      throw new ToolError(`转录末行 ${len} 字节超出收割上限（${capBytes}）`);
+    }
+    const lb = Buffer.alloc(len);
+    fs.readSync(fd, lb, 0, len, start);
+    return JSON.parse(lb.toString("utf8"));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Flatten content (string | [{type:"text",text}|…]) to plain text. */
+function harvestText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (p && typeof p === "object" && typeof p.text === "string" ? p.text : ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return content == null ? "" : String(content);
+}
+
+function renderHarvestMessages(messages, includeTools, tail) {
+  const slice = messages.slice(-tail);
+  const lines = [];
+  for (const m of slice) {
+    if (!m || typeof m !== "object") continue;
+    const role = String(m.role || "?");
+    if (role === "system") {
+      lines.push("[system] " + harvestText(m.content).replace(/\s+/g, " ").slice(0, 160));
+    } else if (role === "user") {
+      lines.push("[user] " + harvestText(m.content).replace(/\s+/g, " ").slice(0, 400));
+    } else if (role === "assistant") {
+      const text = harvestText(m.content).replace(/\s+/g, " ").trim();
+      lines.push("[assistant] " + (text ? text.slice(0, 600) : "(无文本)"));
+      if (includeTools && Array.isArray(m.toolCalls)) {
+        for (const tc of m.toolCalls) {
+          if (!tc) continue;
+          let inputHead = "";
+          try {
+            inputHead = JSON.stringify(tc.input ?? {}).slice(0, 160);
+          } catch {
+            inputHead = "";
+          }
+          lines.push(`    → ${String(tc.name || "?")}(${inputHead})`);
+        }
+      }
+    } else if (role === "tool") {
+      const err = m.isError ? " ERROR" : "";
+      lines.push(
+        `[tool ${String(m.toolName || "?")}${err}] ` +
+          harvestText(m.content).replace(/\s+/g, " ").slice(0, 240),
+      );
+    } else {
+      lines.push(`[${role}] ` + harvestText(m.content).replace(/\s+/g, " ").slice(0, 240));
+    }
+  }
+  return { lines, count: slice.length, truncated: messages.length > slice.length };
+}
+
+function toolAgentHarvest(args) {
+  let tail = Math.floor(Number(args.tail));
+  if (!Number.isFinite(tail) || tail < 1) tail = HARVEST_DEFAULT_TAIL;
+  tail = Math.min(HARVEST_MAX_TAIL, tail);
+  let maxChars = Math.floor(Number(args.max_chars));
+  if (!Number.isFinite(maxChars) || maxChars < 200) maxChars = HARVEST_DEFAULT_CHARS;
+  maxChars = Math.min(HARVEST_MAX_CHARS, maxChars);
+  const includeTools = args.include_tools !== false;
+
+  let sessionId = String(args.session_id ?? "").trim();
+  if (!sessionId) {
+    const agentId = String(args.agent_id ?? "").trim();
+    if (agentId) sessionId = agentId.startsWith("sess_") ? agentId : `sess_subagent_agent_${agentId}`;
+  }
+  let missionId = null;
+  if (!sessionId && args.mission_id != null) {
+    missionId = safeSegment(args.mission_id, "mission_id");
+    const m = findMission(loadBoard(), missionId);
+    if (!m) throw new ToolError(`mission not found: ${missionId}`);
+    const aid = (m.dispatch && m.dispatch.agent_id) || null;
+    if (!aid) throw new ToolError(`mission ${missionId} 无 dispatch.agent_id（未派发或池工领取，无转录可收割）`);
+    sessionId = `sess_subagent_agent_${aid}`;
+  }
+  if (!sessionId) {
+    throw new ToolError('agent_harvest 需要 session_id / agent_id / mission_id 其一');
+  }
+
+  const file = path.join(harvestRolloutDir(), `model-io-${sessionId}.jsonl`);
+  if (!fs.existsSync(file)) {
+    throw new ToolError(
+      `未找到转录 model-io-${sessionId}.jsonl（rollout 目录 ${harvestRolloutDir()}）。` +
+        "未派发、池工领取、或平台未写 rollout 时无转录可收割；终态产出请以 report artifacts 为准",
+    );
+  }
+  let rec;
+  try {
+    rec = readLastJsonLine(file, HARVEST_LINE_CAP);
+  } catch (err) {
+    if (err instanceof ToolError) throw err;
+    throw new ToolError("转录读取失败：" + (err && err.message ? err.message : err));
+  }
+  if (!rec) throw new ToolError("转录文件为空或无完整记录");
+  const messages = Array.isArray(rec.request && rec.request.messages) ? rec.request.messages : [];
+  const rendered = renderHarvestMessages(messages, includeTools, tail);
+  let transcript = rendered.lines.join("\n");
+  const fullLen = transcript.length;
+  if (transcript.length > maxChars) transcript = "…（头部截断，保留尾部）\n" + transcript.slice(transcript.length - maxChars);
+
+  return {
+    ok: true,
+    session_id: sessionId,
+    mission_id: missionId,
+    source: displayPath(file),
+    completed_at: rec.completedAt ?? null,
+    model_id: (rec.model && rec.model.modelId) || (rec.response && rec.response.modelId) || null,
+    message_count: messages.length,
+    rendered_messages: rendered.count,
+    tail_truncated: rendered.truncated,
+    transcript_chars: fullLen,
+    transcript,
   };
 }
 
@@ -2300,6 +3660,9 @@ const TOOL_HANDLERS = {
   [PREFIX + "context_pack"]: toolContextPack,
   [PREFIX + "resume"]: toolResume,
   [PREFIX + "lessons"]: toolLessons,
+  [PREFIX + "sandbox_apply"]: toolSandboxApply,
+  [PREFIX + "sandbox_discard"]: toolSandboxDiscard,
+  [PREFIX + "agent_harvest"]: toolAgentHarvest,
 };
 
 const TOOLS = [
@@ -2313,10 +3676,11 @@ const TOOLS = [
       type: "object",
       properties: {
         action: {
-          enum: ["upsert", "get", "list", "ack"],
+          enum: ["upsert", "get", "list", "ack", "claim"],
           description:
             "upsert=创建或按字段合并更新；get=按 id 取单条；list=按状态过滤列出；" +
-            "ack=主控签收（已知悉该 mission 的结果、暂缓处置时打标，避免再被列为疑似唤醒失败）",
+            "ack=主控签收（已知悉该 mission 的结果、暂缓处置时打标，避免再被列为疑似唤醒失败）；" +
+            "claim=池工自领取（CAS）：worker 领取 ready 任务并写租约，领取即 running",
         },
         mission: {
           type: "object",
@@ -2346,9 +3710,42 @@ const TOOLS = [
                 "question",
                 "done",
                 "failed",
+                "skipped",
+                "ready",
                 "resumed",
                 "closed",
               ],
+            },
+            blockedBy: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "上游 mission_id 列表（DAG）：全部 done/skipped/closed 后本 mission 解锁为 ready；任一上游 failed/skipped 则级联 skipped(upstream_failed)。允许前向引用；成环会被拒绝",
+            },
+            skippedReason: {
+              type: ["string", "null"],
+              description: "skipped 终态原因（当前仅 upstream_failed，级联自动写）",
+            },
+            qa: {
+              type: "object",
+              properties: {
+                verdict: { enum: ["pass", "fail"] },
+                by: { type: "string" },
+                mission_id: { type: "string", description: "评审 mission（可追溯）" },
+                at: { type: "string" },
+                note: { type: "string" },
+              },
+              description:
+                "评审结论（sandbox_apply 的门禁）：评审 mission done 后由主控抄录到目标 mission 上",
+            },
+            owner: {
+              type: ["string", "null"],
+              description: "只读：当前领取者，由 board claim 动作维护；upsert 传入被忽略",
+            },
+            claim: {
+              type: ["object", "null"],
+              description:
+                "只读：{worker, token, claimedAt, leaseUntil} 租约；由 claim/report 续期/超时回收维护；upsert 传入被忽略",
             },
             dispatch: {
               type: "object",
@@ -2411,6 +3808,15 @@ const TOOLS = [
           },
         },
         mission_id: { type: "string" },
+        worker: {
+          type: "string",
+          description: "action=claim 必填：领取者名（如 orch-pool#1）",
+        },
+        lease_minutes: {
+          type: "number",
+          description:
+            "action=claim 租约分钟数（≥1，缺省取 claim_lease_min=30）；report 自动续租，超时回 ready",
+        },
         note: {
           type: "string",
           maxLength: 200,
@@ -2536,6 +3942,22 @@ const TOOLS = [
           items: { type: "string" },
           description: "每个变体的差异维度，长度建议=variants",
         },
+        isolation: {
+          enum: ["worktree", "none"],
+          description:
+            "写型隔离：worktree=为该 mission 建 git worktree 沙箱（分支 orch/<mission_id>，任务包内路径改写+红线声明）；none=不隔离（默认，取 userConfig sandbox_default）。copy 降级不做：非 git 项目直接拒绝并引导 git init",
+        },
+        oob_allowlist: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            '仓库相对路径前缀白名单（如 ["src/","tests/"]）；sandbox_apply 据此机械检出越界改动。缺省/空=允许全部路径。仅 isolation=worktree 生效',
+        },
+        share_node_modules: {
+          type: "boolean",
+          description:
+            "是否把主仓 node_modules 以 junction 共享进沙箱。缺省自动：主仓存在 node_modules 且任务不像安装类（不含 npm/pnpm/yarn install|add、安装依赖等）→ true；显式 true 但任务像安装类 → 照建并在返回中警告",
+        },
         extra: { type: "string" },
         mirror_digest: {
           type: "boolean",
@@ -2596,6 +4018,70 @@ const TOOLS = [
         },
         reason: { type: "string", maxLength: 200, description: "retire 附注" },
         limit: { type: "number", default: 8, description: "list 返回上限" },
+      },
+    },
+  },
+  {
+    name: PREFIX + "sandbox_apply",
+    description:
+      "沙箱收尾（门禁工具）：把沙箱分支合并回主仓并销毁 worktree。门禁=mission done 且 qa.verdict=pass；" +
+      "流程=主仓 status 巡检→越界 allowlist 检出→merge-tree 冲突预检→干净 merge+commit→worktree remove→board closed+自动签收。" +
+      "冲突时 isError 并给冲突清单与合并代理四件套指引（不触主仓）。Apply a sandboxed worktree branch back into the main repo.",
+    inputSchema: {
+      type: "object",
+      required: ["mission_id"],
+      properties: {
+        mission_id: { type: "string" },
+        allow_dirty: {
+          type: "boolean",
+          default: false,
+          description:
+            "主仓 porcelain 非空时的人工确认逃生门（确认非 worker 污染而是自己未提交的改动）。qa 门禁不可绕过",
+        },
+      },
+    },
+  },
+  {
+    name: PREFIX + "sandbox_discard",
+    description:
+      "沙箱弃单（零损伤）：删除沙箱分支与 worktree，主仓零改动；mission 状态不动（可重派或 close）。" +
+      "用于 verdict=fail、worker 写穿、任务作废。幂等：分支/worktree 已不存在时照常成功。Discard a sandbox worktree and branch.",
+    inputSchema: {
+      type: "object",
+      required: ["mission_id"],
+      properties: { mission_id: { type: "string" } },
+    },
+  },
+  {
+    name: PREFIX + "agent_harvest",
+    description:
+      "转录收割（只读）：按 mission/agent/session id 读取子代理的 rollout 转录尾部（末条 model-io 记录内嵌的全量对话），" +
+      "渲染为带角色标签的文本（user/assistant/工具调用行）。跨会话可用（TaskOutput 失效后的兜底）；" +
+      "终态产出仍以 report artifacts 为准。Harvest a subagent transcript tail (read-only).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mission_id: {
+          type: "string",
+          description: "按 mission 收割（取 dispatch.agent_id 映射 sess_subagent_agent_<id>）；三个定位参数缺一即可",
+        },
+        agent_id: { type: "string", description: "agent_<uuid>（自动加 sess_subagent_agent_ 前缀）" },
+        session_id: { type: "string", description: "完整会话 id（sess_…，已含前缀时原样使用）" },
+        tail: {
+          type: "number",
+          default: 12,
+          description: "渲染末尾 N 条消息（1-100，默认 12；早期消息省略）",
+        },
+        max_chars: {
+          type: "number",
+          default: 8000,
+          description: "transcript 字符上限（200-48000，默认 8000；超出保留尾部）",
+        },
+        include_tools: {
+          type: "boolean",
+          default: true,
+          description: "是否渲染 assistant 的工具调用行（→ ToolName(input…)）",
+        },
       },
     },
   },
