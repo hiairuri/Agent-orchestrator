@@ -27,6 +27,7 @@ import path from "node:path";
 const MAX_OUTPUT_CHARS = 1500;
 // v0.3.1 (C2): "resumed" joins the open set — a resumed mission whose worker
 // died used to vanish from the stop-time accounting.
+// v0.4 口径：ready（无人领取的池任务）不算未竟——不进 OPEN 集合，领取成功即 running 才计入。
 const OPEN_STATUSES = ["dispatched", "running", "blocked", "question", "resumed"];
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 

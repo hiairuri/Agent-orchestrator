@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.3.1 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.4.0 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -709,3 +709,14 @@ v0.3.0 的增量设计权威是 `designs/agent-orchestrator-v0.3-DESIGN.md`（re
 - **B 哨兵检测盲区与口径**：非 workflow 在飞（dispatched/running/resumed）龄期（timeline 末事件起算）≥ retries×timeout → exit 1 在飞龄期告警；board 连续 3 tick 不可读 → exit 1 "任务板不可读"；`sentinel.lock` 每 tick 心跳（heartbeatAt+mtime），接管判定=pid 死或心跳龄>90s，bg-gate 在岗判定同规则（治 PID 复用假在岗）；workflow 在飞排除出盯守集合，仅剩 workflow 时 exit 0 文案"workflow 托管中，其余已签收"；result_at 回退链 timeline→updated_at→board mtime→直接告警；cfg 每 tick 重读；elapsed 负值钳 0；remind/ask 路径哨兵句同受 `wake_sentinel` 开关控制；mailbox(read) 对 rename ENOENT（并发已消费）按已消费处理。
 - **C 状态机守卫**：report(blocked/question) 重置 `blocked.answered/answer` 并清空旧 ack（二次提问重新可见）；stop-check/session-start 的 OPEN 集合补 `resumed`（bg-sentinel 原已含）；answer 仅 blocked/question 转 dispatched、终态 done/failed/closed 拒绝并提示（终态不可洗成在飞，running steer 保持原状态）；gc 顺带把过期未读归档进 read/（archived_unread_events），resume `unread_total` 与 Stop 清点口径统一（排除 closed）；closed mission 拒收改板类 report（事件仍入 spool、板不动、响应带 note），drafted 收 done 允许但带 warn；close 时存在未读/未答则响应附 warn（不阻止）。
 - **Windows 平台事实（新）**：跨进程并发 rename 同一源路径可出现"幻影成功"（返回成功但源名仍可见，元数据延迟收敛）——`consumeEventFile` 改为移动后校验源已消失（未收敛则同 dst 重试，仍不收敛标记 `unresolved` 留给下一轮），mailbox(read) 全程持根锁，杜绝双投递。
+
+---
+
+## 18. v0.4 增量：沙箱派发 / 任务依赖图与自领取 / 主控并行迭代规程
+
+v0.4.0 的增量设计权威是 `designs/agent-orchestrator-v0.4-DESIGN.md`（rev.a，工作区 designs/ 目录），本文其余章节描述 v0.1 基线（v0.2/v0.3/v0.3.1 增量见 §15/§16/§17）。增量要点：
+
+- **沙箱派发 sandbox_dispatch（特性 1）**：`context_pack` 新增 `isolation`/`oob_allowlist`/`share_node_modules` 三参；isolation=worktree 时在根锁内 materialize git worktree 沙箱（`<存储根>/sandboxes/<mission_id>/`，分支 `orch/<完整 mission_id>`，node_modules junction 可共享、装依赖类自动禁用），任务包路径前缀改写并附 SANDBOX 节（红线声明+diff 存证要求）。新增 MCP 工具 `sandbox_apply`（门禁=done+qa.verdict=pass；主仓 porcelain 巡检+allowlist 越界机械检出+merge-tree 冲突预检（≥2.38）+干净 merge → worktree remove → board closed 自动签收；冲突 isError 附冲突清单与合并代理四件套指引，apply 失败零副作用）与 `sandbox_discard`（弃分支+强删 worktree，主仓零损伤，幂等）。工具总数 7→9，子代理 MCP_DISALLOWED 新增两项；git 子进程经 `node:child_process` 仅限本地 CLI，远端 argv（push/pull/fetch/clone/remote/submodule）静态红线。评审 verdict 落 mission.qa（ONE_LEVEL 深合并）。
+- **任务依赖图+自领取（特性 2）**：mission 新增 `blockedBy`/`owner`/`claim`/`skippedReason`（懒迁移，BOARD_VERSION 保持 2）；状态机新增 `ready`（blockedBy 全 done/skipped/closed 自动解锁）与 `skipped`（任一上游 failed/skipped 级联，skippedReason=upstream_failed）终态；`sweepGraph` 定点扫描在每次 board 写事务内 fixpoint 执行（解锁/级联/租约回收/悬挂清理），无定时器。`board(action="claim", mission_id, worker, lease_minutes?)` 根锁内 CAS 自领取：成功即 running 并写租约（{worker, token, claimedAt, leaseUntil}）；worker 每次 report 自动续租（lease 缺省取 userConfig `claim_lease_min`=30），超时回 ready。blockedBy 成环 upsert 直接拒绝（DFS 检环，board 不落盘），允许前向引用。口径：ready 无人领取不算未竟、不触发哨兵/Stop/SessionStart；resume 返回 `ready_unclaimed(_count)` 并给领取建议；claim 领取即 running，进入既有在飞/唤醒体系。
+- **主控并行迭代规程（特性 3）**：SKILL 16→19 章——第 17 章沙箱操作面（七步变体/冲突分支/三层检出矩阵）、第 18 章依赖与池工（spawn_agent tools 覆盖放行 board 的池工模式）、第 19 章多轮流水线规程（输入冻结判据/并发上限 8/独立 mission/聚合全文落盘/按 mission 签收恢复）。
+- **配套**：plugin.json 版本 0.4.0、userConfig 新增 `sandbox_default`（none|worktree，默认 none）与 `claim_lease_min`（默认 30）；`.mcp.json` 增 `--sandbox-default`/`--claim-lease-min`；/orch 第 5 步与 /orch-resume 清单补沙箱收尾与 ready/skipped 处置行；stop-check OPEN_STATUSES 补口径注释（逻辑零改动）；board status enum 增 ready/skipped。

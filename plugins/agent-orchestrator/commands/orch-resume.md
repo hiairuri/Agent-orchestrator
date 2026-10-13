@@ -19,5 +19,6 @@ argument-hint: "[mission_id]"
    - 有在飞任务且哨兵未启动 → `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true)` 拉起哨兵；收到哨兵告警 → 按疑似唤醒失败接手 → 处置后可重启哨兵。
    - 跨会话现场（prev_sessions.tail 非空）→ 先读镜像尾部摘要还原现场；深挖再用 `ReadSessionContext(sessionId="…", strategy="handoff")`。
    - 候选 lessons（本次接手的 done/failed 涉及踩坑）→ `lessons(list, status="candidate")` → promote 或放任 gc；failed 补 error-fix 反思。
+   - ready_unclaimed 非空 → 派池工自领取或手动派发；skipped → 复核后 close 或修订 blockedBy 重规划。
 3. 每项执行后调用 `mcp__plugin_agent-orchestrator_orch__board`（action=upsert）更新状态，并把 dispatch.session_id 更新为当前会话 id。
 4. 最后向用户汇报处置清单：恢复了什么、跳过什么、原因。
