@@ -25,13 +25,13 @@ import fs from "node:fs";
 import path from "node:path";
 
 const MAX_OUTPUT_CHARS = 1500;
-const OPEN_STATUSES = ["dispatched", "running", "blocked", "question"];
+// v0.3.1 (C2): "resumed" joins the open set — a resumed mission whose worker
+// died used to vanish from the stop-time accounting.
+const OPEN_STATUSES = ["dispatched", "running", "blocked", "question", "resumed"];
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 
 /* --- context mirror recording (verbatim twin of hooks/journal.mjs) --- */
 
-const MIRROR_MAX_ENTRIES = 400;
-const MIRROR_KEEP_AFTER_COMPACT = 300;
 const MIRROR_MAX_BYTES = 2000000;
 
 function mirrorParseArg(argv, flag) {
@@ -58,41 +58,106 @@ function mirrorMaxCharsPair(raw, defU, defA) {
   return { user: u, assistant: a };
 }
 
-function mirrorRecord(rootDir, sid, kind, text, cap) {
+/** Last seq via a bounded tail read (never a full-file read). */
+function mirrorLastSeqOf(file) {
+  return mirrorLastSeqWindow(file, 8192);
+}
+
+/** Tail search with a growing window — handles lines longer than 8KB. */
+function mirrorLastSeqDeep(file) {
+  let size = 0;
+  try {
+    size = fs.fstatSync(fs.openSync(file, "r")).size;
+  } catch {
+    return 0;
+  }
+  let window = 8192;
+  for (;;) {
+    const seq = mirrorLastSeqWindow(file, window);
+    if (seq > 0) return seq;
+    if (window >= size) return 0;
+    window = Math.min(window * 8, size);
+  }
+}
+
+function mirrorLastSeqWindow(file, window) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return 0;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const chunk = Math.min(window, size);
+    if (chunk <= 0) return 0;
+    const buf = Buffer.alloc(chunk);
+    fs.readSync(fd, buf, 0, chunk, size - chunk);
+    const lines = buf.toString("utf8").split("\n").filter((l) => l.trim());
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const seq = Number(JSON.parse(lines[i]).seq);
+        if (Number.isFinite(seq)) return seq;
+      } catch {
+        /* skip bad tail line */
+      }
+    }
+    return 0;
+  } catch {
+    return 0;
+  } finally {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+function mirrorRecord(rootDir, sid, kind, text, cap, maxBytes = MIRROR_MAX_BYTES) {
   const dir = path.join(rootDir, "context");
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `journal-${sid}.jsonl`);
-  let rows = [];
+  // Rotation decision first (approximate line size), so seq can be derived from
+  // whichever file ends up holding the previous entries.
+  let size = 0;
   try {
-    rows = fs
-      .readFileSync(file, "utf8")
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((l) => {
-        try {
-          return JSON.parse(l);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    size = fs.statSync(file).size;
   } catch {
-    rows = [];
+    /* new file */
   }
-  let seq = rows.length ? Math.max(...rows.map((r) => Number(r.seq) || 0)) : 0;
-  rows.push({ ts: new Date().toISOString(), session_id: sid, kind, text: text.slice(0, cap), seq: seq + 1 });
-  const bytes = rows.reduce((n, r) => n + JSON.stringify(r).length + 1, 0);
-  if (rows.length > MIRROR_MAX_ENTRIES || bytes > MIRROR_MAX_BYTES) {
-    rows = rows.slice(-MIRROR_KEEP_AFTER_COMPACT);
+  const roughLine = Buffer.byteLength(String(text ?? "").slice(0, cap), "utf8") + 200;
+  const overLimit = size + roughLine > maxBytes;
+  let prevSeq;
+  if (overLimit && size > 0) {
+    // v0.3.1 (A5): rotation = rename the over-limit file to .old and let the
+    // append below open a fresh file; no whole-file read-modify-write anymore.
+    try {
+      fs.renameSync(file, `${file}.old`);
+    } catch {
+      /* raced or gone; append still proceeds */
+    }
+    prevSeq = mirrorLastSeqDeep(`${file}.old`);
+  } else {
+    prevSeq = mirrorLastSeqOf(file);
+    if (prevSeq === 0 && size > 0) prevSeq = mirrorLastSeqDeep(file); // oversized lines
   }
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
-  try {
-    if (fs.existsSync(file)) fs.unlinkSync(file);
-  } catch {
-    /* best effort */
+  const entry = { ts: new Date().toISOString(), session_id: sid, kind, text: text.slice(0, cap), seq: prevSeq + 1 };
+  const line = JSON.stringify(entry) + "\n";
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      fs.appendFileSync(file, line);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const end = Date.now() + 20;
+      while (Date.now() < end) {
+        /* 20ms spin */
+      }
+    }
   }
-  fs.renameSync(tmp, file);
+  throw lastErr;
 }
 
 /** kind=assistant mirror entry from Stop stdin; always silent, never blocks. */
@@ -102,6 +167,9 @@ function recordMirrorIfEnabled(input, argv) {
     const raw = input.last_assistant_message ?? input.last_message ?? input.assistant_message;
     if (typeof raw !== "string" || !raw.trim()) return;
     const caps = mirrorMaxCharsPair(mirrorParseArg(argv, "--max-chars"), 2000, 4000);
+    const maxBytesRaw = Number(String(mirrorParseArg(argv, "--max-bytes") || "").trim());
+    const maxBytes =
+      Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? Math.floor(maxBytesRaw) : MIRROR_MAX_BYTES;
     const sid = String(input.session_id || "anon").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64);
     const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
     const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
@@ -115,7 +183,7 @@ function recordMirrorIfEnabled(input, argv) {
     } catch {
       /* fall through */
     }
-    mirrorRecord(rootDir, sid, "assistant", raw, caps.assistant);
+    mirrorRecord(rootDir, sid, "assistant", raw, caps.assistant, maxBytes);
   } catch {
     /* silence: mirror recording must never block the stop flow */
   }
@@ -237,7 +305,8 @@ function parseMs(iso) {
 function silenceMinutes(mission, oldestAt) {
   const baseline = parseMs(oldestAt) ?? parseMs(mission.updated_at);
   if (baseline == null) return null;
-  return Math.floor((Date.now() - baseline) / 60000);
+  // B7: clock jumps must not produce negative silences.
+  return Math.max(0, Math.floor((Date.now() - baseline) / 60000));
 }
 
 function main() {

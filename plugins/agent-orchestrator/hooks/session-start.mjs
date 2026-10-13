@@ -21,7 +21,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const MAX_OUTPUT_CHARS = 1500;
-const OPEN_STATUSES = ["dispatched", "running", "blocked", "question"];
+// v0.3.1 (C2): "resumed" joins the open set — a resumed mission whose worker
+// died used to be missing from the resume briefing.
+const OPEN_STATUSES = ["dispatched", "running", "blocked", "question", "resumed"];
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 const BRIEF_TOP_K = 3;
 const BRIEF_MAX_CHARS = 300;
@@ -115,7 +117,8 @@ function wakeFailureInfo(m) {
   if (!suspected) return { suspected: false, result_at: null, minutes: null };
   const resultAt = lastResultAt(m);
   const ms = resultAt == null ? NaN : Date.parse(resultAt);
-  const minutes = Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 60000) : null;
+  // B7: clock jumps must not produce negative ages.
+  const minutes = Number.isFinite(ms) ? Math.max(0, Math.floor((Date.now() - ms) / 60000)) : null;
   return { suspected: true, result_at: resultAt == null ? null : resultAt, minutes };
 }
 

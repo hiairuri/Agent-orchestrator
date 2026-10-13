@@ -21,6 +21,23 @@
  *   context/journal-<sessionId>.jsonl  (v0.3 context mirror, written by hooks)
  *   sentinel.cfg.json            (v0.3 wake-sentinel config bridge, read-only here)
  *   sentinel.lock                (v0.3 sentinel lock, owned by bg-sentinel.mjs)
+ *   .lock/owner.json             (v0.3.1 root lock: {holder,pid,heartbeatAt}; all
+ *                                 board read-modify-write sections run under it)
+ *
+ * v0.3.1 hotfix (red-team findings):
+ *   A1 mkdir-type root lock around every board/answers/lessons read-modify-write.
+ *   A2 loadBoard re-reads a "missing" board 3x before accepting empty; save uses a
+ *      rename-only retry loop (unlink only after >=3 failures, then rename + verify).
+ *   A3 answers written with flag:"wx"; on conflict the sequence number increments.
+ *   A4 lessons.jsonl merge writes run under the same root lock.
+ *   B7 negative elapsed (clock jumps) clamps to 0.
+ *   B9 mailbox(read) treats rename ENOENT as "already consumed".
+ *   C1 report(blocked/question) resets blocked.answered/answer and clears stale ack.
+ *   C3 answer: only blocked/question may flip status to dispatched; terminal states
+ *      answer back isError.
+ *   C4 gc archives stale unread events too; resume unread_total excludes closed.
+ *   C5 report to a closed mission stores the event but leaves the board untouched.
+ *   C6 closing with unread events / a pending question adds a warn to the response.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -28,7 +45,7 @@ import crypto from "node:crypto";
 import readline from "node:readline";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.3.0";
+const SERVER_VERSION = "0.3.1";
 const BOARD_VERSION = 2; // marker only; readers never validate this value
 const PROTOCOL_VERSION_FALLBACK = "2024-11-05";
 const PREFIX = "mcp__plugin_agent-orchestrator_orch__";
@@ -58,6 +75,28 @@ function log(...parts) {
 
 const nowIso = () => new Date().toISOString();
 const hex = (n) => crypto.randomBytes(n).toString("hex");
+
+/** Synchronous sleep (handlers are sync; Atomics.wait parks the thread). */
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      /* spin */
+    }
+  }
+}
+
+/** true when the process is alive (EPERM counts as alive: exists, owned by others). */
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return Boolean(err && err.code === "EPERM");
+  }
+}
 
 function truncateStr(value, max) {
   const s = String(value ?? "");
@@ -105,9 +144,14 @@ function displayPath(p) {
 }
 
 /**
- * Atomic write: temp file + rename. On Windows a rename over an existing or
- * momentarily locked target can fail, so fall back to unlink-then-rename so the
- * target always ends up holding exactly the last written bytes.
+ * Atomic write: temp file + rename.
+ *
+ * v0.3.1 (A2): on Windows a rename over an existing or momentarily locked target
+ * (a concurrent reader holding the file open) can fail. Failures are retried with
+ * rename-only attempts first, so the "target missing" window basically never opens.
+ * Only after >=3 failed renames do we unlink the target; the unlink is followed
+ * immediately by a rename and a second-existence check, so an aborted sequence can
+ * never silently leave no file behind.
  */
 function atomicWriteFileSync(target, data, base = root) {
   if (base) assertInside(base, target);
@@ -118,20 +162,179 @@ function atomicWriteFileSync(target, data, base = root) {
     `.${path.basename(target)}.${process.pid}.${hex(4)}.tmp`,
   );
   fs.writeFileSync(tmp, data);
-  try {
-    fs.renameSync(tmp, target);
-  } catch (err) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      if (fs.existsSync(target)) fs.unlinkSync(target);
       fs.renameSync(tmp, target);
-    } catch (retryErr) {
-      try {
-        fs.unlinkSync(tmp);
-      } catch {
-        /* best effort */
-      }
-      throw retryErr;
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 4) sleepMs(20 * (attempt + 1));
     }
+  }
+  try {
+    try {
+      fs.unlinkSync(target);
+    } catch {
+      /* target may already be gone */
+    }
+    fs.renameSync(tmp, target);
+    if (!fs.existsSync(target)) {
+      throw new Error(`atomic write lost target: ${target}`);
+    }
+  } catch (retryErr) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best effort */
+    }
+    throw retryErr ?? lastErr;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* root lock (v0.3.1 A1)                                               */
+/*                                                                     */
+/* Every cross-process board/answers/lessons read-modify-write runs    */
+/* inside withRootLock(). The lock is an mkdir: atomic on all OSes.    */
+/* Holder info ({holder,pid,heartbeatAt}) lives in .lock/owner.json.   */
+/* Normal holds are <2s; waits retry with 50-200ms backoff for ~2s and */
+/* then fail with "存储忙，请重试". A lock whose pid is dead or whose    */
+/* age exceeds 30s is treated as dead and taken over.                  */
+/* ------------------------------------------------------------------ */
+
+const ROOT_LOCK_STALE_MS = 30000;
+const ROOT_LOCK_TIMEOUT_MS = 2000;
+let rootLockDepth = 0;
+
+const rootLockDir = () => path.join(root, ".lock");
+
+function readLockOwner(dir) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(dir, "owner.json"), "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A lock is stale when its holder pid is dead or its age exceeds 30s. */
+function rootLockStale(dir) {
+  const owner = readLockOwner(dir);
+  if (owner && Number.isFinite(owner.pid) && pidAlive(owner.pid)) {
+    const hb = Date.parse(String(owner.heartbeatAt ?? ""));
+    let ageMs = Number.isFinite(hb) ? Date.now() - hb : NaN;
+    if (!Number.isFinite(ageMs)) {
+      try {
+        ageMs = Date.now() - fs.statSync(path.join(dir, "owner.json")).mtimeMs;
+      } catch {
+        ageMs = Number.POSITIVE_INFINITY;
+      }
+    }
+    return Math.max(0, ageMs) > ROOT_LOCK_STALE_MS; // B7: negative elapsed clamps to 0
+  }
+  if (owner) return true; // owner doc present but pid dead/invalid
+  // No owner doc yet (writer crashed between mkdir and write, or mid-create):
+  // treat as stale only when the directory itself is old.
+  try {
+    return Date.now() - fs.statSync(dir).mtimeMs > ROOT_LOCK_STALE_MS;
+  } catch {
+    return true; // dir vanished between mkdir and here: retry as free
+  }
+}
+
+function acquireRootLock() {
+  if (rootLockDepth > 0) {
+    rootLockDepth += 1; // same-process re-entry (sync handlers only)
+    return;
+  }
+  const dir = rootLockDir();
+  const deadline = Date.now() + ROOT_LOCK_TIMEOUT_MS;
+  let backoff = 50;
+  for (;;) {
+    try {
+      fs.mkdirSync(dir);
+      try {
+        fs.writeFileSync(
+          path.join(dir, "owner.json"),
+          JSON.stringify({ holder: `pid:${process.pid}`, pid: process.pid, heartbeatAt: nowIso() }) + "\n",
+          { flag: "wx" },
+        );
+      } catch {
+        /* owner doc raced; the mkdir is still ours */
+      }
+      rootLockDepth = 1;
+      return;
+    } catch (err) {
+      if (!err || err.code !== "EEXIST") throw err;
+      if (rootLockStale(dir)) {
+        // Take over via rename: only one contender can win the rename, so two
+        // simultaneous takers cannot both end up holding the fresh lock.
+        const trash = `${dir}.stale.${process.pid}.${hex(4)}`;
+        try {
+          fs.renameSync(dir, trash);
+        } catch {
+          continue; // someone else took it first; re-evaluate
+        }
+        try {
+          fs.mkdirSync(dir);
+          fs.writeFileSync(
+            path.join(dir, "owner.json"),
+            JSON.stringify({
+              holder: `pid:${process.pid}`,
+              pid: process.pid,
+              heartbeatAt: nowIso(),
+              took_over: true,
+            }) + "\n",
+          );
+        } catch {
+          /* mkdir race: loop and re-evaluate */
+        }
+        try {
+          fs.rmSync(trash, { recursive: true, force: true });
+        } catch {
+          /* best effort */
+        }
+        if (rootLockDepth === 0) {
+          // Only count the lock as ours when our mkdir actually won the dir.
+          const ours = readLockOwner(dir);
+          if (ours && ours.pid === process.pid) {
+            rootLockDepth = 1;
+            return;
+          }
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new ToolError("存储忙，请重试（root lock 等待超时）");
+      }
+      sleepMs(backoff + Math.floor(Math.random() * 50));
+      backoff = Math.min(200, backoff + 50);
+    }
+  }
+}
+
+function releaseRootLock() {
+  if (rootLockDepth > 1) {
+    rootLockDepth -= 1;
+    return;
+  }
+  if (rootLockDepth <= 0) return;
+  rootLockDepth = 0;
+  try {
+    fs.rmSync(rootLockDir(), { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Run fn() while holding the root lock (re-entrant within this process). */
+function withRootLock(fn) {
+  acquireRootLock();
+  try {
+    return fn();
+  } finally {
+    releaseRootLock();
   }
 }
 
@@ -249,7 +452,8 @@ function wakeFailureInfo(m) {
   if (!suspected) return { suspected: false, result_at: null, minutes: null };
   const resultAt = lastResultAt(m);
   const ms = resultAt == null ? NaN : Date.parse(resultAt);
-  const minutes = Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 60000) : null;
+  // B7: clock jumps must not produce negative ages.
+  const minutes = Number.isFinite(ms) ? Math.max(0, Math.floor((Date.now() - ms) / 60000)) : null;
   return { suspected: true, result_at: resultAt == null ? null : resultAt, minutes };
 }
 
@@ -276,9 +480,23 @@ function withComputed(m) {
 
 const boardFile = () => path.join(root, "board.json");
 
+/**
+ * v0.3.1 (A2): a "missing" board.json is re-checked 3 more times (50ms apart)
+ * before an empty board is accepted. During the old unlink-then-rename fallback
+ * there was a window where the file did not exist; a reader that mistook that
+ * window for "no board yet" would later save an empty board over the real one.
+ */
 function loadBoard() {
   const file = boardFile();
-  if (!fs.existsSync(file)) return { version: 1, updated_at: nowIso(), missions: [] };
+  let missing = true;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (fs.existsSync(file)) {
+      missing = false;
+      break;
+    }
+    if (attempt < 3) sleepMs(50);
+  }
+  if (missing) return { version: 1, updated_at: nowIso(), missions: [] };
   let raw;
   try {
     raw = fs.readFileSync(file, "utf8");
@@ -378,6 +596,9 @@ function upsertMission(patch, opts = {}) {
   if (merged.status === "closed" && !missionAck(merged)) {
     merged.ack = { at: merged.updated_at, by: "close", note: "auto: closed" };
   }
+  // v0.3.1 (C1): a fresh blocked/question report must clear a stale ack, or the
+  // old ack would whitewash the new question out of every wake-failure check.
+  if (opts.clearAck) merged.ack = null;
   // Explicit ack request from an internal caller (e.g. mailbox answer).
   if (opts.ack && !missionAck(merged)) {
     merged.ack = { at: merged.updated_at, by: opts.ack.by, note: opts.ack.note ?? null };
@@ -578,6 +799,12 @@ function topLessonsBrief() {
 /* ------------------------------------------------------------------ */
 
 function toolLessons(args) {
+  // v0.3.1 (A4): lessons.jsonl is read-merged-written; the whole tool runs under
+  // the root lock so concurrent merges can no longer lose updates.
+  return withRootLock(() => toolLessonsInner(args));
+}
+
+function toolLessonsInner(args) {
   const list = loadLessons();
   if (housekeepLessons(list)) saveLessons(list);
 
@@ -892,16 +1119,6 @@ function listUnreadFiles(missionId) {
     .map((f) => path.join(dir, f));
 }
 
-function listAllUnread() {
-  const out = [];
-  for (const missionId of listSpoolMissions()) {
-    for (const file of listUnreadFiles(missionId)) {
-      out.push({ missionId, file, payload: readEventFile(file) });
-    }
-  }
-  return out;
-}
-
 function readEventFile(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -925,6 +1142,13 @@ function eventAgeMs(payload) {
  * Consume one unread event via rename(unread -> read). If the destination name
  * is taken (Windows rename-onto-existing), retry with a "-1" suffix, then with
  * a random hex suffix.
+ *
+ * v0.3.1: a rename can report success while the source name is still visible
+ * (cross-process metadata lag with concurrently open handles) — the move is
+ * verified by re-checking the source afterwards; while it persists the same
+ * destination is retried, and an event that cannot be moved verifiably is
+ * reported via err.unresolved so the caller leaves it for the next read
+ * instead of double-delivering it.
  */
 function consumeEventFile(srcFile, missionId) {
   const dstDir = readDirOf(missionId);
@@ -938,11 +1162,24 @@ function consumeEventFile(srcFile, missionId) {
   ];
   let lastErr = null;
   for (const dst of candidates) {
-    try {
-      fs.renameSync(srcFile, dst);
-      return dst;
-    } catch (err) {
+    let moved = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        fs.renameSync(srcFile, dst);
+        moved = true;
+        if (!fs.existsSync(srcFile)) return dst; // verifiably moved
+      } catch (err) {
+        lastErr = err;
+        moved = false;
+        break; // destination likely taken → next candidate
+      }
+    }
+    if (moved) {
+      // "Successful" renames yet the source is still visible: do not claim it.
+      const err = new Error(`consume unresolved (src still visible): ${srcFile}`);
+      err.unresolved = true;
       lastErr = err;
+      continue;
     }
   }
   throw lastErr;
@@ -974,22 +1211,41 @@ function toolBoard(args) {
     ) {
       throw new ToolError("mission.model must be a string or null");
     }
-    const mission = upsertMission(patch);
-    return { ok: true, mission: withComputed(mission) };
+    const mission = withRootLock(() => upsertMission(patch)); // v0.3.1 A1
+    const out = { ok: true, mission: withComputed(mission) };
+    // v0.3.1 (C6): closing over an unread mailbox / pending question does not
+    // block, but the coordinator must see it.
+    if (mission.status === "closed") {
+      const unreadLeft = countUnread(mission.id);
+      const pendingQ = Boolean(
+        mission.blocked && mission.blocked.answered === false && mission.blocked.question,
+      );
+      if (unreadLeft > 0 || pendingQ) {
+        const parts = [];
+        if (unreadLeft > 0) parts.push(`仍有 ${unreadLeft} 条未读事件`);
+        if (pendingQ) parts.push("存在未答问题");
+        out.warn = `关闭时${parts.join("且")}——已按关闭处理（不阻止）；如需处置先 mailbox(read, mission_id="${mission.id}")`;
+      }
+    }
+    return out;
   }
   if (action === "ack") {
     if (args.mission_id == null) throw new ToolError('board ack requires "mission_id"');
     const id = safeSegment(args.mission_id, "mission_id");
-    const board = loadBoard();
-    const mission = findMission(board, id);
-    if (!mission) throw new ToolError(`mission not found: ${id}`);
     const note = args.note ? String(args.note).slice(0, 200) : null;
     const at = nowIso();
-    mission.ack = { at, by: "coordinator", note };
-    mission.timeline = Array.isArray(mission.timeline) ? mission.timeline : [];
-    mission.timeline.push({ at, event: "ack", summary: note || "ack" });
-    mission.updated_at = at;
-    saveBoard(board);
+    const mission = withRootLock(() => {
+      // v0.3.1 A1: the whole load→mutate→save section holds the root lock.
+      const board = loadBoard();
+      const m = findMission(board, id);
+      if (!m) throw new ToolError(`mission not found: ${id}`);
+      m.ack = { at, by: "coordinator", note };
+      m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+      m.timeline.push({ at, event: "ack", summary: note || "ack" });
+      m.updated_at = at;
+      saveBoard(board);
+      return m;
+    });
     return withComputed(mission);
   }
   if (action === "get") {
@@ -1034,56 +1290,87 @@ function toolReport(args) {
     throw new ToolError(`report kind=${kind} requires "question"`);
   }
 
-  const board = loadBoard();
-  const mission = findMission(board, missionId);
-  if (!mission) throw new ToolError(`mission not found: ${missionId}`);
-  const token = args.token == null ? null : String(args.token);
-  const expectedToken =
-    mission.dispatch && mission.dispatch.token ? String(mission.dispatch.token) : null;
-  if (expectedToken && token && token !== expectedToken) {
-    throw new ToolError(
-      `report token mismatch for mission ${missionId}: refusing to record ` +
-        `(check the [token] line of your dispatch prompt)`,
+  // v0.3.1 (A1): spool write + board update + lessons append are one critical
+  // section under the root lock.
+  const outcome = withRootLock(() => {
+    const board = loadBoard();
+    const mission = findMission(board, missionId);
+    if (!mission) throw new ToolError(`mission not found: ${missionId}`);
+    const token = args.token == null ? null : String(args.token);
+    const expectedToken =
+      mission.dispatch && mission.dispatch.token ? String(mission.dispatch.token) : null;
+    if (expectedToken && token && token !== expectedToken) {
+      throw new ToolError(
+        `report token mismatch for mission ${missionId}: refusing to record ` +
+          `(check the [token] line of your dispatch prompt)`,
+      );
+    }
+
+    const at = nowIso();
+    const eventId = String(Date.now()).padStart(15, "0") + "-" + hex(4);
+    const event = {
+      v: 1,
+      id: eventId,
+      at,
+      mission_id: missionId,
+      worker,
+      agent_id: (mission.dispatch && mission.dispatch.agent_id) || null,
+      token,
+      kind,
+      summary,
+      details: args.details == null ? "" : String(args.details),
+      artifacts: Array.isArray(args.artifacts) ? args.artifacts.map(String) : [],
+      question,
+      urgent: Boolean(args.urgent),
+    };
+    const spoolPath = path.join(unreadDirOf(missionId), `${eventId}.json`);
+    atomicWriteFileSync(spoolPath, JSON.stringify(event, null, 2) + "\n");
+
+    // v0.3.1 (C5): a closed mission rejects board-changing reports. The event
+    // stays in the mailbox (already written); the board is left untouched.
+    if (mission.status === "closed") {
+      return {
+        closed: true,
+        eventId,
+        spoolPath,
+        status: mission.status,
+        note: "mission 已 closed：事件已入邮箱存档，任务板未改动（closed 拒收改板类 report）",
+        lessonsRecorded: 0,
+        lessonsNote: "mission 已 closed，随附 lessons 未记录",
+        expectedToken,
+        token,
+      };
+    }
+
+    const patch = { id: missionId };
+    if (kind === "done") patch.status = "done";
+    if (kind === "blocked" || kind === "question") {
+      patch.status = kind;
+      // v0.3.1 (C1): reset the whole blocked sub-object — a stale answered=true
+      // must not whitewash a fresh question.
+      patch.blocked = { question, asked_at: at, answered: false, answer: null, answered_at: null };
+    }
+    patch.timeline = [
+      ...(Array.isArray(mission.timeline) ? mission.timeline : []),
+      { at, event: `report:${kind}`, summary },
+    ];
+    const updated = upsertMission(
+      patch,
+      kind === "blocked" || kind === "question" ? { clearAck: true } : {},
     );
-  }
 
-  const at = nowIso();
-  const eventId = String(Date.now()).padStart(15, "0") + "-" + hex(4);
-  const event = {
-    v: 1,
-    id: eventId,
-    at,
-    mission_id: missionId,
-    worker,
-    agent_id: (mission.dispatch && mission.dispatch.agent_id) || null,
-    token,
-    kind,
-    summary,
-    details: args.details == null ? "" : String(args.details),
-    artifacts: Array.isArray(args.artifacts) ? args.artifacts.map(String) : [],
-    question,
-    urgent: Boolean(args.urgent),
-  };
-  const spoolPath = path.join(unreadDirOf(missionId), `${eventId}.json`);
-  atomicWriteFileSync(spoolPath, JSON.stringify(event, null, 2) + "\n");
+    // v0.3.1 (C5): a done report straight out of "drafted" is allowed but odd
+    // enough to flag.
+    const draftedWarn =
+      mission.status === "drafted" && kind === "done"
+        ? "drafted 状态直接收到 done（此前未见 dispatch 记录），请主控核对派发链路"
+        : null;
 
-  const patch = { id: missionId };
-  if (kind === "done") patch.status = "done";
-  if (kind === "blocked" || kind === "question") {
-    patch.status = kind;
-    patch.blocked = { question, asked_at: at };
-  }
-  patch.timeline = [
-    ...(Array.isArray(mission.timeline) ? mission.timeline : []),
-    { at, event: `report:${kind}`, summary },
-  ];
-  const updated = upsertMission(patch);
-
-  // lessons candidates: kind=done only; cap 3; entries missing trigger/fix skipped.
-  let lessonsRecorded = 0;
-  let lessonsNote = null;
-  if (kind === "done" && Array.isArray(args.lessons) && args.lessons.length) {
-    if (args.lessons.length > 3) lessonsNote = "lessons 超过 3 条，仅记录前 3 条";
+    // lessons candidates: kind=done only; cap 3; entries missing trigger/fix skipped.
+    let lessonsRecorded = 0;
+    let lessonsNote = null;
+    if (kind === "done" && Array.isArray(args.lessons) && args.lessons.length) {
+      if (args.lessons.length > 3) lessonsNote = "lessons 超过 3 条，仅记录前 3 条";
       const list = loadLessons();
       for (const raw of args.lessons.slice(0, 3)) {
         if (!raw || typeof raw !== "object") continue;
@@ -1114,21 +1401,36 @@ function toolReport(args) {
         });
         lessonsRecorded += 1;
       }
-    if (lessonsRecorded) saveLessons(list);
-  }
+      if (lessonsRecorded) saveLessons(list); // v0.3.1 (A4): under the root lock
+    }
+
+    return {
+      closed: false,
+      eventId,
+      spoolPath,
+      status: updated.status,
+      draftedWarn,
+      lessonsRecorded,
+      lessonsNote,
+      expectedToken,
+      token,
+    };
+  });
 
   return {
     ok: true,
-    event_id: eventId,
-    spool_path: displayPath(spoolPath),
-    status: updated.status,
+    event_id: outcome.eventId,
+    spool_path: displayPath(outcome.spoolPath),
+    status: outcome.status,
     hint:
       "主控会轮询邮箱消费本事件；只有紧急四情形（验收标准要变/继续无意义/需不可逆操作/阻塞超10分钟）" +
       "且 RespondToCoordinator 工具可用时才直达主控。",
-    lessons_recorded: lessonsRecorded,
-    ...(lessonsNote ? { lessons_note: lessonsNote } : {}),
+    lessons_recorded: outcome.lessonsRecorded,
     ...(truncatedNote ? { note: truncatedNote } : {}),
-    ...(expectedToken && !token
+    ...(outcome.closed && outcome.note && !truncatedNote ? { note: outcome.note } : {}),
+    ...(outcome.lessonsNote ? { lessons_note: outcome.lessonsNote } : {}),
+    ...(outcome.draftedWarn ? { warn: outcome.draftedWarn } : {}),
+    ...(outcome.expectedToken && !outcome.token
       ? { warn: "未携带 token；下次上报请带上派发 prompt 的 [token] 行" }
       : {}),
   };
@@ -1187,156 +1489,242 @@ function toolMailbox(args) {
   }
 
   if (action === "read") {
-    const missionIds = missionFilter ? [missionFilter] : listSpoolMissions();
-    const payloads = [];
-    outer: for (const mid of missionIds) {
-      for (const file of listUnreadFiles(mid)) {
-        const payload = readEventFile(file);
-        if (!payload) continue;
-        if (kindFilter && payload.kind !== kindFilter) continue;
-        consumeEventFile(file, mid);
-        payloads.push(payload);
-        if (payloads.length >= limit) break outer;
+    // v0.3.1: consuming mutates the spool — the whole read runs under the root
+    // lock so concurrent readers can neither double-deliver an event nor trip
+    // over each other's renames.
+    return withRootLock(() => {
+      const missionIds = missionFilter ? [missionFilter] : listSpoolMissions();
+      const payloads = [];
+      outer: for (const mid of missionIds) {
+        for (const file of listUnreadFiles(mid)) {
+          const payload = readEventFile(file);
+          if (!payload) continue;
+          if (kindFilter && payload.kind !== kindFilter) continue;
+          try {
+            consumeEventFile(file, mid);
+          } catch (err) {
+            // v0.3.1 (B9): ENOENT on rename means a concurrent reader consumed
+            // the event first — treat as consumed and move on instead of
+            // erroring. "Unresolved" moves stay for the next read.
+            if (err && (err.code === "ENOENT" || err.unresolved)) continue;
+            throw err;
+          }
+          payloads.push(payload);
+          if (payloads.length >= limit) break outer;
+        }
       }
-    }
-    payloads.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
-    return { consumed: payloads.length, events: payloads };
+      payloads.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+      return { consumed: payloads.length, events: payloads };
+    });
   }
 
   if (action === "answer") {
     if (!missionFilter) throw new ToolError('mailbox answer requires "mission_id"');
     const answer = String(args.answer ?? "");
     if (!answer.trim()) throw new ToolError('mailbox answer requires "answer"');
-    const mission = findMission(loadBoard(), missionFilter);
-    if (!mission) throw new ToolError(`mission not found: ${missionFilter}`);
-    const answersDir = path.join(missionSpoolDir(missionFilter), "answers");
-    fs.mkdirSync(answersDir, { recursive: true });
-    let seq = 1;
-    for (const f of fs.readdirSync(answersDir)) {
-      const m = /^(\d+)-answer\.json$/.exec(f);
-      if (m) seq = Math.max(seq, Number(m[1]) + 1);
-    }
-    const at = nowIso();
-    const answerFile = path.join(answersDir, `${String(seq).padStart(4, "0")}-answer.json`);
-    const answerDoc = {
-      v: 1,
-      at,
-      mission_id: missionFilter,
-      agent_id: (mission.dispatch && mission.dispatch.agent_id) || null,
-      question: (mission.blocked && mission.blocked.question) || null,
-      answer,
-    };
-    atomicWriteFileSync(answerFile, JSON.stringify(answerDoc, null, 2) + "\n");
-    upsertMission(
-      {
-        id: missionFilter,
-        status: "dispatched",
-        blocked: { answer, answered: true, answered_at: at },
-        timeline: [
-          ...(Array.isArray(mission.timeline) ? mission.timeline : []),
-          { at, event: "answer", summary: truncateStr(answer, 200) },
-        ],
-      },
-      { ack: { by: "answer", note: "auto: answered" } },
-    );
-    return {
-      ok: true,
-      answer_file: displayPath(answerFile),
-      ack: { at, by: "answer", note: "auto: answered" },
-      recommended_call: {
-        tool: "SendMessage",
-        to: (mission.dispatch && mission.dispatch.agent_id) || null,
-        summary: truncateStr(answer, 200),
-        message:
-          answer +
-          "\n\n请按以上答复继续执行任务包中的 TASK/RULES；完成后继续用 " +
-          REPORT +
-          " 汇报（kind=milestone/done；done 必带 artifacts 路径）。" +
-          "若该答复引出新阻塞，再次 report(kind=blocked, question=…)。",
-      },
-      note:
-        "运行中=steer；已终态=后台恢复续聊；跨会话/无 agentId=用 context_pack 重建后重新派发",
-    };
+    // v0.3.1 (A1/A3): answer-file sequence allocation + wx write + board update
+    // form one critical section under the root lock.
+    return withRootLock(() => {
+      const mission = findMission(loadBoard(), missionFilter);
+      if (!mission) throw new ToolError(`mission not found: ${missionFilter}`);
+      // v0.3.1 (C3): only blocked/question may flip back to dispatched; a
+      // terminal result must never be washed back into an in-flight state.
+      if (mission.status === "done" || mission.status === "failed" || mission.status === "closed") {
+        throw new ToolError(
+          `mission ${missionFilter} 已是终态（${mission.status}）：answer 拒绝执行（终态结果不可洗成在飞）。` +
+            `请改用 board(action="ack", mission_id="${missionFilter}") 暂缓签收，或保持终态直接处置`,
+        );
+      }
+      const at = nowIso();
+      const answersDir = path.join(missionSpoolDir(missionFilter), "answers");
+      fs.mkdirSync(answersDir, { recursive: true });
+      let seq = 1;
+      for (const f of fs.readdirSync(answersDir)) {
+        const m = /^(\d+)-answer\.json$/.exec(f);
+        if (m) seq = Math.max(seq, Number(m[1]) + 1);
+      }
+      const answerDoc = {
+        v: 1,
+        at,
+        mission_id: missionFilter,
+        agent_id: (mission.dispatch && mission.dispatch.agent_id) || null,
+        question: (mission.blocked && mission.blocked.question) || null,
+        answer,
+      };
+      // A3: exclusive create — a concurrent writer can never overwrite an
+      // existing answer; the sequence number just increments.
+      let answerFile = null;
+      for (;;) {
+        const candidate = path.join(answersDir, `${String(seq).padStart(4, "0")}-answer.json`);
+        try {
+          fs.writeFileSync(candidate, JSON.stringify(answerDoc, null, 2) + "\n", { flag: "wx" });
+          answerFile = candidate;
+          break;
+        } catch (err) {
+          if (err && err.code === "EEXIST" && seq < 100000) {
+            seq += 1;
+            continue;
+          }
+          throw err;
+        }
+      }
+      const wasBlocked = mission.status === "blocked" || mission.status === "question";
+      const updated = upsertMission(
+        {
+          id: missionFilter,
+          ...(wasBlocked ? { status: "dispatched" } : {}), // C3: only blocked/question flip status
+          blocked: { answer, answered: true, answered_at: at },
+          timeline: [
+            ...(Array.isArray(mission.timeline) ? mission.timeline : []),
+            { at, event: "answer", summary: truncateStr(answer, 200) },
+          ],
+        },
+        { ack: { by: "answer", note: "auto: answered" } },
+      );
+      return {
+        ok: true,
+        answer_file: displayPath(answerFile),
+        answer_seq: seq,
+        status: updated.status,
+        ack: { at, by: "answer", note: "auto: answered" },
+        recommended_call: {
+          tool: "SendMessage",
+          to: (mission.dispatch && mission.dispatch.agent_id) || null,
+          summary: truncateStr(answer, 200),
+          message:
+            answer +
+            "\n\n请按以上答复继续执行任务包中的 TASK/RULES；完成后继续用 " +
+            REPORT +
+            " 汇报（kind=milestone/done；done 必带 artifacts 路径）。" +
+            "若该答复引出新阻塞，再次 report(kind=blocked, question=…)。",
+        },
+        note:
+          "运行中=steer；已终态=后台恢复续聊；跨会话/无 agentId=用 context_pack 重建后重新派发",
+      };
+    });
   }
 
   if (action === "gc") {
-    const keepDays = args.keep_days == null ? 14 : Number(args.keep_days);
-    const cutoff = Date.now() - keepDays * 86400000;
-    let removed = 0;
-    for (const mid of listSpoolMissions()) {
-      const rdir = readDirOf(mid);
-      let files = [];
-      try {
-        files = fs.readdirSync(rdir);
-      } catch {
-        continue;
-      }
-      for (const f of files) {
-        const full = path.join(rdir, f);
+    return withRootLock(() => {
+      const keepDays = args.keep_days == null ? 14 : Number(args.keep_days);
+      const cutoff = Date.now() - keepDays * 86400000;
+      let removed = 0;
+      let archivedUnread = 0;
+      for (const mid of listSpoolMissions()) {
+        // v0.3.1 (C4): stale unread events are archived (moved to read/). The
+        // read/ sweep runs FIRST with the same cutoff, so just-archived events
+        // survive this pass and only age out on a later gc.
+        const rdir = readDirOf(mid);
+        let files = [];
         try {
-          if (fs.statSync(full).mtimeMs < cutoff) {
-            fs.unlinkSync(full);
-            removed += 1;
+          files = fs.readdirSync(rdir);
+        } catch {
+          files = [];
+        }
+        for (const f of files) {
+          const full = path.join(rdir, f);
+          try {
+            if (fs.statSync(full).mtimeMs < cutoff) {
+              fs.unlinkSync(full);
+              removed += 1;
+            }
+          } catch {
+            /* best effort */
+          }
+        }
+        const udir = unreadDirOf(mid);
+        let ufiles = [];
+        try {
+          ufiles = fs.readdirSync(udir).filter((f) => f.endsWith(".json"));
+        } catch {
+          /* no unread dir */
+        }
+        for (const f of ufiles) {
+          const full = path.join(udir, f);
+          try {
+            if (fs.statSync(full).mtimeMs < cutoff) {
+              consumeEventFile(full, mid);
+              archivedUnread += 1;
+            }
+          } catch (err) {
+            if (err && err.code === "ENOENT") continue; // consumed concurrently
+            /* best effort */
+          }
+        }
+      }
+      const board = loadBoard();
+      const closed = board.missions.filter((m) => m && m.status === "closed");
+      let archiveFile = null;
+      if (closed.length) {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        const ts =
+          `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+          `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+        const archiveDir = path.join(root, "archive");
+        let candidate = path.join(archiveDir, `board-${ts}.json`);
+        if (fs.existsSync(candidate)) candidate = path.join(archiveDir, `board-${ts}-${hex(2)}.json`);
+        // Archive first; only then remove from the live board.
+        atomicWriteFileSync(
+          candidate,
+          JSON.stringify({ archived_at: nowIso(), missions: closed }, null, 2) + "\n",
+        );
+        board.missions = board.missions.filter((m) => !(m && m.status === "closed"));
+        saveBoard(board);
+        archiveFile = candidate;
+      }
+      // v0.3 gc riders: stale lesson candidates -> retired; stale journal files -> deleted.
+      let lessonsRetired = 0;
+      const lessons = loadLessons();
+      for (const l of lessons) {
+        if (!l || typeof l !== "object" || l.status !== "candidate") continue;
+        const ts = Date.parse(String(l.updated_at || ""));
+        if (Number.isFinite(ts) && ts < cutoff) {
+          l.status = "retired";
+          l.note = "auto: gc";
+          l.updated_at = nowIso();
+          lessonsRetired += 1;
+        }
+      }
+      if (lessonsRetired) saveLessons(lessons);
+      let removedJournal = 0;
+      for (const { file } of listJournalFiles()) {
+        try {
+          if (fs.statSync(file).mtimeMs < cutoff) {
+            fs.unlinkSync(file);
+            removedJournal += 1;
           }
         } catch {
           /* best effort */
         }
       }
-    }
-    const board = loadBoard();
-    const closed = board.missions.filter((m) => m && m.status === "closed");
-    let archiveFile = null;
-    if (closed.length) {
-      const d = new Date();
-      const p = (n) => String(n).padStart(2, "0");
-      const ts =
-        `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
-        `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-      const archiveDir = path.join(root, "archive");
-      let candidate = path.join(archiveDir, `board-${ts}.json`);
-      if (fs.existsSync(candidate)) candidate = path.join(archiveDir, `board-${ts}-${hex(2)}.json`);
-      // Archive first; only then remove from the live board.
-      atomicWriteFileSync(
-        candidate,
-        JSON.stringify({ archived_at: nowIso(), missions: closed }, null, 2) + "\n",
-      );
-      board.missions = board.missions.filter((m) => !(m && m.status === "closed"));
-      saveBoard(board);
-      archiveFile = candidate;
-    }
-    // v0.3 gc riders: stale lesson candidates -> retired; stale journal files -> deleted.
-    let lessonsRetired = 0;
-    const lessons = loadLessons();
-    for (const l of lessons) {
-      if (!l || typeof l !== "object" || l.status !== "candidate") continue;
-      const ts = Date.parse(String(l.updated_at || ""));
-      if (Number.isFinite(ts) && ts < cutoff) {
-        l.status = "retired";
-        l.note = "auto: gc";
-        l.updated_at = nowIso();
-        lessonsRetired += 1;
-      }
-    }
-    if (lessonsRetired) saveLessons(lessons);
-    let removedJournal = 0;
-    for (const { file } of listJournalFiles()) {
+      // v0.3.1 (A5 riders): rotated .old journals age out with the same cutoff.
       try {
-        if (fs.statSync(file).mtimeMs < cutoff) {
-          fs.unlinkSync(file);
-          removedJournal += 1;
+        for (const name of fs.readdirSync(contextDir())) {
+          if (!/^journal-.+\.jsonl\.old$/.test(name)) continue;
+          const full = path.join(contextDir(), name);
+          try {
+            if (fs.statSync(full).mtimeMs < cutoff) {
+              fs.unlinkSync(full);
+              removedJournal += 1;
+            }
+          } catch {
+            /* best effort */
+          }
         }
       } catch {
-        /* best effort */
+        /* no context dir */
       }
-    }
-    return {
-      ok: true,
-      removed_read_events: removed,
-      archived_missions: closed.length,
-      archive_file: archiveFile ? displayPath(archiveFile) : null,
-      lessons_retired: lessonsRetired,
-      removed_journal_files: removedJournal,
-    };
+      return {
+        ok: true,
+        removed_read_events: removed,
+        archived_unread_events: archivedUnread,
+        archived_missions: closed.length,
+        archive_file: archiveFile ? displayPath(archiveFile) : null,
+        lessons_retired: lessonsRetired,
+        removed_journal_files: removedJournal,
+      };
+    });
   }
 
   throw new ToolError(`unknown mailbox action: ${JSON.stringify(action)} (use peek|read|answer|gc)`);
@@ -1619,6 +2007,11 @@ function buildPackMarkdown(opts) {
 }
 
 function toolContextPack(args) {
+  // v0.3.1 (A1): pack writes + the board upsert hold the root lock.
+  return withRootLock(() => toolContextPackInner(args));
+}
+
+function toolContextPackInner(args) {
   const missionId = safeSegment(args.mission_id, "mission_id");
   const title = String(args.title ?? "").trim();
   const task = String(args.task ?? "").trim();
@@ -1886,7 +2279,9 @@ function toolResume(args) {
     generated_at: nowIso(),
     session_id: sessionId || null,
     missions: missionsOut,
-    unread_total: listAllUnread().length,
+    // v0.3.1 (C4): same counting basis as the Stop hook — only open (non-closed)
+    // missions count, so a closed mission's leftover events no longer inflate.
+    unread_total: openMissions.reduce((n, m) => n + countUnread(m.id), 0),
     actions_top3: actions.slice(0, 3),
     prev_sessions: prevSessions,
     context_hint: contextHint,

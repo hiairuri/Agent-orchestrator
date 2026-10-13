@@ -11,12 +11,19 @@
  * nudge (once, when no sentinel is on duty and the 10-minute cooldown has
  * elapsed); foreground remind/ask append the same nudge when no sentinel runs.
  * --policy off stays fully silent; --exempt path unchanged.
+ * v0.3.1: on-duty detection requires a fresh lock heartbeat (B3, anti PID-reuse);
+ * the foreground nudge is gated by --sentinel-hint too (B8).
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MIN_PROMPT_CHARS = 600;
+// v0.3.1 (B3): a live pid alone no longer proves the sentinel is on duty —
+// PID reuse can fake liveness. Same heartbeat rule as bg-sentinel's takeover:
+// alive = holder pid alive AND lock heartbeat (heartbeatAt, fallback mtime)
+// no older than 90s.
+const HEARTBEAT_STALE_MS = 90000;
 
 const SENTINEL_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "bg-sentinel.mjs");
 const HINT_COOLDOWN_MS = 10 * 60 * 1000;
@@ -76,8 +83,19 @@ function pidAlive(pid) {
 
 function sentinelAlive(rootDir) {
   try {
-    const lock = JSON.parse(fs.readFileSync(path.join(rootDir, "sentinel.lock"), "utf8"));
-    return Boolean(lock && Number.isFinite(lock.pid) && pidAlive(lock.pid));
+    const lockPath = path.join(rootDir, "sentinel.lock");
+    const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    if (!lock || !Number.isFinite(lock.pid) || !pidAlive(lock.pid)) return false;
+    const hb = Date.parse(String(lock.heartbeatAt ?? ""));
+    let age = Number.isFinite(hb) ? Date.now() - hb : NaN; // B7 clamp below
+    if (!Number.isFinite(age)) {
+      try {
+        age = Date.now() - fs.statSync(lockPath).mtimeMs;
+      } catch {
+        return false;
+      }
+    }
+    return Math.max(0, age) <= HEARTBEAT_STALE_MS;
   } catch {
     return false;
   }
@@ -164,7 +182,11 @@ function main() {
   const why = longTaskWhy(ti);
   if (!why) return;
 
-  const sentinelSuffix = sentinelOnDuty ? "" : " " + sentinelHintText();
+  // v0.3.1 (B8): the sentinel nudge in the remind/ask paths is governed by the
+  // same --sentinel-hint switch as the background path — wake_sentinel=off must
+  // strip the nudge from every path.
+  const sentinelSuffix =
+    hintEnabled && !sentinelOnDuty ? " " + sentinelHintText() : "";
 
   if (policy === "ask") {
     process.stdout.write(

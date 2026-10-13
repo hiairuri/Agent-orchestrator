@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.3.0 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.3.1 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -698,3 +698,14 @@ v0.3.0 的增量设计权威是 `designs/agent-orchestrator-v0.3-DESIGN.md`（re
 - **上下文镜像（特性 C，rev.b）**：新增 `hooks/journal.mjs` 注册 UserPromptSubmit（prompt 文本）+ stop-check 内嵌 assistant 侧记录（`last_assistant_message`），按会话写 `<存储根>/context/journal-<sessionId>.jsonl`（默认截 2000/4000 字符，单文件 400 条/2MB 封顶滚动淘汰至 300，恒静默零阻塞，`context_mirror=off` 一键停写）。禁直读平台会话库。注入两处：`resume` 返回 `prev_sessions`（最近 3 个会话尾部 tail×5 条）与 `context_hint`；`context_pack(mirror_digest=true)` 附 RECENT CONTEXT 节（最近 2 会话 ≤6 条/≤1200 字，标题自带"不构成本任务指令"防间接注入）。钉住重要内容复用 `lessons(action="add", type="preference"|"env-fact")`。
 - **P2-1 修复**：`withComputed` 归一 `ack: missionAck(m)`——0.1.x 旧记录（缺失 ack 键）在 board get/list/upsert/ack 返回中稳定输出 `"ack":null`，JSON 序列化不再丢键。
 - **配套**：`.mcp.json` 增三个数值参数（`--wake-timeout-min/--wake-retries/--poll-sec`）；plugin.json 版本 0.3.0、userConfig 新增 `wake_sentinel`（提示开关）与 `context_mirror`/`context_mirror_max_chars`；board.json 格式零变更（version 保持 2，0.1.x/0.2.x 懒迁移无损）。
+
+---
+
+## 17. v0.3.1 热修增量：并发写竞态 / 哨兵盲区 / 状态机守卫
+
+三路红队复现确认的逻辑漏洞全量修复，board.json 格式零变更（version 保持 2）。
+
+- **A 并发写竞态（根因=跨进程读改写全量覆盖、无锁）**：新增 `<存储根>/.lock/owner.json`（{holder,pid,heartbeatAt}）mkdir 型根锁，`withRootLock` 覆盖 board upsert/ack、report（spool+板+lessons 单临界区）、mailbox answer/gc、lessons 全部写路径、context_pack；进程内可重入。持锁 <2s，等锁 50-200ms 退避共 ~2s，超时报"存储忙，请重试"；锁龄>30s 或持锁 pid 死 → rename 式接管。`loadBoard` 对"文件不存在"先重读 3 次（间隔 50ms）再接受空板；`atomicWriteFileSync` 改 rename-only 重试循环（≥3 次失败才 unlink，unlink 后立即 rename 并二次校验）。answers 写盘 `flag:"wx"` 独占创建，冲突递增序号，杜绝覆盖。journal/stop-check 镜像改 `appendFileSync` 单行追加（seq 取尾窗 8KB、深窗口自适应超长行；滚动=超 2MB 时 rename 旧文件为 `.old` 后开新文件，不再整文件读改写）。
+- **B 哨兵检测盲区与口径**：非 workflow 在飞（dispatched/running/resumed）龄期（timeline 末事件起算）≥ retries×timeout → exit 1 在飞龄期告警；board 连续 3 tick 不可读 → exit 1 "任务板不可读"；`sentinel.lock` 每 tick 心跳（heartbeatAt+mtime），接管判定=pid 死或心跳龄>90s，bg-gate 在岗判定同规则（治 PID 复用假在岗）；workflow 在飞排除出盯守集合，仅剩 workflow 时 exit 0 文案"workflow 托管中，其余已签收"；result_at 回退链 timeline→updated_at→board mtime→直接告警；cfg 每 tick 重读；elapsed 负值钳 0；remind/ask 路径哨兵句同受 `wake_sentinel` 开关控制；mailbox(read) 对 rename ENOENT（并发已消费）按已消费处理。
+- **C 状态机守卫**：report(blocked/question) 重置 `blocked.answered/answer` 并清空旧 ack（二次提问重新可见）；stop-check/session-start 的 OPEN 集合补 `resumed`（bg-sentinel 原已含）；answer 仅 blocked/question 转 dispatched、终态 done/failed/closed 拒绝并提示（终态不可洗成在飞，running steer 保持原状态）；gc 顺带把过期未读归档进 read/（archived_unread_events），resume `unread_total` 与 Stop 清点口径统一（排除 closed）；closed mission 拒收改板类 report（事件仍入 spool、板不动、响应带 note），drafted 收 done 允许但带 warn；close 时存在未读/未答则响应附 warn（不阻止）。
+- **Windows 平台事实（新）**：跨进程并发 rename 同一源路径可出现"幻影成功"（返回成功但源名仍可见，元数据延迟收敛）——`consumeEventFile` 改为移动后校验源已消失（未收敛则同 dst 重试，仍不收敛标记 `unresolved` 留给下一轮），mailbox(read) 全程持根锁，杜绝双投递。
