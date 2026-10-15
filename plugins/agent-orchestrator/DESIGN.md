@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.4.1 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.5.1 ｜ 日期：2026-10-15 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -730,3 +730,39 @@ v0.4.1 的增量设计权威是 `designs/agent-orchestrator-v0.4.1-DESIGN.md`（
 - **server 配套**：sentinel.cfg.json 发布 v2 全键 + signals 块（argv 增 `--sentinel-family`/`--sentinel-grace-min`）；`board(list)` 顶层 `sentinel_health`（instances/shots_24h/abandoned/echo_tail，纯只读）；resume 增补员/接手建议并刷新 `sentinel/coord-session.txt`；/orch 与 /orch-resume 各补一行；hooks.json 零变更。
 - **agent_harvest（工具 9→10）**：只读收割子代理 rollout 转录尾部（末条 model-io 记录内嵌全量对话），按 mission/agent/session 定位，tail/max_chars 截断；跨会话可用（TaskOutput 失效兜底）；子代理 MCP_DISALLOWED 增补。
 - **健壮性**：mergeMission schema 白名单（未知顶层键丢弃并在 upsert 响应 `ignored_keys` 列出）；root.txt 重设计（tmp 目录测试根不写全局指针、悬空指针自愈删除、全部读者悬空回退默认根）；v0.4.0 QA 三小修（sandbox_apply applied_at 幂等分支前置至门禁之前、report warn 键名区分（warn_drafted/warn_claim/warn_token + 兼容合并 warn）、悬挂依赖清理 timeline 措辞点名被删 id）。plugin.json 版本 0.4.1。
+
+---
+
+## 20. v0.4.2 增量：成本纪律 doctrine（纯文案零代码）
+
+v0.4.2 的增量设计权威是 `designs/agent-orchestrator-cost-rules-DESIGN.md` §7.1（工作区 designs/ 目录；逐字总装汇于 `designs/agent-orchestrator-v0.5-DESIGN.md` §7.1），本文其余章节描述基线与 v0.2–v0.4.1 增量（见 §15–§19）。纯文案发布：零代码、零 schema、零 board 格式变更（机制化登记 scope_paths/files_touched 与越界审计随 v0.5 落地，本版先发纪律）。增量要点：
+
+- **SKILL 第 20 章「成本纪律（cost-rules）」整章新增**：20.1 文件所有权分区（派发前盘点写集，≥3 文件拆分、≥8 必拆，枢纽文件归单一 mission 独占，在飞写集相交三选一处置）；20.2 分叉与缓存经济（血缘优先选型表：续聊 > workflow 重放 > 重新派发，变体分叉为对比不为省钱）；20.3 上下文预算（S≤20/M≤60/L≤120 步档位写进任务包，硬阈值约 120 步或上下文逼近 230K 强制收尾，对账点=每次 milestone report）；20.4 探针与读回纪律（DB 探针禁 `SELECT *`、单次输出 ≤50 行/≤10KB、≥1000 行文件禁一次全文读入、已读文件不重读）；20.5 验收断言链与回归分层（断言沉淀 `tests/assertions/` 带 ID 文件、harness 沉淀 `tests/harness/`、全量回归仅限发版前/骨架变更/信号链变更）。
+- **四处追加**：第 4 章决策表追加「done 且任务登记过写集（RULES 清单或 scope_paths）」审计行（置于沙箱派发行之后）；第 8 章末尾追加「缓存语义选型（先血缘后冷启）」段；第 12 章坑位清单追加「探针原文回显是隐形大头」「已读的文件别重读」两条；第 16 章快速参考追加「成本速查」行。
+- **frontmatter**：description 触发词列表末尾追加（m）成本纪律触发句。
+- **配套**：plugin.json 版本 0.4.2、workspace 的 plugins/marketplace.json 同步 0.4.2。
+
+---
+
+## 21. v0.5 增量：context manifest / inputs 牵引 / 一次性浓缩 / 守闸门呈现 / cost-rules 机制化
+
+v0.5.0 的增量设计权威是 `designs/agent-orchestrator-v0.5-DESIGN.md`（总装单一事实源，含 D1 清单数据面/D2 浓缩预算/D3 机制化三份分块与 DA4 裁决清单 §13.1；工作区 designs/ 目录），本文其余章节描述基线与 v0.2–v0.4.2 增量（见 §15–§20）。增量要点：
+
+- **S1 context manifest 协议**：report 新增可选 `manifest_entries`（≤12 条；条目七字段 id/layer/type/title/text/ref/source，type 封闭五值 assertion｜env_fact｜anchor｜conclusion｜directive）；done 收口七步管线（形状校验→帽执行→T2 自动补桩→sidecar 原子写 `<存储根>/packs/<mission_id>/manifest.json`→mission.manifest 指针整体替换→assertion 条目机械比对出 `manifest_note`/`manifest_warnings`）；软处置不 isError；截断标记 T0 `…[截断于N字节]`、T1 `…[截断于N字]`。
+- **S2 inputs 机械牵引**：context_pack 新增 `inputs`（≤4 个 mission id，层→节确定性路由：T0 逐字块→CONTEXT ≤24KB、T1 一行→SUMMARY ≤4KB、T2 指针→READ FIRST ≤20 条；保序降级永不静默丢；L1/L2/L3 回退链；组包瞬间快照不回灌；牵引文本过沙箱路径改写）、`scope_paths`（≤32 项超限报错；物化 OWNERSHIP 节，沙箱派发时整体取代 oob_allowlist）、`budget`（enum S/M/L，物化 BUDGET 节含 token 档静态预告行）；缺省与旧版同参包逐字节一致。
+- **S3 一次性浓缩**：agent_harvest 成功响应追加 `usage`/`file_bytes`/`messages_kind` 元数据（tail=0 即零回显纯探测）；token 档 WARN ≥120K / ACT ≥150K / HARD ≥180K / ABS 230K（主控对账采样、哨兵零参与）；浓缩=受控例外（每 mission ≤1 次、再达 ACT 禁二次浓缩、死亡仍归 agent_harvest），CR-09 v0.5 修订版落 SKILL 20.3；第 4 章决策表增 ACT 行（已有浓缩事件→只剩拆分/放弃）。
+- **S4 守闸门呈现**：withComputed 附 `t1_head`/`artifacts_n`/`output_files_n`/`has_question`；resume 对 done/failed 未签收行附 t1_head、blocked/question 行 `question_head` ≤160；mailbox read details 帽 2000 字（标记+提示句，spool 存证不动，peek 不变）；SKILL 新增 20.6 守闸门纪律矩阵小节（单一事实源，第 4/6 章只引用）。
+- **S5 cost-rules 机制化**：board upsert 白名单增 `scope_paths`/`strict_scope`/`scope_violations`/`manifest`（均整体替换、不入 ONE_LEVEL；manifest 只读剥离）；F3 冲突预检（默认档 `scope_warnings` 带"三选一"hint、strict 档拒绝登记）、board list 顶层 `scope_conflicts`（≤10 条）；report 可选 `files_touched`（≤50）越界审计（timeline `scope_violation` 事件 + mission.scope_violations 全量重算 + 响应 `warn_scope` 分键）；normalizePathList 提取统一三调用点（trim+`\`→`/`+空串过滤）。
+- **bg-gate 收尾（本版唯一 hooks/userConfig 改动）**：C4 提醒句（token 在册但 prompt 无 [channel] 行）；C7 解耦——独立 userConfig `dispatch_contract: remind|ask|off`（默认 remind），background_gate=off 不再连坐契约检查；strict=ask 仅高置信形状升级（deny 永不采用，fail-open 宪法不破）。
+- **tests/ 沉淀（CR-13/14 首次执行）**：`tests/assertions/v0.4.x.md`（84 条 bootstrap + A-v050 组）与 `tests/harness/` 八件（jsonrpc-client/temp-root/fixture-board/git-fixture/capture/accelerate/run-all 等）随本版落盘；回归入口 `node tests/run-all.mjs --layer all`。
+- **配套**：plugin.json 版本 0.5.0、workspace 的 plugins/marketplace.json 同步 0.5.0；BOARD_VERSION 保持 2、tools/list 恒 10、hooks.json 事件集不变。
+
+---
+
+## 22. v0.5.1 增量指针：哨兵全清零唤醒 / GP+persona 主派发形态 / 对抗性审查入库
+
+v0.5.1 为实战修订版（配套：plugin.json 0.5.1、workspace 的 plugins/marketplace.json 同步 0.5.1、server SERVER_VERSION 对齐 0.5.1），增量要点：
+
+- **哨兵全清零唤醒改造**：全清转 standby 待命零通知、新在飞自动复活、cap 单赢家轮换选举（每周期 ≤1 条）、告警路径零改动——细则权威 SKILL §14 与 tests/suites/sentinel-teardown.mjs。
+- **typed 派发快照缺陷应对**：宿主校验读冻结 MCP 快照，含 mcp 工具名的角色派发恒拒；插件侧正式化 GP+persona 主派发形态（SKILL §10）与角色正文双通道上报（report 主 / KIND=xxx 次），根因与评估权威 designs/dispatch-probe-20261014/{DESIGN.md,eval-role-tools.md,findings-S1..S3.md}。
+- **对抗性审查全链文档入库** designs/adv-review-20261014/（实锤 47/P0×5——修复工程未启动，非本版内容；QQagent 卡死调查 designs/qqagent-hang-20261014/ 亦未结）。

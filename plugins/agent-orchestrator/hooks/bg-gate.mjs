@@ -3,7 +3,9 @@
  * agent-orchestrator PreToolUse gate: nudge foreground Agent dispatches that
  * look like long tasks toward run_in_background=true.
  * stdin : {tool_name, tool_input, ...}; args: --policy remind|ask|off, --exempt csv,
- *         --sentinel-hint on|off (from ${user_config.wake_sentinel})
+ *         --sentinel-hint on|off (from ${user_config.wake_sentinel}),
+ *         --contract remind|ask|off (from ${user_config.dispatch_contract};
+ *         absent or unresolved template -> remind)
  * stdout: strict JSON hookSpecificOutput only when intervening; silence = allow.
  * Fail-open: any error exits 0 with no output. Never denies in v0.2–v0.4.1.
  *
@@ -167,8 +169,21 @@ function sentinelHintText() {
  *   - [token] absent but [channel] present → nudge to include the token.
  *   - [token] not registered on any non-closed mission → warn (reports rejected).
  *   - token registered but its mission id ≠ [channel] → mismatch warn.
+ *   - v0.5 (C4): token registered but no [channel] line → reminder naming the
+ *     owning mission (verbatim DESIGN §7.4), no longer a silent pass.
  * Board read-only; any error → "" (never block dispatch).
  */
+/**
+ * v0.5 (strict=ask, M-10): high-confidence real dispatch = the [channel] value
+ * matches the generated mission-id shape. Placeholder/template text (C10) can
+ * never match, so it never triggers an escalation.
+ */
+const MISSION_ID_SHAPE = /^m-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$/;
+function missionIdShaped(prompt) {
+  const ch = /^\s*\[channel\]\s*(\S+)/m.exec(typeof prompt === "string" ? prompt : "");
+  return Boolean(ch && MISSION_ID_SHAPE.test(String(ch[1])));
+}
+
 function contractWarn(prompt, rootDir) {
   try {
     const text = typeof prompt === "string" ? prompt : "";
@@ -202,6 +217,11 @@ function contractWarn(prompt, rootDir) {
     if (channel && String(hit.id) !== channel) {
       return `派发契约头不匹配：token=${token} 属于 mission ${hit.id}，而 [channel] 写的是 ${channel}——worker 的 report 会对不上频道，请修正后重发。`;
     }
+    // v0.5 (C4): token 在册但 prompt 无 [channel] 行——旧包重派或新建漏登记，
+    // 不再静默通过；追加一句提醒（DESIGN §7.4 逐字），区分旧 mission 与新 mission。
+    if (!channel) {
+      return `该 token 属 mission ${hit.id}——若这是新 mission 请先 context_pack 建 mission 记新 token`;
+    }
     return "";
   } catch {
     return "";
@@ -217,6 +237,21 @@ function longTaskWhy(ti) {
   return null;
 }
 
+/** 统一出口：契约校验失败的 ask 升级（仅此一处会产生 ask；deny 永不采用）。 */
+function emitContractAsk(contractMsg) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "ask",
+        permissionDecisionReason:
+          "bg-gate：派发契约校验未通过——" + contractMsg +
+          " 请核对 context_pack 返回的 [channel]/[token] 后确认或修正重发。",
+      },
+    }),
+  );
+}
+
 function main() {
   const input = readStdinJson();
   const toolName = String(input.tool_name || "");
@@ -224,19 +259,51 @@ function main() {
   const ti = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
   const prompt = typeof ti.prompt === "string" ? ti.prompt : "";
 
-  const policy = normalizePolicy(parseArg(process.argv.slice(2), "--policy"));
-  if (policy === "off") return; // 完全静默（含哨兵提示）
-
   const argv = process.argv.slice(2);
+  const policy = normalizePolicy(parseArg(argv, "--policy"));
+  // v0.5 (C7 解耦): --contract 来自新 userConfig 键 dispatch_contract
+  // （remind|ask|off，默认 remind），独立于 --policy（background_gate）——
+  // background_gate=off 不再连坐关闭契约检查；只有 dispatch_contract=off 才静默。
+  const contract = normalizePolicy(parseArg(argv, "--contract"));
   const hintEnabled = onOffHint(parseArg(argv, "--sentinel-hint")); // off 之外一律 on
   const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
   const rootDir = locateRoot(projectDir);
   const sentinelOnDuty = sentinelAlive(rootDir);
   // v0.4.1: contract registration check runs for every dispatch that carries a
-  // contract head, regardless of gate policy details (remind-only).
-  const contractMsg = contractWarn(prompt, rootDir);
+  // contract head. v0.5: gated by --contract (default remind), NOT by --policy.
+  const contractMsg = contract === "off" ? "" : contractWarn(prompt, rootDir);
+  // v0.5 (strict=ask): 仅高置信真派发升级——[channel] 值匹配 mission id 生成形状
+  // 且 token 校验失败；占位符文本天然不匹配不升级（C10）；deny 永不采用。
+  const contractAsk =
+    Boolean(contractMsg) && contract === "ask" && missionIdShaped(prompt);
+
+  if (policy === "off") {
+    // v0.5 (C7): 闸门完全静默（含哨兵提示），但契约检查独立存活——
+    // dispatch_contract=remind/ask 且确有契约问题时仍要出口。
+    if (contractMsg) {
+      if (contractAsk) {
+        emitContractAsk(contractMsg);
+      } else {
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "bg-gate: dispatch contract",
+              additionalContext: "[agent-orchestrator] " + contractMsg,
+            },
+          }),
+        );
+      }
+    }
+    return;
+  }
 
   if (ti.run_in_background === true) {
+    if (contractAsk) {
+      emitContractAsk(contractMsg);
+      return;
+    }
     const extras = [];
     if (contractMsg) extras.push("[agent-orchestrator] " + contractMsg);
     if (hintEnabled && !sentinelOnDuty && hintDue(rootDir)) {
@@ -268,6 +335,12 @@ function main() {
 
   const why = longTaskWhy(ti);
   if (!why && !contractMsg) return;
+
+  // v0.5 (strict=ask): 契约升级优先于长任务提醒——高置信真派发且校验失败才到这。
+  if (contractAsk) {
+    emitContractAsk(contractMsg);
+    return;
+  }
 
   // v0.3.1 (B8): the sentinel nudge in the remind/ask paths is governed by the
   // same --sentinel-hint switch as the background path — wake_sentinel=off must

@@ -1,6 +1,6 @@
 ---
 name: agent-orchestrator
-description: "主控操作手册：把主控 agent 变成任务指挥官。当需要（a）派发/并行/分叉多个子代理并持续跟踪；（b）子代理后台跑、主控同时继续别的活；（c）子代理阻塞提问、主控作答后让它继续；（d）同会话或跨会话恢复中断的任务；（e）给不同子代理/角色选不同模型；（f）运行时创建自定义角色；（g）沉淀与复用编排教训（lessons）；（h）任务完成未签收时被哨兵家族叫醒（防完成通知丢失）；（i）跨会话引用近期会话现场（上下文镜像）；（j）把写代码任务隔离进 git worktree 沙箱并安全合并；（k）任务依赖编排与池工自领取；（l）多轮迭代流水线并行推进——任一情况都使用本技能。含三行契约派发、任务板与邮箱轮询、SendMessage 恢复与 steer、ResumeWorkflowRun/AmendWorkflow、含结果签收与疑似唤醒失败检测、前台派发后台闸门、lessons 经验沉淀、哨兵家族（错峰冗余补枪）与上下文镜像。Stop 收工提醒处置。"
+description: "主控操作手册：把主控 agent 变成任务指挥官。当需要（a）派发/并行/分叉多个子代理并持续跟踪；（b）子代理后台跑、主控同时继续别的活；（c）子代理阻塞提问、主控作答后让它继续；（d）同会话或跨会话恢复中断的任务；（e）给不同子代理/角色选不同模型；（f）运行时创建自定义角色；（g）沉淀与复用编排教训（lessons）；（h）任务完成未签收时被哨兵家族叫醒（防完成通知丢失）；（i）跨会话引用近期会话现场（上下文镜像）；（j）把写代码任务隔离进 git worktree 沙箱并安全合并；（k）任务依赖编排与池工自领取；（l）多轮迭代流水线并行推进；（m）控制派发成本——文件所有权分区、分叉缓存经济、上下文预算与探针纪律——任一情况都使用本技能。含三行契约派发、任务板与邮箱轮询、SendMessage 恢复与 steer、ResumeWorkflowRun/AmendWorkflow、含结果签收与疑似唤醒失败检测、前台派发后台闸门、lessons 经验沉淀、哨兵家族（错峰冗余补枪）与上下文镜像。Stop 收工提醒处置。"
 ---
 
 # agent-orchestrator：主控操作手册
@@ -24,17 +24,17 @@ description: "主控操作手册：把主控 agent 变成任务指挥官。当�
 - **邮箱（spool/）**：子代理 report 的事件落盘；`mailbox(peek)` 看不消费，`mailbox(read)` rename 消费。
 - **三行契约**：`[channel]/[worker]/[token]` 三行出现在派发 prompt 头部与任务包 CONTRACT 节，防误报、可对账。
 - 铁律：**主控是唯一轮询者与答题者**；子代理之间禁止互调（星型拓扑）。
-- **教训库（memory/lessons.jsonl）**：两级写入的编排/过程教训（MCP 工具 lessons 检索与晋升）。**唤醒哨兵（hooks/bg-sentinel.mjs）**：你以后台任务启动，退出即通知——全清自毁、超时告警叫醒你。**上下文镜像（context/journal-*.jsonl）**：提示词与回复的截断落盘记录，支撑跨会话现场引用。
+- **教训库（memory/lessons.jsonl）**：两级写入的编排/过程教训（MCP 工具 lessons 检索与晋升）。**唤醒哨兵（hooks/bg-sentinel.mjs）**：你以后台任务启动，退出即通知——常态全清转待命（0 通知）、告警才叫醒你。**上下文镜像（context/journal-*.jsonl）**：提示词与回复的截断落盘记录，支撑跨会话现场引用。
 
 ## 2. 标准派发七步
 
 1. `board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})` 建 mission——**original_prompt 必填**（跨会话恢复的种子）。
 2. `context_pack(mission_id, title, task, read_first, rules, upstream_context)` 生成任务包 + token + prompt_template。
-3. `Agent(description, subagent_type="agent-orchestrator:orch-worker", prompt=prompt_template + 任务要点, run_in_background=true)` 派发。
-4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台连发 3 次拉起哨兵家族**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`——全部签收它们静默自毁，未签收会分级告警叫醒你（family/grace 默认取 userConfig；详见第 14 章）。
+3. 派发（宿主快照缺陷期间一律走第 10 章主形态：`Agent(description, prompt=<agents/<role>.md 原型正文> + prompt_template + 任务要点, run_in_background=true)`；typed 形态 `subagent_type="agent-orchestrator:orch-worker"` 恒拒，待宿主修复快照数据源后恢复）。
+4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台连发 3 次拉起哨兵家族**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`——常态全清它们转待命（0 通知），未签收会分级告警叫醒你（family/grace 默认取 userConfig；详见第 14 章）。
 5. **不等**：继续干别的活。同一消息里放多条 Agent 调用 = 并发（上限约 8）。
 6. 完成通知到达后：读通知里的输出文件路径（兜底）→ `mailbox(action=read)` 消费事件。
-7. 聚合落盘（结果写文件，只把摘要带进上下文）→ `board(upsert, mission={id, status:"closed"})`。（close 会自动补签收 ack；done 附带的候选 lessons 在此时 `lessons(action="promote")` 提炼晋升或放任 gc；本回合全部处置完且哨兵在值守，它会自行自毁，无需手动停）
+7. 聚合落盘（结果写文件，只把摘要带进上下文）→ `board(upsert, mission={id, status:"closed"})`。（close 会自动补签收 ack；done 附带的候选 lessons 在此时 `lessons(action="promote")` 提炼晋升或放任 gc；本回合全部处置完且哨兵在值守，它会自动转待命，无需手动停）
 
 角色选择：动手改代码用 `orch-worker`；纯调研查证用 `orch-scout`；验收评审用 `orch-reviewer`。
 
@@ -55,6 +55,16 @@ kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必�
 ## CONTEXT（上游产物，逐字注入——你当时不在场）
 {upstream_context 或 "（无）"}
 
+### ENV FACTS（环境事实，主控掌握的运行环境知识——缺了会瞎找，逐条给实测结论）
+- CLI/工具可用性：{如 "zcode CLI 在本机不可用，勿尝试；用 node <脚本> 代替" 或 "全部可用"}
+- 脚本/驱动路径：{绝对路径 + 调用方式，如验收驱动、harness、一次性脚本}
+- 转义与调用坑：{如 "Windows 下驱动参数禁反斜杠路径；JSON 参数单引号包裹"}
+- 平台红线：{只读目录/禁写区/DB 访问限制；无则写 "无特殊红线"}
+
+（ENV FACTS 子节必备，四条缺项写"无"，不得整节省略；worker 按 ENV FACTS 行事，与其实测矛盾时 report(question) 而非自行试错；主控只写本轮实测过的结论，重派时重验）
+
+（SUMMARY 为 server 自动生成节：inputs 派发时出现，主控手写包无此节）
+
 ## READ FIRST
 - {path1}
 - {path2}
@@ -66,6 +76,17 @@ kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必�
 - 只在本包范围内工作，不改包外文件
 - 受阻/目标矛盾/必败门禁：立即 report(kind=blocked, question=…)，不硬扛不造假
 - {rules...}
+
+## OWNERSHIP（文件所有权）
+（仅 scope_paths 非空时出现，缺省整节省略）
+允许写（scope_paths，越界 = 验收 fail 信号）：
+- {scope_paths 逐条}
+清单外路径一律只读。done 的 files_touched 会按此清单比对。
+
+## BUDGET（预算档位）
+（仅给定 budget 参数时出现，缺省整节省略）
+档位：{S|M|L}（≈{20|60|120} 步上限）。milestone report 请附进度与剩余步数估计；逼近上限时主动收尾：完成当前阶段、report(done) 附遗留清单。
+上下文档位：WARN 120K 提醒 / ACT 150K 决策 / HARD 180K 强制收尾 / ABS 230K 红线（由主控对账判定，worker 无需自测）
 
 ## VARIANT（仅分叉变体 v{k}）
 {variant_axes[k] 或 "（无）"}
@@ -95,9 +116,12 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | dispatched，无完成通知 | board | 继续别的活，不轮询 |
 | 完成通知到达 | 通知 | 读输出文件路径 → `mailbox(read)` 消费 → 聚合落盘 → mission closed |
 | running 且最老事件 age_ms>15min | `mailbox(peek)` | `SendMessage(steer)` 询问进度；无 agentId → 派 scout 查证 |
+| ACT 且 timeline 已有浓缩事件 | board/timeline | 只剩拆分/放弃，禁二次浓缩 |
+| 逼近硬阈值（步数近档位上限，或采样近 HARD 180K） | milestone 对账 / `agent_harvest(tail=0)` | `SendMessage(steer)`："完成当前阶段、report(done) 附遗留清单"，剩余工作按 files_touched 拆新 mission（§20.3） |
 | kind=blocked/question | `mailbox(read)` | 能答→`mailbox(answer)`+SendMessage；需查证→先派 orch-scout；workflow→`ResolveWorkflowQuestion(dwfq-id)` |
-| done | report/board | 聚合 → closed |
+| done | report/board | 读 t1_head（≤160 字）与产物路径列表；勿 read details 长文 → 聚合 → closed |
 | done 且 mission 为沙箱派发（pack.sandbox 存在） | board | 派 orch-reviewer 审 diff+越界 → `board(upsert, mission={id, qa:{verdict,…}})` → pass 则 `sandbox_apply(mission_id)`；fail 则 `sandbox_discard`（第 17 章） |
+| done 且任务登记过写集（RULES 清单或 scope_paths） | board/pack | 审计产物 diff（或 files_touched）⊆ 写集；越界 → 追问 worker 或 verdict=fail |
 | ready（无人领取的池任务） | board/resume | 不算未竟不告警；要动它就派池工自领取（第 18 章）或改走普通派发 |
 | 疑似唤醒失败（done/failed/blocked/question + dispatch.agent_id 非空 + 未签收） | board / Stop 清单 | `mailbox(read)` 接手结果 → 处置（answer/close 自动签收）；用户要求暂缓 → `board(action="ack", mission_id, note="deferred by user")`；workflow 模式不参与此判定 |
 | 哨兵告警（bg-sentinel exit 1 完成通知） | 通知 | 按疑似唤醒失败流程接手未签收项（mailbox(read) → answer/close，自动签收）；**处置后补员**——再发 1 次同命令 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true)` 把家族补满 |
@@ -129,7 +153,9 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - 不轮询、靠完成通知。`TaskOutput(task_id, block=true, timeout≤600000)` 仅作显式等待；偶发 "No task found" → 兜底 = 完成通知里的输出文件路径，或 `GetWorkflowRun` / `ListWorkflowRuns`。
 - 失控任务收敛：`TaskStop(task_id)`。
 - 聚合纪律：全文写文件、只带摘要进上下文——把子代理长文原样读进上下文是上下文膨胀的首因。
-- 收工时还有任务在飞？先启动哨兵家族再走（见第 14 章）：后台 Bash 同命令连发 3 次运行 `hooks/bg-sentinel.mjs --once`——全部签收它们静默自毁（通知无害），未签收分级告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
+- 收工时还有任务在飞？先启动哨兵家族再走（见第 14 章）：后台 Bash 同命令连发 3 次运行 `hooks/bg-sentinel.mjs --once`——全部签收它们转待命（常态 0 通知），未签收分级告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
+
+守闸门纪律矩阵见第 20 章（单一事实源，此处不复制）。
 
 ## 7. 恢复手册
 
@@ -142,6 +168,8 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - **2–8 个独立变体、一轮出结果**：`context_pack(variants=N, variant_axes=[...])` → 同一条消息发 N 条 `Agent(run_in_background=true)`（prompt 用返回的 `prompt_templates` 对应项）。适合 A/B 方案、多库调研、多风格实现。
 - **需要循环/门禁/结果互联**：用 `CreateWorkflow` 写 fan-out 脚本。workflow 里角色 = persona(system+model)：`agent(name, { system?, model? })` 可按子代理指定模型（未指定继承 run 级 `subagent_model`）；工具面仍全局同一，没有 per-agent 工具集。
 - **结果比较**：变体跑完派 orch-reviewer 汇总评审，再向用户给 verdict。
+
+**缓存语义选型（先血缘后冷启）**：SendMessage 续聊终态代理 = 原对话保留、只付增量（多轮修正首选）；同 workflow 命名代理 = journal 重放免费（Amend 零成本导入已完成工作）；独立派发 = 冷启全自费。变体分叉（variants）的理由是对比不是省钱——跨任务前缀缓存不可依赖。重新派发前先问："它的上下文还在吗？"
 
 ## 9. 模型选择两轨
 
@@ -157,10 +185,11 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 没有"运行中动态改单个子代理模型"的 API。唯一路径 = 改脚本里的模型字面量/表 → `AmendWorkflow(path)`（supersede 旧 run，已完成工作零成本导入为缓存；改某子代理模型不冲掉它的缓存，但缓存命中的已完成 ask 仍返回旧模型结果，仅新 live ask 跑新模型）。启动期校验：脚本中所有模型名对照 host 模型目录解析（modelBindings 记 journal）并经用户确认窗口批准，host 无模型目录则拒绝启动；诊断码 9010=编译期 model 值非法（非字面量/字面量联合/ModelRef、动态拼名，提示 as const），9011=解析失败（not_found/ambiguous/disabled/reasoning_level_unknown，提示 `ListModels` 或改用全 providerId/modelId）。使用纪律：仅当用户要求或明显轻量层（judge/router）时用 per-agent 模型，id 一律取自 `ListModels`。
 
-## 10. 自定义角色
+## 10. 自定义角色与主派发形态
 
-- `spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` → 写入 `<项目>/.zcode/agents/<name>.md`。
-- 生效时机：**新会话注册**；当前会话要立即用 → `Agent(prompt=原型正文+system_prompt)` 注入 persona 替代。
+**主派发形态 = GP + persona 注入**（宿主快照缺陷存在期间所有插件角色派发一律用它）：宿主 typed 校验读取 create 时点冻结的 MCP 启动快照，快照为空期间 `subagent_type` 派发插件角色在 spawn 前恒拒（"Required MCP tool is not available in the parent startup snapshot"），重试无新信息。协议：Read `plugins/agent-orchestrator/agents/<role>.md` 原型正文 → `Agent(description, prompt=<原型正文> + system_prompt + 三行契约头 + 任务要点, run_in_background=true)`；上报走双通道（report 工具为主，TOOL_ABSENT 时终态回复行首 `KIND=xxx` 降级）。GP 形态不经快照收敛路径，是当前**唯一**同时保全 milestone 事件、哨兵联动、manifest/inputs 牵引与板面时间线的形态——typed 派发当前根本无法启动。角色文件 frontmatter 的 tools 清单在该路径下不生效，正文即角色；宿主升级后跑一次最小 GP 探针（任务=调用 report 回显）复核该面未变。**原生 typed 派发的恢复条件：宿主修复快照数据源之后**（判据：`subagent_type` 派发不再报快照缺工具）；原生角色 `tools` 清单 report 全名**保留不删**——删了修复后必断运行时，留着在当前被拒现状下零额外成本。
+
+- `spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` → 写入 `<项目>/.zcode/agents/<name>.md`。生效时机：**新会话注册**；且产物走同一子代理装配链，`tools` 覆盖含 `mcp__plugin…` 具体名的在 typed 形态下同受快照收敛——注册≠当下可派发，仍按 GP+persona 注入派发。
 - 三个 archetype：worker（执行，cyan）/ scout（只读调研，blue）/ reviewer（评审，yellow）；`tools` 覆盖原型工具面时 report 全名强制保留。
 - 转正：某个临时代理用得好 → `spawn_agent` 固化成项目角色，下次免注入。
 
@@ -189,6 +218,8 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - junction 共享的 node_modules 被安装类 mission 写穿：junction 是同一目录的另一个入口，沙箱内 npm install = 主仓 install。装依赖类任务 materialize 时自动禁共享；任何沙箱任务都禁 install/upgrade/delete node_modules——要装就删链接独立装并写进报告。
 - worktree 元数据残留：一切收尾只走 sandbox_apply / sandbox_discard（内部统一 `git worktree remove` + `prune` 自愈），禁止手删 sandboxes/ 目录——手删留下悬空元数据，下次 materialize 靠 prune 兜底但会拖慢且日志脏。
 - ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
+- **探针原文回显是隐形大头**：4 个会话合计 111 次 DB/二进制原文回显（单会话最高 149KB）——DB 探针禁 `SELECT *`、必须聚合 + LIMIT ≤100；二进制只回显类型/大小/哈希/首 256 字节；单次输出 ≤50 行或 ≤10KB（第 20.4 节）。
+- **已读的文件别重读**：server.mjs 曾被单会话重读 12/10/7 次、全文读码 1638 行——派发时把函数/行号锚点写进任务包；≥1000 行文件禁一次全文读入（先 grep 结构再定点读）。
 
 ## 13. 学习记忆（lessons）
 
@@ -207,7 +238,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 ## 14. 唤醒哨兵家族（bg-sentinel v2）
 
-**平台原理（为什么是家族）**：只有**后台任务退出**产生的完成通知能叫醒你；**运行中的任务不产生任何通知，且完成通知实测会丢**。一次进程退出 = 一次通知 = 一枪，单进程只有一条命——多枪冗余在平台事实下唯一的实现形态就是**多实例并存**。哨兵 v2 = N 个（默认 3）互相独立的直至型实例：60s 判定、全清才退；每个实例开一枪（exit 1 通知）后光荣退役，**其余实例继续值守**（开枪不再终止盯守）。
+**平台原理（为什么是家族）**：只有**后台任务退出**产生的完成通知能叫醒你；**运行中的任务不产生任何通知，且完成通知实测会丢**。一次进程退出 = 一次通知 = 一枪，单进程只有一条命——多枪冗余在平台事实下唯一的实现形态就是**多实例并存**。哨兵 v2 = N 个（默认 3）互相独立的直至型实例：60s 判定、全清转待命（不退出，见下）；每个实例开一枪（exit 1 通知）后光荣退役，**其余实例继续值守**（开枪不再终止盯守）。
 
 **启动（固定 ritual，已并入第 2 章第 4 步）**：本回合首次 Agent 派发后，同一条消息**连发 3 次**（同命令重复发，自动认领不同槽位）：
 
@@ -225,7 +256,11 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | 崩溃实锤 | 10 分钟 | rollout 心跳停更 + tool_usage 无 running 行佐证；绕过双空闲门 |
 | 板不可读 | 立即 | 连续 3 tick，cap=2 |
 
-**退出条件**：全部签收且无在飞 → **静默 exit 0 自毁**（家族收工会有 3 条安静通知，无害 = 正常收工）；仅剩 workflow 在飞 → 同样自毁（workflow 由宿主通知）。寿命 24h 自限。**收到告警 → 按"疑似唤醒失败"接手 → 处置后补员**：再发 1 次同命令把家族补满（bg-gate 冷却戳与派发提醒照旧兜底）。
+**退出与待命（v0.5.1 待命制：常态 0 通知）**：
+- **全清 → 实例不退出**（全部签收且无在飞；含仅剩 workflow 在飞——workflow 由宿主完成通知，无需盯守）：槽位写 `state=standby` 转低频待命（板面复核默认 `max(wake_poll_sec, 300s)`，CLI `--standby-poll-sec` / cfg `standby_poll_sec` 可调；心跳照常刷新，bg-gate 与 `sentinel_health` 仍视其在岗——补员提醒天然抑制）。板面出现新在飞/未签收 → 自动复活回 active 正常值守；待命期板不可读静默续待命（不告警）。
+- **告警完全照旧**：分级阈值、双空闲门、逃逸口、cap 3 枪、abandoned 回声 + toast 全部不变（exit 1 该醒就醒）。
+- **寿命轮换（每寿命周期至多 1 条通知）**：实例到期（默认 24h）做单赢家选举——赢家写 `sentinel/family-teardown.json` 后 exit 0 退出（这条通知表示"本轮轮换完成"，无需处置），输家见新鲜标记自动顺延进入下一轮；家族逐轮递减直至消亡（会话结束后最多残留至各实例最后一轮，长驻是预期）。收到轮换通知可选择性补员（后台重发 3 次同命令），不补也行。
+- **补员纪律**：收到告警 → 按"疑似唤醒失败"接手 → 处置后再发 1 次同命令把家族补满（bg-gate 冷却戳与派发提醒照旧兜底）。升级窗口内新旧实例混跑不冲突：旧实例仍按旧语义全清自毁，过渡期少量安静通知属预期。
 
 **fired 仲裁与 abandoned**：同条件两枪最小间隔 5 分钟（错峰，多实例不会重复轰炸）；单条件封顶 3 枪，第 3 枪带 abandoned 标记并追加邮箱回声 + OS toast 兜底（3 枪全丢大概率是平台通知异常——**接手后检查通知链路**，别当没事）。`board(list)` 顶层 `sentinel_health` 给出家族在岗数、24h 开枪记录、abandoned 清单与回声摘要；`resume` 简报在家族缺员/有 abandoned 时给补员建议。
 
@@ -261,19 +296,27 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | sandbox_discard | `mcp__plugin_agent-orchestrator_orch__sandbox_discard` | 主控 |
 | agent_harvest | `mcp__plugin_agent-orchestrator_orch__agent_harvest` | 主控 |
 
-**board 行为**：action ∈ upsert/get/list/ack；ack 说明：`board(action="ack", mission_id, note?) → ack={at, by:"coordinator", note}`；answer/close 自动补签。
+**board 行为**：action ∈ upsert/get/list/ack；ack 说明：`board(action="ack", mission_id, note?) → ack={at, by:"coordinator", note}`；answer/close 自动补签；list 顶层另附 `scope_conflicts`（在飞 mission 两两 scope 相交视图，与 upsert 的 `scope_warnings` 同构，≤10 条，无冲突省略键）。
 
 **board claim 行为**：`board(action="claim", mission_id, worker, lease_minutes?)`——CAS 领取 ready/drafted 任务（owner 置空才可领、依赖全绿才可领），成功即 running 并写租约；worker 每次 report 自动续租；超时自动回 ready。沙箱 apply/discard：门禁=done+qa.verdict=pass；discard 幂等零损伤。
 
+**context_pack 行为**：可选参数 `inputs`（≤4 个上游 mission id，机械牵引其 manifest 条目，T0→CONTEXT/T1→SUMMARY/T2→READ FIRST 路由；全部零产出 isError）、`scope_paths`（≤32 项，超限报错不截断；物化 OWNERSHIP 节，沙箱派发时整体取代 oob_allowlist）、`budget`（enum S/M/L，物化 BUDGET 节含 token 档静态预告行）；缺省均不出现（与旧版同参包逐字节一致）。
+
+**呈现面**：board mission 行附 `t1_head`（≤160 字，最近 report summary 截取，附 artifacts_n/output_files_n/has_question；无 report → null）；resume 对 done/failed 未签收行附 t1_head，blocked/question 行以 `question_head`（≤160 字）预览（全文仍经 mailbox read）。
+
+**mailbox 行为**：peek 不消费（仅 summary+age）；read 消费事件，details 超 2000 字截断并追加标记 `…[截断于N字]` 与提示句（details 已截断（帽 2000 字）：长文应写文件走 artifacts，邮箱只传摘要）——spool 存证原文不动；answer 留痕并返回 recommended_call。
+
+**manifest/inputs 快照语义**：inputs 牵引发生在组包瞬间、逐字物化进包；上游 manifest 之后更新不回灌旧包——要新鲜就重打包。
+
 **lessons 行为**：action ∈ list/add/promote/retire；list 默认 status=active 按 score 降序；add 可带 contradicts=<旧id> 记反例；候选由 report(kind=done, lessons=[…]) 产生，`lessons(list, status="candidate")` 查看待提炼。
 
-**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=全清自毁/到期/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances 在岗数 / shots_24h / abandoned / echo_tail）。
+**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=寿命轮换（单赢家选举，每寿命周期至多 1 条）/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances 在岗数 / shots_24h / abandoned / echo_tail）。
 
 **agent_harvest 行为**：`agent_harvest(mission_id|agent_id|session_id, tail?, max_chars?)` → 只读收割子代理 rollout 转录尾部（末条 model-io 记录内嵌全量对话），渲染带角色标签的文本；跨会话可用，TaskOutput 失效时的兜底；无转录（未派发/池工）报错并引导以 report artifacts 为准。
 
-**board upsert schema 白名单**（v0.4.1）：未知顶层字段不入库（如 timeline_note），响应以 `ignored_keys` 列出——写错字段名不会再静默改板。
+**board upsert schema 白名单**（v0.4.1）：未知顶层字段不入库（如 timeline_note），响应以 `ignored_keys` 列出——写错字段名不会再静默改板。v0.5 起可登记 `scope_paths`/`strict_scope`（均整体替换、不入 ONE_LEVEL）；`manifest` 为只读派生字段（upsert 输入侧剥离，沿 ack 先例）。
 
-**kind 枚举**：milestone / blocked / question / done（summary ≤ 200 字；blocked/question 必带 question；done 必带 artifacts）。
+**kind 枚举**：milestone / blocked / question / done（summary ≤ 200 字；blocked/question 必带 question；done 必带 artifacts）；milestone/done 可选 `files_touched`（≤50 项，参与越界审计）与 `manifest_entries`（≤12 条，done 收口写 manifest）。
 
 **mission 状态机**：`drafted →(解锁 blockedBy 全绿)→ ready →(claim)→ running → (blocked|question|done|failed|skipped)`；`drafted → dispatched → running`（普通派发，不经 ready）；`blocked/question →(answer) dispatched/resumed`；`done/failed → closed`；`skipped 为终态（skippedReason=upstream_failed），复核后 closed 归档`；workflow stopped 标 `resumed` 后继续用 running/done。
 
@@ -284,7 +327,9 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - `TaskOutput(task_id, block, timeout≤600000)`；`TaskStop(task_id)`。
 - workflow：`CreateWorkflow{script|saved|path, name, max_concurrency, subagent_model}`、`AmendWorkflow{run_id, path|script, subagent_model, max_concurrency}`（任何状态可改，旧完成工作导入为缓存）、`ResumeWorkflowRun{run_id}`（仅 stopped）、`GetWorkflowRun`（pendingQuestions）、`ListWorkflowRuns{statuses}`、`ResolveWorkflowQuestion{question_id(dwfq-…), answer}`、`EvalWorkflowSnippet`、`ListModels`、`SaveWorkflow`（需用户同意）。子代理 `escalate` 每 ask 限 3 次。模型：可按子代理在 persona 指定——`agent(name, { system?, model? })`，model 取编译期字面量（可带 `$reasoningLevel`）或 `model("…")` 的 ModelRef，id 取自 `ListModels`；未指定继承 run 级 `subagent_model`；启动期模型名对照 host 模型目录校验并经确认窗口批准；诊断码 9010（编译期 model 值非法）/9011（解析失败，含 fill 引入 run 未绑定的新模型）；工具面仍全局同一、无 per-agent 工具集。
 - hooks 仅 7 事件；插件注册 SessionStart（恢复简报）、Stop（镜像记录 + 收工清点，含疑似唤醒失败）、PreToolUse（Agent|Task 后台闸门 + 哨兵派发提醒）、UserPromptSubmit（镜像记录，恒静默）四个；Stop 用 hookSpecificOutput.hookEventName="Stop"+additionalContext；PreToolUse 用 permissionDecision allow/ask + additionalContext；退出码 0 放行。
-- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10；桥接为哨兵两枪最小间隔）、wake_retries（默认 3；桥接为单条件封顶枪数）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；哨兵家族实例数，N=1 无冗余等于旧版）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 自动 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
+- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、dispatch_contract（remind|ask|off，默认 remind；派发契约校验独立开关，bg-gate --contract，background_gate=off 不连坐）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10；桥接为哨兵两枪最小间隔）、wake_retries（默认 3；桥接为单条件封顶枪数）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；哨兵家族实例数，N=1 无冗余等于旧版）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 自动 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
+
+**成本速查**：写集 ≥3 拆分、≥8 强制拆；预算档 S≤20 / M≤60 / L≤120 步，硬顶约 120 步或 230K 上下文（L 档派发前预拆）；探针单次 ≤50 行/≤10KB、DB 禁 `SELECT *`；回归 = 新断言全跑 + 旧断言抽样，全量仅发版前/骨架变更/信号链变更；血缘优先：续聊 > workflow 重放 > 重新派发。
 
 ## 17. 沙箱派发（sandbox_dispatch）
 
@@ -335,7 +380,7 @@ context_pack(isolation="worktree")            # materialize：分支+worktree+�
 
 **claim CAS 与租约**：`board(action="claim", mission_id, worker, lease_minutes?)`——owner 为空且状态 drafted/ready 且依赖全绿才可领；成功即 running 并写 {worker, token, claimedAt, leaseUntil}（token 缺失时补发）。worker 每次 report 自动续租（缺省租约取 userConfig `claim_lease_min`=30）；超时未续自动回 ready 可再领取（下一个写路径顺带回收，无需定时器）。两个池工抢同一任务，根锁内 CAS 恰一人成功，另一人 isError 附当前 owner。
 
-**池工模式**（同构任务池才需要，普通派发用不上）：主控显式 spawn 一个放行 board 的角色——`spawn_agent(name="orch-pool-<tag>", archetype="worker", tools=["report", "mcp__plugin_agent-orchestrator_orch__board"], system_prompt="你是池工：循环 claim→干活→report→再 claim，直到 claim 全部失败（无 ready）后正常结束；不要 upsert/ack，那两件事归主控")`——当前会话立即用则 `Agent(prompt=原型正文+system_prompt)` 注入。池工 claim 成功后按 next_hint：先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。
+**池工模式**（同构任务池才需要，普通派发用不上）：主控显式 spawn 一个放行 board 的角色——`spawn_agent(name="orch-pool-<tag>", archetype="worker", tools=["report", "mcp__plugin_agent-orchestrator_orch__board"], system_prompt="你是池工：循环 claim→干活→report→再 claim，直到 claim 全部失败（无 ready）后正常结束；不要 upsert/ack，那两件事归主控")`——宿主快照缺陷期间池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发（typed 挂不上 board/report 等 MCP 工具，第 10 章主形态）。池工 claim 成功后按 next_hint：先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。
 
 **口径（逐字）**：ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
 
@@ -361,3 +406,55 @@ context_pack(isolation="worktree")            # materialize：分支+worktree+�
 - 哨兵告警/疑似唤醒失败只针对具体 mission，处置它不阻塞其余迭代。
 - 会话中断后：resume 简报按 mission 列出全部在转迭代与 recommended_action，逐项恢复即可——连续性靠 board+文件，不靠记忆。
 - 迭代编号进 title（如「v2 迭代：搜索重构——实现」），Stop 清单与简报里才扫得清轮次。
+
+## 20. 成本纪律（cost-rules）
+
+**为什么**：遥测实证——Read 输出占工具字节 56–78%、编辑仅 0–3%；单代理上下文 53K→352K 单调增长能把 50M token 烧在重放上（99.2% 已是 cache 重放仍拦不住二次方曲线）。成本的主战场是"读回"与"重放"，不是"编辑"。四条杠杆：砍上下文（分区）、砍步数（预算）、重放免费化（血缘）、砍读回（探针与锚点）。
+
+### 20.1 文件所有权分区
+- 派发前先盘点**写集**（会被 Edit/Write 的文件）：≥3 个文件或跨 ≥2 个顶层目录 → 拆成 scope 不相交的多个 mission；**≥8 个 → 必须拆**。强耦合的原子重构除外（单 mission + 沙箱）。
+- 切分优先级：目录 > 层 > 变更类型；被多个子集引用的**枢纽文件**（如 server.mjs）归单一 mission 独占，其余只读。禁止"按话题切但都落在同一文件"的假并行。
+- 写集用 `board(upsert, mission={id, scope_paths:[...]})` 登记并经 `context_pack(scope_paths=...)` 物化进 OWNERSHIP 节（目录条目必须以 `/` 结尾）；两个在飞 mission scope 相交时 board 响应 `scope_warnings`（`strict_scope:true` 则拒绝登记）。
+- 两个在飞 mission 的写集相交 → **三选一**：后写者 blockedBy=[前写者] 转串行；改沙箱分叉各自 apply；重切把相交文件归一边独占。**禁止裸并行写同一文件。**
+
+### 20.2 分叉与缓存经济（选形态先看血缘）
+| 场景 | 形态 | 缓存语义 |
+|---|---|---|
+| 一次性、异构、并行 | 独立 Agent 派发 | 冷启全自费 |
+| A/B 对比、多风格 | 变体分叉 variants=N | 共享 upstream 前缀只是打包便利；跨任务缓存不可依赖——分叉的理由是对比不是省钱 |
+| 多阶段流水线、预期 amend | 同 workflow 命名代理 | journal 重放免费（Amend 零成本导入已完成工作） |
+| 修正、补遗、答题续做 | SendMessage 续聊终态代理 | 原对话在场，只付增量 |
+| 改代码要安全合并 | 沙箱派发 | 同独立派发 + 隔离开销 |
+- 原则：**有血缘就用血缘**（续聊 > workflow 重放 > 重新派发）。重新派发前先问："它的上下文还在吗？"——在就续聊，别重付物化税。
+- 确须重派时，任务包给最低但充分的四件：上一版断言原文+实装语义、被引设计章节**原文**、函数/行号锚点清单、环境事实。禁止把上一轮全文粘进包。
+
+### 20.3 上下文预算（强制点）
+- 派发前定档：**S ≤20 步 / M ≤60 步 / L ≤120 步**，写进任务包 BUDGET 节；**L 档必须预拆阶段或转 workflow**，不许先跑着看。
+- **token 档位（CR-09 v0.5；主控对账时以 `agent_harvest(tail=0)` 探测模式采样，零转录回显）**：WARN ≥120K → 对账时提醒逼近；**ACT ≥150K → 按浓缩/拆分/放弃决策表处置**（**拆分是默认动作**：steer 收尾 + 按 files_touched 续派；**浓缩是受控例外**——上下文大而产物少（artifacts ≤2）、连续性价值高时派 S 档浓缩代理产出七节交接包 + manifest 条目 + 状态重建清单，后继者全新冷启派发；**浓缩边界四条：①每 mission 最多 1 次；②浓缩≠同会话续跑（平台无压缩 API，浓缩代理是新会话，签收后原 mission closed）；③浓缩后再达 ACT → 强制拆分或放弃，禁二次浓缩；④死亡/失联仍归 agent_harvest，浓缩不兜死亡**）；**HARD ≥180K → 强制收尾**：steer"完成当前阶段、report(done) 附遗留清单"，剩余拆新 mission（以 files_touched 为完成度基线）；**ABS 230K 为文档红线**（实测 p95 已 253K——防线靠前移到 ACT/HARD，不靠事后拦截）。
+- 对账点 = 每次 milestone report（要求 worker 附进度与剩余步数估计）：milestone 同时是哨兵失联宽限的续期信号，对账搭同一班车、零新增轮询。哨兵不管预算，预算是你对账时的事。worker 的 `files_touched`（milestone/done 可选附带）落 timeline，既是越界审计基线，也是中断接力的每文件完成度清单。
+
+### 20.4 探针与读回纪律
+- DB 探针**禁 `SELECT *`**：列字段 + 聚合/COUNT + LIMIT ≤100；二进制只回显类型/大小/哈希/首 256 字节；日志用 tail ≤50 行或 grep -m。单次探针输出 **≤50 行或 ≤10KB**，超限分页。
+- 派发时把函数/行号锚点清单写进任务包；**≥1000 行的文件禁一次全文读入**（先 grep 结构再定点读）；同一会话已读的文件不重读。
+- （结构化 probe 工具与会话级读缓存为机制候选，实装前以上是纯纪律。）
+
+### 20.5 验收断言链与回归分层
+- 每版验收断言**沉淀为文件**（`tests/assertions/v<版本>.md`，逐字措辞 + 实装语义注记，带 ID）；下一版验收 mission 的 read_first 必含上一版断言文件——断言不靠文档措辞口口相传。
+- 验收 harness（fixture/加速参数/捕获脚本）沉淀 `tests/harness/`，复用优先，禁止每轮自建。
+- 回归分层：**全量仅限发版前、骨架变更（board 格式/hooks 事件/工具清单）、哨兵信号链变更**；日常迭代 = 新断言全跑 + 旧断言抽样（直接层全跑、邻接层抽 1/3、远端层免跑）。
+- 任务包与设计的用例口径必须对齐：包内 TASK 逐条引用断言 ID，数量与断言文件一致。
+
+### 20.6 守闸门纪律矩阵（单一事实源；第 4/6 章只引用不复制）
+
+主控对各 mission 形态只读什么（防验收闸门失守，行为对照全部为实测实证）：
+
+| mission 形态 | 主控允许读什么 | 机制支撑（v0.5 落地后） | 条文落点 |
+|---|---|---|---|
+| done（普通） | T1（t1_head ≤160 字）+ artifacts/output_files **路径列表**；禁读 details 长文与产物全文 | t1_head 呈现字段；mailbox details 呈现帽（2000 字）；worker 侧纪律"长文写文件走 artifacts" | 第 4 章 done 行注记 |
+| failed | 同 done + lessons 候选清单（查询，不进正文） | resume 的 t1_head 覆盖 done/failed 未签收 | 并入 done 行，零机制 |
+| question/blocked | 只读 question（+age），立即答或派 scout | 现状已合规；仅补呈现帽 question_head ≤160，全文留 mailbox read | 第 4 章 kind=blocked/question 行 |
+| QA/review（沙箱） | **豁免条款**：reviewer（worker 侧）读 T0 断言原文 + diff + allowlist；**主控只读 verdict 结构（qa 字段）、不复述 diff** | qa 机械门禁与 apply 越界比对不动；manifest assertion 条目机械比对供 verdict 输入 | 第 17 章；reviewer read_first 必含断言文件 |
+| 浓缩代理（S3 新形态） | 主控读浓缩产物**全文**——它本身就是 T1 | 无新机制（七节交接包/manifest 条目/状态重建清单三件套即呈现面） | 20.3 节受控例外（占位防漏） |
+| workflow 在飞/pending | 状态与 pendingQuestions | recommendedAction 四支不动 | 无差距 |
+
+manifest/inputs 速查：done 可带 `manifest_entries`（≤12 条；条目七字段 id/layer/type/title/text/ref/source，type 封闭五值 assertion｜env_fact｜anchor｜conclusion｜directive，断言条目 ref.loc 用断言文件 ID 如 `tests/assertions/v0.4.x.md#V-12`）→ server 收口校验/截断后写 sidecar 并挂 mission.manifest 指针；`context_pack(inputs=[mission_id])`（≤4 个）按层确定性路由——T0 逐字块入 CONTEXT（合计 ≤24KB）、T1 一行入 SUMMARY（合计 ≤4KB）、T2 指针追加 READ FIRST（≤20 条）；**快照语义**：牵引发生在组包瞬间、逐字物化进包，上游 manifest 之后更新不回灌旧包——要新鲜就重打包。

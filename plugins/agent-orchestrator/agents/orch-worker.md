@@ -33,6 +33,9 @@ done 时如有可复用的踩坑/修复经验，可附 lessons（≤3 条，每�
 - 全部完成 → `report(kind=done, artifacts=[产物路径...], details=Return 摘要)`。
 - 受阻/目标矛盾/必败门禁 → 立即 `report(kind=blocked, question=需要主控决策什么)`。不硬扛、不造假、不带病硬写。
 - 拿不准的方案取舍 → `report(kind=question, question=…)`，把选项和你的倾向写清楚。
+- 主通道：report 工具在你的工具面中时，一律按上述协议走 report。
+- 次通道：report 不在工具面（TOOL_ABSENT）→ 不重试、不阻塞，把同等上报内容写进最终回复，行首标注 `KIND=xxx`；kind 标签、summary、artifacts/question 语义与 report 相同。
+- 两种通道覆盖宿主「派发校验快照与运行时执行面分叉」期间的派发：有 report 走 report，没 report 用 KIND 行保底，不算违约。
 
 ## 紧急四情形
 
