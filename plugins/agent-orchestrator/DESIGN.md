@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.5.0 ｜ 日期：2026-10-13 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.5.1 ｜ 日期：2026-10-15 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -756,3 +756,13 @@ v0.5.0 的增量设计权威是 `designs/agent-orchestrator-v0.5-DESIGN.md`（�
 - **bg-gate 收尾（本版唯一 hooks/userConfig 改动）**：C4 提醒句（token 在册但 prompt 无 [channel] 行）；C7 解耦——独立 userConfig `dispatch_contract: remind|ask|off`（默认 remind），background_gate=off 不再连坐契约检查；strict=ask 仅高置信形状升级（deny 永不采用，fail-open 宪法不破）。
 - **tests/ 沉淀（CR-13/14 首次执行）**：`tests/assertions/v0.4.x.md`（84 条 bootstrap + A-v050 组）与 `tests/harness/` 八件（jsonrpc-client/temp-root/fixture-board/git-fixture/capture/accelerate/run-all 等）随本版落盘；回归入口 `node tests/run-all.mjs --layer all`。
 - **配套**：plugin.json 版本 0.5.0、workspace 的 plugins/marketplace.json 同步 0.5.0；BOARD_VERSION 保持 2、tools/list 恒 10、hooks.json 事件集不变。
+
+---
+
+## 22. v0.5.1 增量指针：哨兵全清零唤醒 / GP+persona 主派发形态 / 对抗性审查入库
+
+v0.5.1 为实战修订版（配套：plugin.json 0.5.1、workspace 的 plugins/marketplace.json 同步 0.5.1、server SERVER_VERSION 对齐 0.5.1），增量要点：
+
+- **哨兵全清零唤醒改造**：全清转 standby 待命零通知、新在飞自动复活、cap 单赢家轮换选举（每周期 ≤1 条）、告警路径零改动——细则权威 SKILL §14 与 tests/suites/sentinel-teardown.mjs。
+- **typed 派发快照缺陷应对**：宿主校验读冻结 MCP 快照，含 mcp 工具名的角色派发恒拒；插件侧正式化 GP+persona 主派发形态（SKILL §10）与角色正文双通道上报（report 主 / KIND=xxx 次），根因与评估权威 designs/dispatch-probe-20261014/{DESIGN.md,eval-role-tools.md,findings-S1..S3.md}。
+- **对抗性审查全链文档入库** designs/adv-review-20261014/（实锤 47/P0×5——修复工程未启动，非本版内容；QQagent 卡死调查 designs/qqagent-hang-20261014/ 亦未结）。

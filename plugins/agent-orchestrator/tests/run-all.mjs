@@ -5,7 +5,7 @@
  * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=10/BOARD_VERSION/hooks.json/SB09+M07/B07）
  *   + L1 直接层全跑（sb-normalize=SB01/02/05+M01/02；crv1-scope=CRV1-01..08+E4+M04；
  *   crv2-pack=CRV2-01..08+CR-V22/23/24/25；crv4-audit=CRV4-01..05+CR-V18..V21/V29；
- *   crv3-present=CRV3-01..03+CR-V26/27/28+M03/05/06；condense=CR-V9/10/16；bggate=M08..M10+B01..07+S09）。
+ *   crv3-present=CRV3-01..03+CR-V26/27/28+M03/05/06；condense=CR-V9/10/16；bggate=M08..M10+B01..07+S09；sentinel-teardown=哨兵 v2.1 待命/轮换 T1..T4）。
  *   L2 邻接层（哨兵 live V 组、lessons/journal/stop-check）与 L3 手工/文档项不在本入口自动化——
  *   执行载体见 tests/assertions/v0.4.x.md §3 映射表与 §10 总表。
  *
@@ -30,6 +30,7 @@ const REGISTRY = [
   { name: "crv3-present", layer: "L1" },
   { name: "condense", layer: "L1" },
   { name: "bggate", layer: "L1" },
+  { name: "sentinel-teardown", layer: "L1" },
 ];
 
 function argOf(flag) {

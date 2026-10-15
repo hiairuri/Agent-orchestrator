@@ -24,17 +24,17 @@ description: "主控操作手册：把主控 agent 变成任务指挥官。当�
 - **邮箱（spool/）**：子代理 report 的事件落盘；`mailbox(peek)` 看不消费，`mailbox(read)` rename 消费。
 - **三行契约**：`[channel]/[worker]/[token]` 三行出现在派发 prompt 头部与任务包 CONTRACT 节，防误报、可对账。
 - 铁律：**主控是唯一轮询者与答题者**；子代理之间禁止互调（星型拓扑）。
-- **教训库（memory/lessons.jsonl）**：两级写入的编排/过程教训（MCP 工具 lessons 检索与晋升）。**唤醒哨兵（hooks/bg-sentinel.mjs）**：你以后台任务启动，退出即通知——全清自毁、超时告警叫醒你。**上下文镜像（context/journal-*.jsonl）**：提示词与回复的截断落盘记录，支撑跨会话现场引用。
+- **教训库（memory/lessons.jsonl）**：两级写入的编排/过程教训（MCP 工具 lessons 检索与晋升）。**唤醒哨兵（hooks/bg-sentinel.mjs）**：你以后台任务启动，退出即通知——常态全清转待命（0 通知）、告警才叫醒你。**上下文镜像（context/journal-*.jsonl）**：提示词与回复的截断落盘记录，支撑跨会话现场引用。
 
 ## 2. 标准派发七步
 
 1. `board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})` 建 mission——**original_prompt 必填**（跨会话恢复的种子）。
 2. `context_pack(mission_id, title, task, read_first, rules, upstream_context)` 生成任务包 + token + prompt_template。
-3. `Agent(description, subagent_type="agent-orchestrator:orch-worker", prompt=prompt_template + 任务要点, run_in_background=true)` 派发。
-4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台连发 3 次拉起哨兵家族**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`——全部签收它们静默自毁，未签收会分级告警叫醒你（family/grace 默认取 userConfig；详见第 14 章）。
+3. 派发（宿主快照缺陷期间一律走第 10 章主形态：`Agent(description, prompt=<agents/<role>.md 原型正文> + prompt_template + 任务要点, run_in_background=true)`；typed 形态 `subagent_type="agent-orchestrator:orch-worker"` 恒拒，待宿主修复快照数据源后恢复）。
+4. `board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})` 记录派发；**并（本回合首次派发时）后台连发 3 次拉起哨兵家族**：`Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`——常态全清它们转待命（0 通知），未签收会分级告警叫醒你（family/grace 默认取 userConfig；详见第 14 章）。
 5. **不等**：继续干别的活。同一消息里放多条 Agent 调用 = 并发（上限约 8）。
 6. 完成通知到达后：读通知里的输出文件路径（兜底）→ `mailbox(action=read)` 消费事件。
-7. 聚合落盘（结果写文件，只把摘要带进上下文）→ `board(upsert, mission={id, status:"closed"})`。（close 会自动补签收 ack；done 附带的候选 lessons 在此时 `lessons(action="promote")` 提炼晋升或放任 gc；本回合全部处置完且哨兵在值守，它会自行自毁，无需手动停）
+7. 聚合落盘（结果写文件，只把摘要带进上下文）→ `board(upsert, mission={id, status:"closed"})`。（close 会自动补签收 ack；done 附带的候选 lessons 在此时 `lessons(action="promote")` 提炼晋升或放任 gc；本回合全部处置完且哨兵在值守，它会自动转待命，无需手动停）
 
 角色选择：动手改代码用 `orch-worker`；纯调研查证用 `orch-scout`；验收评审用 `orch-reviewer`。
 
@@ -153,7 +153,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - 不轮询、靠完成通知。`TaskOutput(task_id, block=true, timeout≤600000)` 仅作显式等待；偶发 "No task found" → 兜底 = 完成通知里的输出文件路径，或 `GetWorkflowRun` / `ListWorkflowRuns`。
 - 失控任务收敛：`TaskStop(task_id)`。
 - 聚合纪律：全文写文件、只带摘要进上下文——把子代理长文原样读进上下文是上下文膨胀的首因。
-- 收工时还有任务在飞？先启动哨兵家族再走（见第 14 章）：后台 Bash 同命令连发 3 次运行 `hooks/bg-sentinel.mjs --once`——全部签收它们静默自毁（通知无害），未签收分级告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
+- 收工时还有任务在飞？先启动哨兵家族再走（见第 14 章）：后台 Bash 同命令连发 3 次运行 `hooks/bg-sentinel.mjs --once`——全部签收它们转待命（常态 0 通知），未签收分级告警叫醒你。忘了启动也不慌：未签收任务仍会出现在 Stop 清单与 resume 简报的"疑似唤醒失败"里。
 
 守闸门纪律矩阵见第 20 章（单一事实源，此处不复制）。
 
@@ -185,10 +185,11 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 没有"运行中动态改单个子代理模型"的 API。唯一路径 = 改脚本里的模型字面量/表 → `AmendWorkflow(path)`（supersede 旧 run，已完成工作零成本导入为缓存；改某子代理模型不冲掉它的缓存，但缓存命中的已完成 ask 仍返回旧模型结果，仅新 live ask 跑新模型）。启动期校验：脚本中所有模型名对照 host 模型目录解析（modelBindings 记 journal）并经用户确认窗口批准，host 无模型目录则拒绝启动；诊断码 9010=编译期 model 值非法（非字面量/字面量联合/ModelRef、动态拼名，提示 as const），9011=解析失败（not_found/ambiguous/disabled/reasoning_level_unknown，提示 `ListModels` 或改用全 providerId/modelId）。使用纪律：仅当用户要求或明显轻量层（judge/router）时用 per-agent 模型，id 一律取自 `ListModels`。
 
-## 10. 自定义角色
+## 10. 自定义角色与主派发形态
 
-- `spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` → 写入 `<项目>/.zcode/agents/<name>.md`。
-- 生效时机：**新会话注册**；当前会话要立即用 → `Agent(prompt=原型正文+system_prompt)` 注入 persona 替代。
+**主派发形态 = GP + persona 注入**（宿主快照缺陷存在期间所有插件角色派发一律用它）：宿主 typed 校验读取 create 时点冻结的 MCP 启动快照，快照为空期间 `subagent_type` 派发插件角色在 spawn 前恒拒（"Required MCP tool is not available in the parent startup snapshot"），重试无新信息。协议：Read `plugins/agent-orchestrator/agents/<role>.md` 原型正文 → `Agent(description, prompt=<原型正文> + system_prompt + 三行契约头 + 任务要点, run_in_background=true)`；上报走双通道（report 工具为主，TOOL_ABSENT 时终态回复行首 `KIND=xxx` 降级）。GP 形态不经快照收敛路径，是当前**唯一**同时保全 milestone 事件、哨兵联动、manifest/inputs 牵引与板面时间线的形态——typed 派发当前根本无法启动。角色文件 frontmatter 的 tools 清单在该路径下不生效，正文即角色；宿主升级后跑一次最小 GP 探针（任务=调用 report 回显）复核该面未变。**原生 typed 派发的恢复条件：宿主修复快照数据源之后**（判据：`subagent_type` 派发不再报快照缺工具）；原生角色 `tools` 清单 report 全名**保留不删**——删了修复后必断运行时，留着在当前被拒现状下零额外成本。
+
+- `spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` → 写入 `<项目>/.zcode/agents/<name>.md`。生效时机：**新会话注册**；且产物走同一子代理装配链，`tools` 覆盖含 `mcp__plugin…` 具体名的在 typed 形态下同受快照收敛——注册≠当下可派发，仍按 GP+persona 注入派发。
 - 三个 archetype：worker（执行，cyan）/ scout（只读调研，blue）/ reviewer（评审，yellow）；`tools` 覆盖原型工具面时 report 全名强制保留。
 - 转正：某个临时代理用得好 → `spawn_agent` 固化成项目角色，下次免注入。
 
@@ -237,7 +238,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 ## 14. 唤醒哨兵家族（bg-sentinel v2）
 
-**平台原理（为什么是家族）**：只有**后台任务退出**产生的完成通知能叫醒你；**运行中的任务不产生任何通知，且完成通知实测会丢**。一次进程退出 = 一次通知 = 一枪，单进程只有一条命——多枪冗余在平台事实下唯一的实现形态就是**多实例并存**。哨兵 v2 = N 个（默认 3）互相独立的直至型实例：60s 判定、全清才退；每个实例开一枪（exit 1 通知）后光荣退役，**其余实例继续值守**（开枪不再终止盯守）。
+**平台原理（为什么是家族）**：只有**后台任务退出**产生的完成通知能叫醒你；**运行中的任务不产生任何通知，且完成通知实测会丢**。一次进程退出 = 一次通知 = 一枪，单进程只有一条命——多枪冗余在平台事实下唯一的实现形态就是**多实例并存**。哨兵 v2 = N 个（默认 3）互相独立的直至型实例：60s 判定、全清转待命（不退出，见下）；每个实例开一枪（exit 1 通知）后光荣退役，**其余实例继续值守**（开枪不再终止盯守）。
 
 **启动（固定 ritual，已并入第 2 章第 4 步）**：本回合首次 Agent 派发后，同一条消息**连发 3 次**（同命令重复发，自动认领不同槽位）：
 
@@ -255,7 +256,11 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | 崩溃实锤 | 10 分钟 | rollout 心跳停更 + tool_usage 无 running 行佐证；绕过双空闲门 |
 | 板不可读 | 立即 | 连续 3 tick，cap=2 |
 
-**退出条件**：全部签收且无在飞 → **静默 exit 0 自毁**（家族收工会有 3 条安静通知，无害 = 正常收工）；仅剩 workflow 在飞 → 同样自毁（workflow 由宿主通知）。寿命 24h 自限。**收到告警 → 按"疑似唤醒失败"接手 → 处置后补员**：再发 1 次同命令把家族补满（bg-gate 冷却戳与派发提醒照旧兜底）。
+**退出与待命（v0.5.1 待命制：常态 0 通知）**：
+- **全清 → 实例不退出**（全部签收且无在飞；含仅剩 workflow 在飞——workflow 由宿主完成通知，无需盯守）：槽位写 `state=standby` 转低频待命（板面复核默认 `max(wake_poll_sec, 300s)`，CLI `--standby-poll-sec` / cfg `standby_poll_sec` 可调；心跳照常刷新，bg-gate 与 `sentinel_health` 仍视其在岗——补员提醒天然抑制）。板面出现新在飞/未签收 → 自动复活回 active 正常值守；待命期板不可读静默续待命（不告警）。
+- **告警完全照旧**：分级阈值、双空闲门、逃逸口、cap 3 枪、abandoned 回声 + toast 全部不变（exit 1 该醒就醒）。
+- **寿命轮换（每寿命周期至多 1 条通知）**：实例到期（默认 24h）做单赢家选举——赢家写 `sentinel/family-teardown.json` 后 exit 0 退出（这条通知表示"本轮轮换完成"，无需处置），输家见新鲜标记自动顺延进入下一轮；家族逐轮递减直至消亡（会话结束后最多残留至各实例最后一轮，长驻是预期）。收到轮换通知可选择性补员（后台重发 3 次同命令），不补也行。
+- **补员纪律**：收到告警 → 按"疑似唤醒失败"接手 → 处置后再发 1 次同命令把家族补满（bg-gate 冷却戳与派发提醒照旧兜底）。升级窗口内新旧实例混跑不冲突：旧实例仍按旧语义全清自毁，过渡期少量安静通知属预期。
 
 **fired 仲裁与 abandoned**：同条件两枪最小间隔 5 分钟（错峰，多实例不会重复轰炸）；单条件封顶 3 枪，第 3 枪带 abandoned 标记并追加邮箱回声 + OS toast 兜底（3 枪全丢大概率是平台通知异常——**接手后检查通知链路**，别当没事）。`board(list)` 顶层 `sentinel_health` 给出家族在岗数、24h 开枪记录、abandoned 清单与回声摘要；`resume` 简报在家族缺员/有 abandoned 时给补员建议。
 
@@ -305,7 +310,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 **lessons 行为**：action ∈ list/add/promote/retire；list 默认 status=active 按 score 降序；add 可带 contradicts=<旧id> 记反例；候选由 report(kind=done, lessons=[…]) 产生，`lessons(list, status="candidate")` 查看待提炼。
 
-**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=全清自毁/到期/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances 在岗数 / shots_24h / abandoned / echo_tail）。
+**镜像与哨兵**：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=寿命轮换（单赢家选举，每寿命周期至多 1 条）/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances 在岗数 / shots_24h / abandoned / echo_tail）。
 
 **agent_harvest 行为**：`agent_harvest(mission_id|agent_id|session_id, tail?, max_chars?)` → 只读收割子代理 rollout 转录尾部（末条 model-io 记录内嵌全量对话），渲染带角色标签的文本；跨会话可用，TaskOutput 失效时的兜底；无转录（未派发/池工）报错并引导以 report artifacts 为准。
 
@@ -375,7 +380,7 @@ context_pack(isolation="worktree")            # materialize：分支+worktree+�
 
 **claim CAS 与租约**：`board(action="claim", mission_id, worker, lease_minutes?)`——owner 为空且状态 drafted/ready 且依赖全绿才可领；成功即 running 并写 {worker, token, claimedAt, leaseUntil}（token 缺失时补发）。worker 每次 report 自动续租（缺省租约取 userConfig `claim_lease_min`=30）；超时未续自动回 ready 可再领取（下一个写路径顺带回收，无需定时器）。两个池工抢同一任务，根锁内 CAS 恰一人成功，另一人 isError 附当前 owner。
 
-**池工模式**（同构任务池才需要，普通派发用不上）：主控显式 spawn 一个放行 board 的角色——`spawn_agent(name="orch-pool-<tag>", archetype="worker", tools=["report", "mcp__plugin_agent-orchestrator_orch__board"], system_prompt="你是池工：循环 claim→干活→report→再 claim，直到 claim 全部失败（无 ready）后正常结束；不要 upsert/ack，那两件事归主控")`——当前会话立即用则 `Agent(prompt=原型正文+system_prompt)` 注入。池工 claim 成功后按 next_hint：先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。
+**池工模式**（同构任务池才需要，普通派发用不上）：主控显式 spawn 一个放行 board 的角色——`spawn_agent(name="orch-pool-<tag>", archetype="worker", tools=["report", "mcp__plugin_agent-orchestrator_orch__board"], system_prompt="你是池工：循环 claim→干活→report→再 claim，直到 claim 全部失败（无 ready）后正常结束；不要 upsert/ack，那两件事归主控")`——宿主快照缺陷期间池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发（typed 挂不上 board/report 等 MCP 工具，第 10 章主形态）。池工 claim 成功后按 next_hint：先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。
 
 **口径（逐字）**：ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
 

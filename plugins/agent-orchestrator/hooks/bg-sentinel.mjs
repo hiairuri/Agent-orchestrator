@@ -8,7 +8,7 @@
  * 同命令连发 N 次（默认 3）= 错峰哨兵家族；--once 接受并忽略（0.3.1 肌肉记忆兼容）。
  * 退出 = 完成通知：主控空闲时开新回合、忙时并入当前回合。
  *
- * v2 语义（直至型，60s 判定、全清才退）：
+ * v2 语义（直至型，60s 判定；v2.1 全清转待命不退出）：
  *   - 启动即认领最低空闲槽位 <存储根>/sentinel/instance-<k>.json（wx 原子创建）；
  *     全满且全部新鲜 → exit 0 静默让位（家族拒绝超编）。
  *   - 错峰：槽位 k 首个 tick 前 sleep k×stagger_sec；此后 poll 周期加 k×5% 抖动。
@@ -27,9 +27,18 @@
  *     cap_window_min 内满 wake_cap 枪 → 封顶；第 cap 枪条目 final:true = abandoned）。
  *   - 回声：本地 echo.jsonl + 平台邮箱信封（六字段 + 写前自校验 + tmp+rename 毒丸规避）
  *     + abandoned 时 OS toast 兜底（fire-and-forget）。
- *   - 全清（无在飞非 workflow 且无未签收终态）→ 删自己槽位文件 → exit 0 静默自毁；
- *     仅剩 workflow 在飞 → B4 文案自毁（workflow 由宿主完成通知，无需盯守）。
- *   - 寿命 ≥ max_lifetime_min（默认 24h）→ exit 0 安静退出。
+ *   - 全清待命（v2.1，替代旧"全清自毁"）：全清（无在飞非 workflow 且无未签收终态；
+ *     含仅剩 workflow 在飞——workflow 由宿主完成通知，无需盯守）不退出。平台事实：
+ *     任何后台退出都会变成完成通知（全清三实例三连唤 = 实测缺陷），故槽位写
+ *     state=standby 转低频待命——tick 心跳仍按 poll 周期刷新（保 bg-gate/server 的
+ *     90s 在岗新鲜度，补员提醒天然抑制），板面读评节流到 standby_poll_sec
+ *     （默认 max(poll, 300s)）；板面出现新在飞/未签收 → 自动复活回 active 正常
+ *     盯守与告警。待命期板不可读 → 静默续待命（不计数不告警）。常态全清 0 条通知。
+ *   - 寿命 ≥ max_lifetime_min（默认 24h）→ 家族轮换单赢家选举（v2.1，替代旧
+ *     "各自安静退出"三连唤）：认领 sentinel/family-teardown.json（wx 原子创建；
+ *     陈旧/损坏标记可夺位；新鲜窗 = 读者自身 lifetimeMs）——赢家 exit 0 退出
+ *     （每个寿命周期至多 1 条通知），输家见新鲜标记顺延自身寿命（重置计时）进入
+ *     下一轮，家族逐轮递减直至消亡（长驻是预期）。
  *
  * 信号红线：对 board.json / spool 绝对只读；自有落盘全部在 <存储根>/sentinel/ 与
  * 平台邮箱 unread/；db.sqlite 仅 node:sqlite 以只读打开且仅查 tool_usage（动态
@@ -366,10 +375,11 @@ function coordBusy(rootDir, signals, boardMtimeMs, idleMs) {
 /* 家族槽位                                                             */
 /* ================================================================== */
 
-function slotDoc(startedAt, slot, tookOver, prev) {
+function slotDoc(startedAt, slot, tookOver, prev, state) {
   return {
     pid: process.pid,
     slot,
+    state: state === "standby" ? "standby" : "active", // v2.1 待命制；旧版文件无此字段 = active
     started_at: new Date(startedAt).toISOString(),
     heartbeatAt: new Date().toISOString(),
     ...(tookOver ? { took_over: true } : {}),
@@ -454,12 +464,12 @@ function claimSlot(sentDir, familySize, startedAt, staleDocs) {
   return { slot: -1, tookOver: false, prev: null };
 }
 
-function touchSlot(sentDir, slot, startedAt, tookOver, prev) {
+function touchSlot(sentDir, slot, startedAt, tookOver, prev, state) {
   try {
-    // 心跳 touch 保留接管痕迹（可观测性，B3 同款）
+    // 心跳 touch 保留接管痕迹（可观测性，B3 同款）；state 反映当前待命/值守（v2.1）
     fs.writeFileSync(
       path.join(sentDir, `instance-${slot}.json`),
-      JSON.stringify(slotDoc(startedAt, slot, tookOver, prev)) + "\n",
+      JSON.stringify(slotDoc(startedAt, slot, tookOver, prev, state)) + "\n",
     );
   } catch {
     /* best effort */
@@ -472,6 +482,60 @@ function releaseSlot(sentDir, slot) {
   } catch {
     /* ENOENT best effort */
   }
+}
+
+/* ================================================================== */
+/* 家族轮换选举（v2.1：寿命 cap 单赢家，每寿命周期至多 1 条通知）           */
+/* ================================================================== */
+
+function teardownFile(rootDir) {
+  return path.join(rootDir, "sentinel", "family-teardown.json");
+}
+
+/**
+ * 寿命到期时的单赢家选举：认领 <sentinel>/family-teardown.json（wx 原子创建）。
+ * 返回 true = 本实例是本轮唯一赢家（可退出——退出即通知，赢家仅此一枪）；
+ * 返回 false = 输家（见新鲜标记 / 竞争失败），调用方顺延自身寿命进入下一轮。
+ * 仲裁：新鲜标记（age < freshMs）→ 输家；无标记 → 认领；陈旧/损坏标记 → 夺位
+ * （复核后 unlink 再 wx）；并发竞争由 wx 串行化，3 轮尝试后仍败 → 本轮顺延，
+ * 绝不出现双赢家双退出。旧版实例不识此标记照旧自退出（混跑兼容，非 fatal）。
+ */
+function claimTeardown(rootDir, slot, freshMs) {
+  const f = teardownFile(rootDir);
+  const now = Date.now();
+  const readAt = () => {
+    try {
+      const t = Date.parse(String(JSON.parse(fs.readFileSync(f, "utf8")).at ?? ""));
+      return Number.isFinite(t) ? t : 0; // 坏 at 字段 → 视为最老（可夺位）
+    } catch {
+      return null; // 缺失或整文件损坏
+    }
+  };
+  const write = () => {
+    try {
+      fs.writeFileSync(
+        f,
+        JSON.stringify({ at: new Date(now).toISOString(), pid: process.pid, slot }) + "\n",
+        { flag: "wx" },
+      );
+      return true;
+    } catch {
+      return false; // EEXIST：他人先到（并发赢家或待夺位的旧标记）
+    }
+  };
+  for (let i = 0; i < 3; i++) {
+    const at = readAt();
+    if (at !== null && now - at < freshMs) return false; // 新鲜标记 → 输家顺延
+    if (write()) return true; // 无标记（或上轮已夺位删除）→ 赢家
+    const at2 = readAt(); // EEXIST → 复核：并发赢家刚写入？
+    if (at2 !== null && now - at2 < freshMs) return false;
+    try {
+      fs.unlinkSync(f); // 陈旧/损坏标记 → 夺位后重试
+    } catch {
+      /* gone：下轮 wx 直接认领 */
+    }
+  }
+  return false; // 极端竞争：本轮放弃（顺延），下轮再选
 }
 
 /* ================================================================== */
@@ -926,9 +990,13 @@ function main() {
 
   const resolveCfg = () => {
     const c = readCfg();
+    const pollMs = numArg(argv, "--poll-sec", c, "wake_poll_sec", 60, 1, 3600) * 1000;
     return {
       raw: c,
-      pollMs: numArg(argv, "--poll-sec", c, "wake_poll_sec", 60, 1, 3600) * 1000,
+      pollMs,
+      // v2.1 待命制：全清后板面低频复核周期（默认 ≥300s；心跳不受影响仍按 poll 刷新）
+      standbyPollMs:
+        numArg(argv, "--standby-poll-sec", c, "standby_poll_sec", Math.max(pollMs / 1000, 300), 1, 3600) * 1000,
       lifetimeMs:
         numArg(argv, "--max-lifetime-min", c, "max_lifetime_min", 1440, 0.01, 43200) * 60000,
       wakeGraceMs: numArgBridge(argv, "--wake-grace-min", c, "wake_grace_min", null, 5, 0.01, 1440) * 60000,
@@ -967,16 +1035,25 @@ function main() {
   let tickTimer = null;
   let tookOver = tookOverClaim; // 接管痕迹：touch 时保留（V2 可观测性）
   let tookOverPrev = tookOverPrevClaim;
+  let standby = false; // v2.1 待命制：全清不退出 → true 转低频待命
+  let lifetimeAnchor = startedAt; // 寿命 cap 锚：轮换输家顺延时重置
+  let lastEvalAt = 0; // 最近一次全量板面评估时刻（待命节流用）
 
   const tick = () => {
     const cfg = resolveCfg(); // B6
     const signals = signalsOf(cfg.raw);
+    const prevState = standby;
 
-    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev);
+    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, standby ? "standby" : "active");
 
-    if (Date.now() - startedAt >= cfg.lifetimeMs) {
-      finish(0, "[orch-sentinel] 哨兵达到最大寿命，静默退出。");
-      return;
+    if (Date.now() - lifetimeAnchor >= cfg.lifetimeMs) {
+      // 寿命 cap（v2.1 家族轮换）：单赢家选举——赢家唯一退出（退出即通知，每寿命
+      // 周期至多一枪）；输家见新鲜标记顺延自身寿命进入下一轮（长驻是预期）。
+      if (claimTeardown(root, slot, cfg.lifetimeMs)) {
+        finish(0, "[orch-sentinel] 家族轮换：本实例寿命到期退出（本轮唯一赢家），其余实例自动顺延；可选补员（后台重发 3 次哨兵命令）。");
+        return;
+      }
+      lifetimeAnchor = Date.now(); // 输家：重置计时进入下一轮
     }
 
     // prune：首 tick 或每 30 分钟（fired/echo 24h + legacy 锁一次性清理）
@@ -992,6 +1069,14 @@ function main() {
       firstTick = false;
     }
 
+    // v2.1 待命节流：active 每 tick 全量评估；standby 每 standby_poll_sec 才读板
+    // （心跳 touch 不节流，保 90s 在岗新鲜度）。板面出现新在飞/未签收即自动复活。
+    if (standby && Date.now() - lastEvalAt < cfg.standbyPollMs) {
+      tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
+      return;
+    }
+    lastEvalAt = Date.now();
+
     let boardMtime = NaN;
     try {
       boardMtime = fs.statSync(path.join(root, "board.json")).mtimeMs;
@@ -1000,6 +1085,11 @@ function main() {
     }
     const board = readBoardSafe(root);
     if (board === null) {
+      if (standby) {
+        // 待命期板不可读：无法证明有新活，静默续待命（不计数不告警——全清期 0 通知）
+        tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
+        return;
+      }
       if (boardFailTicks === 0) boardFailSince = Date.now(); // C0 anchor
       boardFailTicks += 1; // B2
       if (boardFailTicks >= BOARD_BAD_TICKS_LIMIT) {
@@ -1038,18 +1128,20 @@ function main() {
     const isWorkflow = (m) => (m.dispatch && m.dispatch.mode) === "workflow";
     const inFlightAll = missions.filter((m) => m && IN_FLIGHT_STATUSES.includes(m.status));
     const inFlightNW = inFlightAll.filter((m) => !isWorkflow(m));
-    const workflowNW = inFlightAll.filter(isWorkflow);
 
     if (!conds.length && !inFlightNW.length) {
-      if (workflowNW.length) {
-        // B4: workflow runs are hosted (the platform notifies on completion);
-        // never claim "all results claimed" when workflow missions remain.
-        finish(0, "[orch-sentinel] workflow 托管中，其余已签收，哨兵自毁。（workflow 由宿主完成通知，无需盯守）");
-        return;
-      }
-      finish(0, "[orch-sentinel] 无在飞任务且结果全部已签收，哨兵自毁。");
+      // v2.1 待命制：全清不退出（含仅剩 workflow 在飞——workflow 由宿主完成通知，
+      // 无需盯守）。平台事实：任何后台退出都变成完成通知 = 唤醒主控（旧版全清
+      // 三实例三连唤属缺陷）；故槽位标 state=standby 转低频待命，板面出现新在飞/
+      // 未签收 → 下一轮评估自动复活回 active 正常值守。
+      standby = true;
+      boardFailTicks = 0;
+      if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "standby");
+      tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
       return;
     }
+    standby = false; // 有活干（在飞或未签收）→ 恢复 active 值守
+    if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "active");
 
     const due = conds.filter(
       (c) => matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),

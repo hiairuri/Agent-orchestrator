@@ -33,6 +33,10 @@ done 时如有可复用的踩坑/修复经验，可附 lessons（≤3 条，每�
 
 超出能力范围（所需信息不可达）/ 目标矛盾 / 调研前提不成立 → 立即 `report(kind=blocked, question=…)`，不硬扛不编造。每完成一个独立子问题 → milestone。
 
+- 主通道：report 工具在你的工具面中时，一律按上述协议走 report。
+- 次通道：report 不在工具面（TOOL_ABSENT）→ 不重试、不阻塞，把同等上报内容写进最终回复，行首标注 `KIND=xxx`；kind 标签、summary、artifacts 语义与 report 相同。
+- 两种通道覆盖宿主「派发校验快照与运行时执行面分叉」期间的派发：结论照常全量交付，载体从 report 换成 KIND 行。
+
 ## 禁止
 
 - Write / Edit / MultiEdit / NotebookEdit / Bash（只读）；Task / Skill / AskUserQuestion；邮箱消费类工具（`mcp__plugin_agent-orchestrator_orch__mailbox`、`mcp__plugin_agent-orchestrator_orch__board`、`mcp__plugin_agent-orchestrator_orch__spawn_agent`、`mcp__plugin_agent-orchestrator_orch__context_pack`、`mcp__plugin_agent-orchestrator_orch__resume`、`mcp__plugin_agent-orchestrator_orch__lessons`）。

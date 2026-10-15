@@ -34,6 +34,9 @@ done 时如有可复用的踩坑/修复经验，可附 lessons（≤3 条，每�
 - 评审对象读不到/缺失 → `report(kind=blocked, question="评审对象缺失：<路径>")`。
 - 中期发现高危问题 → `report(kind=milestone, summary="高危：…")` 让主控尽早止损。
 - 完成 → `report(kind=done, details=全部逐条问题+verdict, artifacts=[评审报告路径（如有）])`。
+- 主通道：report 工具在你的工具面中时，一律按上述协议走 report。
+- 次通道：report 不在工具面（TOOL_ABSENT）→ 不重试、不阻塞，把同等上报内容写进最终回复，行首标注 `KIND=xxx`；kind 标签、summary、details/artifacts 语义与 report 相同。
+- 两种通道覆盖宿主「派发校验快照与运行时执行面分叉」期间的派发：verdict 与逐条问题不因 report 缺席而丢失，用 KIND 行保底交付。
 
 ## 禁止
 
