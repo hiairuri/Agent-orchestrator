@@ -18,6 +18,7 @@
  * custom root) if present, otherwise the default directory itself.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const MAX_OUTPUT_CHARS = 1500;
@@ -28,11 +29,18 @@ const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 const BRIEF_TOP_K = 3;
 const BRIEF_MAX_CHARS = 300;
 
-/* --- lessons digest (verbatim twin of server.mjs topLessonsBrief) --- */
+/* --- lessons digest (twin of server.mjs topLessonsBrief；v0.6 V6-57 起本副本
+     多做代理对回退，server 侧维持原样刻意分叉) --- */
 
 function truncateStr(value, max) {
   const s = String(value ?? "");
-  return s.length > max ? s.slice(0, max) : s;
+  if (s.length <= max) return s;
+  // v0.6 (V6-57): 切点落在高位代理（emoji 等前半）则回退一位，避免产出孤立代理。
+  const cut =
+    max > 0 && s.charCodeAt(max - 1) >= 0xd800 && s.charCodeAt(max - 1) <= 0xdbff
+      ? max - 1
+      : max;
+  return s.slice(0, cut);
 }
 
 function loadLessons(rootDir) {
@@ -142,26 +150,88 @@ function readStdinJson() {
   }
 }
 
+/* --- root-id 契约校验定根（v0.6；verbatim twin：五脚本同文，行为由 tests/suites/root-contract.mjs
+     矩阵锁定，零代码共享）---
+   分代门：temp 拒绝（两代通用）→ v2 强校验（root-id 比对）/ v1 弱校验（存在即采信 + stderr 提示）
+   → 任一失败回退默认根 + stderr 告警一行。hooks 不删指针（删除职责全归 server 自愈）。 */
+function isTempLikeDir(p) {
+  try {
+    const tmp = path.resolve(os.tmpdir());
+    const r = path.resolve(p);
+    const rel = path.relative(tmp, r);
+    return rel !== "" && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+function rootIdOf(rootPath) {
+  try {
+    return fs.readFileSync(path.join(rootPath, "root-id"), "utf8").trim();
+  } catch {
+    return ""; // 无 root-id（≤v0.4.0 旧版 server 根 / 非存储目录）
+  }
+}
+
+function rootContractStderr(msg) {
+  try {
+    process.stderr.write("[agent-orchestrator] " + msg + "\n");
+  } catch {
+    /* stderr 不可写也不阻塞 */
+  }
+}
+
+/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根静默；
+ *  任一校验失败 → 回退默认根 + stderr 告警。不删指针。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
   try {
     const pointer = path.join(defaultRoot, "root.txt");
-    if (fs.existsSync(pointer)) {
-      const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) {
-        // v0.4.1: a dangling pointer (deleted test root / moved storage) must not
-        // drag hook writes onto a nonexistent path — fall back to the default.
-        try {
-          if (fs.statSync(custom).isDirectory()) return custom;
-        } catch {
-          /* dangling → fall through to default root */
-        }
-      }
+    if (!fs.existsSync(pointer)) return defaultRoot;
+    const lines = fs
+      .readFileSync(pointer, "utf8")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!lines.length) return defaultRoot; // 空指针 ≈ 无指针（静默）
+    const target = lines[0];
+    if (isTempLikeDir(target)) {
+      rootContractStderr("root.txt 指针未通过归属校验（目标位于临时目录），已回退默认根");
+      return defaultRoot;
     }
+    let live = false;
+    try {
+      live = fs.statSync(target).isDirectory();
+    } catch {
+      live = false; // 悬空指针
+    }
+    if (!live) {
+      rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
+      return defaultRoot;
+    }
+    const rid = rootIdOf(target);
+    if (lines.length >= 2) {
+      // v2 强校验：目标存活 ∧ root-id 存在 ∧ 内容 === 指针内嵌 id
+      if (!rid) {
+        rootContractStderr("root.txt 指针未通过归属校验（目标根缺少 root-id），已回退默认根");
+        return defaultRoot;
+      }
+      if (rid !== lines[1]) {
+        rootContractStderr("root.txt 指针未通过归属校验（root-id 与指针内嵌 id 失配），已回退默认根");
+        return defaultRoot;
+      }
+      return target;
+    }
+    // v1 弱校验（v0.4.1–v0.5.1 旧格式兼容）：目标存活 ∧ root-id 存在即采信（值不比对）
+    if (!rid) {
+      rootContractStderr("root.txt 指针未通过归属校验（旧格式指针且目标根无 root-id），已回退默认根");
+      return defaultRoot;
+    }
+    rootContractStderr("root.txt 为旧格式指针（v1 弱校验已采信），重启 server 后自动升级");
+    return target;
   } catch {
-    /* fall through to default */
+    return defaultRoot; // 任何意外 → 默认根（fail-open，不阻塞）
   }
-  return defaultRoot;
 }
 
 function loadBoard(rootDir) {
@@ -246,7 +316,7 @@ function main() {
   );
 
   let text = lines.join("\n");
-  if (text.length > MAX_OUTPUT_CHARS) text = text.slice(0, MAX_OUTPUT_CHARS - 3) + "...";
+  if (text.length > MAX_OUTPUT_CHARS) text = truncateStr(text, MAX_OUTPUT_CHARS - 3) + "...";
   process.stdout.write(JSON.stringify({ additionalContext: text }));
 }
 

@@ -107,27 +107,88 @@ function numArgBridge(argv, flag, cfg, cfgKey, bridgeKey, def, min, max) {
   return def;
 }
 
-/** 存储根发现：root.txt 指针优先；指针目标目录不存在（悬空，如已清理的测试根）
- *  → 回退默认根，绝不重建悬空路径。 */
+/* --- root-id 契约校验定根（v0.6；verbatim twin：五脚本同文，行为由 tests/suites/root-contract.mjs
+     矩阵锁定，零代码共享）---
+   分代门：temp 拒绝（两代通用）→ v2 强校验（root-id 比对）/ v1 弱校验（存在即采信 + stderr 提示）
+   → 任一失败回退默认根 + stderr 告警一行。hooks 不删指针（删除职责全归 server 自愈）。 */
+function isTempLikeDir(p) {
+  try {
+    const tmp = path.resolve(os.tmpdir());
+    const r = path.resolve(p);
+    const rel = path.relative(tmp, r);
+    return rel !== "" && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+function rootIdOf(rootPath) {
+  try {
+    return fs.readFileSync(path.join(rootPath, "root-id"), "utf8").trim();
+  } catch {
+    return ""; // 无 root-id（≤v0.4.0 旧版 server 根 / 非存储目录）
+  }
+}
+
+function rootContractStderr(msg) {
+  try {
+    process.stderr.write("[agent-orchestrator] " + msg + "\n");
+  } catch {
+    /* stderr 不可写也不阻塞 */
+  }
+}
+
+/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根静默；
+ *  任一校验失败 → 回退默认根 + stderr 告警。不删指针。--root 显式指定时仍直通不校验。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
   try {
     const pointer = path.join(defaultRoot, "root.txt");
-    if (fs.existsSync(pointer)) {
-      const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) {
-        try {
-          const st = fs.statSync(custom);
-          if (st.isDirectory()) return custom;
-        } catch {
-          /* 悬空指针 → 回退默认根 */
-        }
-      }
+    if (!fs.existsSync(pointer)) return defaultRoot;
+    const lines = fs
+      .readFileSync(pointer, "utf8")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!lines.length) return defaultRoot; // 空指针 ≈ 无指针（静默）
+    const target = lines[0];
+    if (isTempLikeDir(target)) {
+      rootContractStderr("root.txt 指针未通过归属校验（目标位于临时目录），已回退默认根");
+      return defaultRoot;
     }
+    let live = false;
+    try {
+      live = fs.statSync(target).isDirectory();
+    } catch {
+      live = false; // 悬空指针
+    }
+    if (!live) {
+      rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
+      return defaultRoot;
+    }
+    const rid = rootIdOf(target);
+    if (lines.length >= 2) {
+      // v2 强校验：目标存活 ∧ root-id 存在 ∧ 内容 === 指针内嵌 id
+      if (!rid) {
+        rootContractStderr("root.txt 指针未通过归属校验（目标根缺少 root-id），已回退默认根");
+        return defaultRoot;
+      }
+      if (rid !== lines[1]) {
+        rootContractStderr("root.txt 指针未通过归属校验（root-id 与指针内嵌 id 失配），已回退默认根");
+        return defaultRoot;
+      }
+      return target;
+    }
+    // v1 弱校验（v0.4.1–v0.5.1 旧格式兼容）：目标存活 ∧ root-id 存在即采信（值不比对）
+    if (!rid) {
+      rootContractStderr("root.txt 指针未通过归属校验（旧格式指针且目标根无 root-id），已回退默认根");
+      return defaultRoot;
+    }
+    rootContractStderr("root.txt 为旧格式指针（v1 弱校验已采信），重启 server 后自动升级");
+    return target;
   } catch {
-    /* fall through */
+    return defaultRoot; // 任何意外 → 默认根（fail-open，不阻塞）
   }
-  return defaultRoot;
 }
 
 /* --- board / wake-failure helpers: verbatim twin of server.mjs & hooks --- */
@@ -375,11 +436,12 @@ function coordBusy(rootDir, signals, boardMtimeMs, idleMs) {
 /* 家族槽位                                                             */
 /* ================================================================== */
 
-function slotDoc(startedAt, slot, tookOver, prev, state) {
+function slotDoc(startedAt, slot, tookOver, prev, state, rootDir) {
   return {
     pid: process.pid,
     slot,
     state: state === "standby" ? "standby" : "active", // v2.1 待命制；旧版文件无此字段 = active
+    root: rootDir ?? null, // V6-56 观测性：槽位自证解析根（root-id 契约下排障用）
     started_at: new Date(startedAt).toISOString(),
     heartbeatAt: new Date().toISOString(),
     ...(tookOver ? { took_over: true } : {}),
@@ -427,7 +489,7 @@ function pruneStaleSlots(sentDir, familySize) {
 }
 
 /** 认领最低空闲槽位；返回 {slot, tookOver, prev}；全满且全部新鲜 → slot=-1（静默让位）。 */
-function claimSlot(sentDir, familySize, startedAt, staleDocs) {
+function claimSlot(sentDir, familySize, startedAt, staleDocs, rootDir) {
   for (let k = 0; k < familySize; k++) {
     const f = path.join(sentDir, `instance-${k}.json`);
     let doc = null;
@@ -446,7 +508,7 @@ function claimSlot(sentDir, familySize, startedAt, staleDocs) {
       if (slotFresh(doc, mtimeMs)) continue; // 他人新鲜在岗 → 下一槽位
       // 接管（pid 死或心跳龄 >90s）：改写并记录 prev
       try {
-        fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, true, doc)) + "\n");
+        fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, true, doc, undefined, rootDir)) + "\n");
         return { slot: k, tookOver: true, prev: doc };
       } catch {
         continue;
@@ -455,7 +517,7 @@ function claimSlot(sentDir, familySize, startedAt, staleDocs) {
     const prev = staleDocs && staleDocs.has(k) ? staleDocs.get(k) : null;
     const tookOver = Boolean(prev);
     try {
-      fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, tookOver, prev)) + "\n", { flag: "wx" });
+      fs.writeFileSync(f, JSON.stringify(slotDoc(startedAt, k, tookOver, prev, undefined, rootDir)) + "\n", { flag: "wx" });
       return { slot: k, tookOver, prev };
     } catch {
       /* EEXIST：竞争败者 → 下一槽位 */
@@ -464,12 +526,22 @@ function claimSlot(sentDir, familySize, startedAt, staleDocs) {
   return { slot: -1, tookOver: false, prev: null };
 }
 
-function touchSlot(sentDir, slot, startedAt, tookOver, prev, state) {
+function touchSlot(sentDir, slot, startedAt, tookOver, prev, state, rootDir) {
   try {
+    const f = path.join(sentDir, `instance-${slot}.json`);
+    // v0.6 (V6-55)：touch 前重读槽位校验 pid 归属——被接管实例苏醒后让位（不覆盖
+    // 他人心跳），退为无槽幽灵（firedEligible/claimShots 仲裁本就防双开枪，幽灵只
+    // 损失观测在岗性）；后续 tick 持续让位。不改 slotDoc 结构，待命制零冲突。
+    try {
+      const cur = JSON.parse(fs.readFileSync(f, "utf8"));
+      if (cur && Number.isFinite(cur.pid) && cur.pid !== process.pid) return;
+    } catch {
+      /* 缺失/坏文件 → 无法证明他人所有，照常 touch（心跳保鲜优先） */
+    }
     // 心跳 touch 保留接管痕迹（可观测性，B3 同款）；state 反映当前待命/值守（v2.1）
     fs.writeFileSync(
-      path.join(sentDir, `instance-${slot}.json`),
-      JSON.stringify(slotDoc(startedAt, slot, tookOver, prev, state)) + "\n",
+      f,
+      JSON.stringify(slotDoc(startedAt, slot, tookOver, prev, state, rootDir)) + "\n",
     );
   } catch {
     /* best effort */
@@ -609,7 +681,9 @@ function claimShots(rootDir, due, cfg, slot) {
       final: isFinal,
       summary_head: buildSummary([c], cfg).replace(/\s+/g, " ").slice(0, 200),
     };
-    const name = `${c.key}--${c.category}--${now}--${process.pid}.json`;
+    // v0.6 (V6-54)：文件名去 pid——同 key+category+同毫秒的双实例写同名文件，
+    // wx 恢复「恰一成功」互斥（旧名带 pid 各写各名，读-写间隙留下双开枪 TOCTOU 窗）。
+    const name = `${c.key}--${c.category}--${now}.json`;
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name), JSON.stringify(doc) + "\n", { flag: "wx" });
@@ -805,21 +879,31 @@ function classify(board, boardMtimeMs, cfg, rootDir, signals) {
         // 佐证无 running 行 → 实锤宽限；有行（可能长工具）或佐证不可用 → 保守档 ×3
         const thresholdMs = running === false ? cfg.crashGraceMs : cfg.crashGraceMs * 3;
         if (ageMs >= thresholdMs) {
-          conds.push({
-            key: String(m.id),
-            category: "crash",
-            mission: m,
-            title,
-            status: m.status,
-            anchorMs: hb,
-            graceMs: cfg.crashGraceMs,
-            ageMs,
-            bypassGate: true,
-          });
-          continue; // 一 mission 一条件（取最严）
+          // V6-32 板面龄期反证：lastActivity 与 board mtime 双陈旧（板面全死）时
+          // C3 降级 C2 受双空闲门，避免对整块陈旧板面绕门开枪；活板真崩溃照旧绕门。
+          // 与 v2.1 待命制正交（待命制管全清、本条管有在飞但全陈旧）。
+          let la = lastActivityMs(m);
+          if (la == null && Number.isFinite(boardMtimeMs)) la = boardMtimeMs; // 与 C2 同备链
+          const laStale = la != null && Math.max(0, now - la) >= Math.max(cfg.stallGraceMs, cfg.crashGraceMs * 3);
+          const boardStale = Number.isFinite(boardMtimeMs) && Math.max(0, now - boardMtimeMs) >= cfg.crashGraceMs * 3;
+          if (!(laStale && boardStale)) {
+            conds.push({
+              key: String(m.id),
+              category: "crash",
+              mission: m,
+              title,
+              status: m.status,
+              anchorMs: hb,
+              graceMs: cfg.crashGraceMs,
+              ageMs,
+              bypassGate: true,
+            });
+            continue; // 一 mission 一条件（取最严）
+          }
+          // 反证成立 → 不在此开枪，落下方 C2 inflight_stall（受双空闲门）
         }
       }
-      // rollout 缺失/未到期 → 本 mission 落 C2（降级链终端，绝不告警"找不到心跳文件"）
+      // rollout 缺失/未到期/反证成立 → 本 mission 落 C2（降级链终端，绝不告警"找不到心跳文件"）
     }
 
     // C1 未签收终态（board 正据，沿用 wakeFailureInfo 口径）
@@ -1022,7 +1106,7 @@ function main() {
   fs.mkdirSync(sentDir, { recursive: true });
   const first = resolveCfg();
   const staleDocs = pruneStaleSlots(sentDir, first.familySize);
-  const claimed = claimSlot(sentDir, first.familySize, startedAt, staleDocs);
+  const claimed = claimSlot(sentDir, first.familySize, startedAt, staleDocs, root);
   const slot = claimed.slot;
   if (slot < 0) process.exit(0);
   let tookOverClaim = claimed.tookOver;
@@ -1044,7 +1128,7 @@ function main() {
     const signals = signalsOf(cfg.raw);
     const prevState = standby;
 
-    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, standby ? "standby" : "active");
+    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, standby ? "standby" : "active", root);
 
     if (Date.now() - lifetimeAnchor >= cfg.lifetimeMs) {
       // 寿命 cap（v2.1 家族轮换）：单赢家选举——赢家唯一退出（退出即通知，每寿命
@@ -1136,12 +1220,12 @@ function main() {
       // 未签收 → 下一轮评估自动复活回 active 正常值守。
       standby = true;
       boardFailTicks = 0;
-      if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "standby");
+      if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "standby", root);
       tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
       return;
     }
     standby = false; // 有活干（在飞或未签收）→ 恢复 active 值守
-    if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "active");
+    if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "active", root);
 
     const due = conds.filter(
       (c) => matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),

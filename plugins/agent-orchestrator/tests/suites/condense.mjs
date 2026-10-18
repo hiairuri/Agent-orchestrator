@@ -2,7 +2,8 @@
  * suites/condense.mjs —— CR-V9（tail=0 探测零回显+元数据逐位）/ CR-V10（≥1MB 大末行+中途重写）
  *   + CR-V16（①缺失不 throw 不动板 ②0.4.1 逐字节回归双进程对拍）+ 工具清单不变量
  *
- * 覆盖断言组：浓缩组 CR-V9/V10/V16①②（步级定义 D2 §7）；工具名集合与 0.4.1 完全一致。
+ * 覆盖断言组：浓缩组 CR-V9/V10/V16①②（步级定义 D2 §7）；工具名集合与 0.4.1 兼容
+ *   （旧十名依序保留为前缀、唯一新增 probe 尾接——v0.6 A6 口径）。
  *   转录自 v05-impl-07/acc.mjs（ORCH_ROLLOUT_DIR 测试缝注入夹具）。
  *   CR-V16③（浓缩 mission 无申报的后继 L2 回退）由 suites/crv2-pack 的 CR-V25 覆盖。
  *
@@ -134,10 +135,17 @@ try {
   // ---------- 不变量 ----------
   const tl = await cur.tools();
   const names = tl.tools.map((t) => t.name);
-  ck.ok("tools/list = 10", names.length === 10, names.length);
+  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", names.length === 11, names.length);
   if (old) {
     const tlOld = await old.tools();
-    ck.ok("工具名集合与 0.4.1 完全一致", JSON.stringify(names) === JSON.stringify(tlOld.tools.map((t) => t.name)), names);
+    const legacy = tlOld.tools.map((t) => t.name);
+    // v0.6 A6：兼容不变量同步——0.4.1 旧十名依序保留为前缀，唯一新增 probe 尾接
+    //（既有工具名与顺序零漂移的语义不变，仅为设计内第 11 号工具放行）。
+    ck.ok("工具名集合与 0.4.1 兼容：旧十名依序为前缀 + probe 尾接",
+      names.length === legacy.length + 1 &&
+      JSON.stringify(names.slice(0, legacy.length)) === JSON.stringify(legacy) &&
+      names[names.length - 1].endsWith("__probe"),
+      { last: names[names.length - 1] });
   }
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));

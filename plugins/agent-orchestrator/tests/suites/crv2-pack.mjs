@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startServer, Checker } from "../harness/jsonrpc-client.mjs";
-import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
+import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo, repoRoot, exportFileFromGit } from "../harness/git-fixture.mjs";
 
 const ck = new Checker("crv2-pack");
@@ -25,7 +25,15 @@ const SCRATCH = path.join(BASE.root, "scratch");
 const sectionsOf = (md) => !md ? [] : md.split("\n").filter((l) => l.startsWith("## "))
   .map((l) => l.replace(/^## ([^（(]*)?.*/, "$1").trim()).map((l) => l.split("（")[0].split("(")[0].trim());
 const readPack = (rel) => { const p = path.join(TROOT, rel); return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null; };
-const normToken = (s) => String(s).replace(/\[token\] [0-9a-f]{4,16}/g, "[token] X").replace(/"token":"[0-9a-f]{4,16}"/g, '"token":"X"');
+// normToken 归一化易变面：token（原）+ 0.6 E-17 胶水行的 artifacts 软约束注记（主控 2026-10-15
+// 裁决 A 授权：server.mjs 任务包模板按卡内裁决变字，对拍除该预期增量外仍逐字节，A-v060 见 v0.6.x.md §0）
+// + 0.6 A2 V6-18 的 CONTEXT 节头围栏句（主控 2026-10-15 批复授权，A-v060-INJ-03）
+// + 0.6 A3 V6-09 熵升级 hex(4)→hex(16)（主控 2026-10-15 批复授权：{4,16}→{4,32}，归一化语义不变）
+const normToken = (s) => String(s)
+  .replace(/\[token\] [0-9a-f]{4,32}/g, "[token] X")
+  .replace(/"token":"[0-9a-f]{4,32}"/g, '"token":"X"')
+  .replace(/done 必带 artifacts 路径（软约束：[^）]*）。/g, "done 必带 artifacts 路径。")
+  .replace(/## CONTEXT（[^）]*）/g, "## CONTEXT 节头");
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const rmRetry = (d) => { for (let i = 0; i < 6; i++) { try { fs.rmSync(d, { recursive: true, force: true }); return; } catch (e) { if (i === 5) throw e; sleep(250); } } };
 
@@ -55,6 +63,16 @@ async function scenarioA(s) {
   return packs;
 }
 
+/** v0.6 A4 夹具适配（主控批复授权，见 v0.6.x.md §0）：create-as-done 被 V6-20 迁移
+ *  白名单合法拒绝（终态无直达）——done mission 夹具统一改直写 board.json 种子
+ *  （server 每调用 fresh load），断言主句零改动。 */
+function seedDoneBoard(mid, over = {}) {
+  const p = path.join(TROOT, "board.json");
+  const board = JSON.parse(fs.readFileSync(p, "utf8"));
+  board.missions.push(blankMission({ id: mid, title: over.title ?? mid + " 标题", status: "done", ...over }));
+  fs.writeFileSync(p, JSON.stringify(board, null, 2) + "\n");
+}
+
 /** 种一个三条目 sidecar（T0 directive/T1 conclusion/T2 anchor）+ 对应 done mission */
 async function seedSidecar(root, mid, { absPaths = false, PROJ: proj } = {}) {
   fs.mkdirSync(path.join(root, "packs", mid), { recursive: true });
@@ -66,7 +84,7 @@ async function seedSidecar(root, mid, { absPaths = false, PROJ: proj } = {}) {
   ];
   fs.writeFileSync(path.join(root, "packs", mid, "manifest.json"),
     JSON.stringify({ v: 1, mission_id: mid, generated_at: "2026-10-13T00:00:00.000Z", source: "worker", entries }, null, 2) + "\n");
-  await cur.call("board", { action: "upsert", mission: { id: mid, title: mid + " 标题", status: "done" } });
+  seedDoneBoard(mid);
 }
 
 let cur = null;
@@ -93,7 +111,7 @@ try {
   const repo = freshFixture();
   cur = startServer({ root: TROOT, cwd: PROJ });
   const tl = await cur.tools();
-  ck.ok("tools/list = 10", tl.tools?.length === 10, tl.tools?.length);
+  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", tl.tools?.length === 11, tl.tools?.length);
   const packsNew = await scenarioA(cur);
 
   // ---- CRV2-05 / CR-V22：缺省包与 0.4.1 逐字节（token 归一化）
@@ -194,7 +212,7 @@ try {
       ]) entries.push({ id: eid, layer, type: layer === "T0" ? "directive" : "anchor", title, text, ref, source: "worker" });
       fs.writeFileSync(path.join(TROOT, "packs", mid, "manifest.json"),
         JSON.stringify({ v: 1, mission_id: mid, generated_at: "2026-10-13T00:00:00.000Z", source: "worker", entries }, null, 2) + "\n");
-      await cur.call("board", { action: "upsert", mission: { id: mid, title: mid + " 标题", status: "done" } });
+      seedDoneBoard(mid);
     }
     const collideLine = "docs/mC.md（§目标）——来自 mC#c01";
     await cur.call("context_pack", { mission_id: "mR6", title: "超帽去重包", task: "t", inputs: ["mA", "mB", "mC", "mB"], read_first: [collideLine] });
@@ -206,15 +224,15 @@ try {
   }
 
   // ---- CR-V25：回退链（L1 server 桩 sidecar / L2 存量无 sidecar / L3 零产物 / 混合 / 损坏侧车）
-  await cur.call("board", { action: "upsert", mission: { id: "m4", title: "存量任务", status: "done", artifacts: ["reports/legacy.md"] } });
+  seedDoneBoard("m4", { artifacts: ["reports/legacy.md"] });
   await cur.call("report", { mission_id: "m4", worker: "rig", kind: "done", summary: "存量 mission 的最后一次 done 摘要" });
   // m4n：0.4.x 存量形态（有 artifacts、从未 done report → 无 sidecar 无 manifest）→ L2
-  await cur.call("board", { action: "upsert", mission: { id: "m4n", title: "存量无report", status: "done", artifacts: ["reports/legacy.md"] } });
-  await cur.call("board", { action: "upsert", mission: { id: "m5", title: "零产物任务", status: "done" } });
+  seedDoneBoard("m4n", { artifacts: ["reports/legacy.md"] });
+  seedDoneBoard("m5");
   await cur.call("report", { mission_id: "m5", worker: "rig", kind: "done", summary: "零产物收尾" });
   fs.mkdirSync(path.join(TROOT, "packs", "m6"), { recursive: true });
   fs.writeFileSync(path.join(TROOT, "packs", "m6", "manifest.json"), "{这不是JSON!!");
-  await cur.call("board", { action: "upsert", mission: { id: "m6", title: "损坏侧车任务", status: "done", artifacts: ["reports/m6.md"] } });
+  seedDoneBoard("m6", { artifacts: ["reports/m6.md"] });
 
   await cur.call("context_pack", { mission_id: "mR7", title: "L1 存量牵引", task: "t", inputs: ["m4"] });
   const pR7 = readPack("packs/mR7/pack.md");

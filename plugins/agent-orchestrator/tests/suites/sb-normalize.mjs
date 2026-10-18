@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
-import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
+import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo, makeOobChange } from "../harness/git-fixture.mjs";
 
 const ck = new Checker("sb-normalize");
@@ -36,9 +36,27 @@ const G = makeRepo({ dir: path.join(T.root, "repoG") });
 const s = startServer({ root: T.root, cwd: G.dir });
 const boardFile = () => JSON.parse(fs.readFileSync(path.join(T.root, "board.json"), "utf8"));
 const mission = (id) => boardFile().missions.find((x) => x && x.id === id);
-const toDone = async (mid) => {
-  await s.call("report", { mission_id: mid, worker: "orch-worker#1", kind: "done", summary: "verify done" });
-  await s.call("board", { action: "upsert", mission: { id: mid, qa: { verdict: "pass", note: "auto" } } });
+const toDone = async (mid, token) => {
+  // 0.6 A3 契约适配（主控 2026-10-15 批复授权，见 v0.6.x.md §0）：V6-09 fail-closed 后
+  // 携 token mission 的 report 必须带派发 token；V6-42 起 apply 门槛 qa 为评审链结构体
+  // （建 mid-rev reviewer mission 互指目标，再回写目标 qa）。
+  await s.call("report", { mission_id: mid, worker: "orch-worker#1", kind: "done", summary: "verify done", token });
+  // 0.6 A4 夹具适配（主控 2026-10-15 批复授权，见 v0.6.x.md §0）：reviewer mission 的
+  // create-as-done 被 V6-20 迁移白名单合法拒绝（终态无直达）——改直写板种子。
+  const bf = boardFile();
+  bf.missions.push(
+    blankMission({
+      id: mid + "-rev",
+      agent_type: "agent-orchestrator:orch-reviewer",
+      status: "done",
+      qa: { verdict: "pass", mission_id: mid },
+    }),
+  );
+  fs.writeFileSync(path.join(T.root, "board.json"), JSON.stringify(bf, null, 2) + "\n");
+  await s.call("board", {
+    action: "upsert",
+    mission: { id: mid, status: "done", qa: { verdict: "pass", reviewed_by: mid + "-rev", reviewed_at: new Date().toISOString() } },
+  });
 };
 const wtCommit = (wt, msg) => { G.git(["add", "-A"], wt); G.git(["commit", "-m", msg], wt); };
 const newMission = async (title) => {
@@ -62,7 +80,7 @@ try {
   ck.ok("SB1 pack 不含未改写 projectDir 前缀", !pack1.includes(fwd(G.dir) + "/src/a.txt"));
 
   // ---------- SB2 越界检出 ----------
-  await toDone(m1);
+  await toDone(m1, a.json?.token);
   makeOobChange(wt1, "README.md");
   wtCommit(wt1, "oob change");
   const ap1 = await s.call("sandbox_apply", { mission_id: m1 });
@@ -90,7 +108,7 @@ try {
   const c = await s.call("context_pack", { mission_id: m3, title: "M02", task: "t", isolation: "worktree", oob_allowlist: [" src/", "src\\b"] });
   const wt3 = path.join(T.root, "sandboxes", m3);
   ck.ok("M-02 存储为归一化列表", !c.isError && eq(mission(m3)?.pack?.sandbox?.oob_allowlist, ["src/", "src/b"]), mission(m3)?.pack?.sandbox?.oob_allowlist);
-  await toDone(m3);
+  await toDone(m3, c.json?.token);
   fs.mkdirSync(path.join(wt3, "src"), { recursive: true });
   fs.writeFileSync(path.join(wt3, "src", "b.txt"), "b\n");
   wtCommit(wt3, "feat b");

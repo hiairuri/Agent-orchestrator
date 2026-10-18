@@ -18,11 +18,14 @@
  * v0.4.1: on-duty detection reads the sentinel v2 family directory (fresh
  * instance-<k>.json slots; the legacy sentinel.lock still counts during the
  * upgrade window). Dispatch-contract check: a background dispatch whose prompt
- * carries [channel]/[token] lines is matched against the board — an unregistered
+ * [token] lines is matched against the board — an unregistered
  * or mismatched contract gets a remind-only warning (worker reports would be
  * rejected), never a denial.
+ * v0.6 (B4/V6-52): fail-open 保留但「静默放行」降为「明示放行」——板不可读与顶层
+ * 异常时输出「契约校验跳过」一句（allow 不变，永不拦派发；10s 超时层不动）。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -66,25 +69,88 @@ function onOffHint(raw) {
   return String(raw ?? "").trim() !== "off";
 }
 
-/** 存储根发现：root.txt 指针优先；指针目标目录不存在（悬空）→ 回退默认根。 */
+/* --- root-id 契约校验定根（v0.6；verbatim twin：五脚本同文，行为由 tests/suites/root-contract.mjs
+     矩阵锁定，零代码共享）---
+   分代门：temp 拒绝（两代通用）→ v2 强校验（root-id 比对）/ v1 弱校验（存在即采信 + stderr 提示）
+   → 任一失败回退默认根 + stderr 告警一行。hooks 不删指针（删除职责全归 server 自愈）。 */
+function isTempLikeDir(p) {
+  try {
+    const tmp = path.resolve(os.tmpdir());
+    const r = path.resolve(p);
+    const rel = path.relative(tmp, r);
+    return rel !== "" && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+function rootIdOf(rootPath) {
+  try {
+    return fs.readFileSync(path.join(rootPath, "root-id"), "utf8").trim();
+  } catch {
+    return ""; // 无 root-id（≤v0.4.0 旧版 server 根 / 非存储目录）
+  }
+}
+
+function rootContractStderr(msg) {
+  try {
+    process.stderr.write("[agent-orchestrator] " + msg + "\n");
+  } catch {
+    /* stderr 不可写也不阻塞 */
+  }
+}
+
+/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根静默；
+ *  任一校验失败 → 回退默认根 + stderr 告警。不删指针。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
   try {
     const pointer = path.join(defaultRoot, "root.txt");
-    if (fs.existsSync(pointer)) {
-      const custom = fs.readFileSync(pointer, "utf8").trim();
-      if (custom) {
-        try {
-          if (fs.statSync(custom).isDirectory()) return custom;
-        } catch {
-          /* 悬空指针 → 回退默认根 */
-        }
-      }
+    if (!fs.existsSync(pointer)) return defaultRoot;
+    const lines = fs
+      .readFileSync(pointer, "utf8")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!lines.length) return defaultRoot; // 空指针 ≈ 无指针（静默）
+    const target = lines[0];
+    if (isTempLikeDir(target)) {
+      rootContractStderr("root.txt 指针未通过归属校验（目标位于临时目录），已回退默认根");
+      return defaultRoot;
     }
+    let live = false;
+    try {
+      live = fs.statSync(target).isDirectory();
+    } catch {
+      live = false; // 悬空指针
+    }
+    if (!live) {
+      rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
+      return defaultRoot;
+    }
+    const rid = rootIdOf(target);
+    if (lines.length >= 2) {
+      // v2 强校验：目标存活 ∧ root-id 存在 ∧ 内容 === 指针内嵌 id
+      if (!rid) {
+        rootContractStderr("root.txt 指针未通过归属校验（目标根缺少 root-id），已回退默认根");
+        return defaultRoot;
+      }
+      if (rid !== lines[1]) {
+        rootContractStderr("root.txt 指针未通过归属校验（root-id 与指针内嵌 id 失配），已回退默认根");
+        return defaultRoot;
+      }
+      return target;
+    }
+    // v1 弱校验（v0.4.1–v0.5.1 旧格式兼容）：目标存活 ∧ root-id 存在即采信（值不比对）
+    if (!rid) {
+      rootContractStderr("root.txt 指针未通过归属校验（旧格式指针且目标根无 root-id），已回退默认根");
+      return defaultRoot;
+    }
+    rootContractStderr("root.txt 为旧格式指针（v1 弱校验已采信），重启 server 后自动升级");
+    return target;
   } catch {
-    /* fall through to default */
+    return defaultRoot; // 任何意外 → 默认根（fail-open，不阻塞）
   }
-  return defaultRoot;
 }
 
 function pidAlive(pid) {
@@ -179,8 +245,15 @@ function sentinelHintText() {
  * never match, so it never triggers an escalation.
  */
 const MISSION_ID_SHAPE = /^m-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$/;
+// v0.6 (V6-52): 板不可读的明示放行信号——contractWarn 读板失败时置位，main 据此把
+// 「静默放行」降为「明示放行」（fail-open 产品不变量保留：闸门永不拦派发）。
+let boardUnreadable = false;
+// v0.6 (V6-53): 契约头正则单一来源——missionIdShaped / contractWarn / longTaskWhy
+// 三处同源引用，消除旧 longTaskWhy 窄正则（无前导空白容忍）的分叉。
+// 只认半角方括号：context_pack 模板只产半角，全角不放宽（避免扩大触发面）。
+const CONTRACT_HEAD = /^\s*\[channel\]\s*(\S+)/m;
 function missionIdShaped(prompt) {
-  const ch = /^\s*\[channel\]\s*(\S+)/m.exec(typeof prompt === "string" ? prompt : "");
+  const ch = CONTRACT_HEAD.exec(typeof prompt === "string" ? prompt : "");
   return Boolean(ch && MISSION_ID_SHAPE.test(String(ch[1])));
 }
 
@@ -188,7 +261,7 @@ function contractWarn(prompt, rootDir) {
   try {
     const text = typeof prompt === "string" ? prompt : "";
     if (!text) return "";
-    const ch = /^\s*\[channel\]\s*(\S+)/m.exec(text);
+    const ch = CONTRACT_HEAD.exec(text);
     const tk = /^\s*\[token\]\s*(\S+)/m.exec(text);
     if (!ch && !tk) return "";
     const channel = ch ? String(ch[1]) : "";
@@ -200,6 +273,7 @@ function contractWarn(prompt, rootDir) {
     try {
       board = JSON.parse(fs.readFileSync(path.join(rootDir, "board.json"), "utf8"));
     } catch {
+      boardUnreadable = true; // V6-52：明示放行信号
       return ""; // board missing/unreadable → 不拦不猜（fail-open）
     }
     const missions = board && Array.isArray(board.missions) ? board.missions : [];
@@ -230,7 +304,7 @@ function contractWarn(prompt, rootDir) {
 
 function longTaskWhy(ti) {
   const prompt = typeof ti.prompt === "string" ? ti.prompt : "";
-  if (/^\[channel\]\s?/m.test(prompt)) return "含派发契约头 [channel]";
+  if (CONTRACT_HEAD.test(prompt)) return "含派发契约头 [channel]";
   if (prompt.length >= MIN_PROMPT_CHARS) {
     return `prompt ${prompt.length} 字符 ≥ ${MIN_PROMPT_CHARS}`;
   }
@@ -276,11 +350,17 @@ function main() {
   // 且 token 校验失败；占位符文本天然不匹配不升级（C10）；deny 永不采用。
   const contractAsk =
     Boolean(contractMsg) && contract === "ask" && missionIdShaped(prompt);
+  // v0.6 (V6-52): 明示放行——板不可读时 fail-open 保留，追加一句「契约校验跳过」。
+  // 与 contractAsk 互斥（后者要求 contractMsg 非空）：跳过提示永不升级 ask。
+  const contractSkip =
+    !contractMsg && boardUnreadable
+      ? "契约校验跳过：板不可读（fail-open），本次派发未做契约核验。"
+      : "";
 
   if (policy === "off") {
     // v0.5 (C7): 闸门完全静默（含哨兵提示），但契约检查独立存活——
     // dispatch_contract=remind/ask 且确有契约问题时仍要出口。
-    if (contractMsg) {
+    if (contractMsg || contractSkip) {
       if (contractAsk) {
         emitContractAsk(contractMsg);
       } else {
@@ -290,7 +370,7 @@ function main() {
               hookEventName: "PreToolUse",
               permissionDecision: "allow",
               permissionDecisionReason: "bg-gate: dispatch contract",
-              additionalContext: "[agent-orchestrator] " + contractMsg,
+              additionalContext: "[agent-orchestrator] " + (contractMsg || contractSkip),
             },
           }),
         );
@@ -306,6 +386,7 @@ function main() {
     }
     const extras = [];
     if (contractMsg) extras.push("[agent-orchestrator] " + contractMsg);
+    if (contractSkip) extras.push("[agent-orchestrator] " + contractSkip);
     if (hintEnabled && !sentinelOnDuty && hintDue(rootDir)) {
       markHint(rootDir);
       extras.push("[agent-orchestrator] " + sentinelHintText());
@@ -334,7 +415,7 @@ function main() {
   if (tokens.some((t) => subagentType.includes(t))) return;
 
   const why = longTaskWhy(ti);
-  if (!why && !contractMsg) return;
+  if (!why && !contractMsg && !contractSkip) return;
 
   // v0.5 (strict=ask): 契约升级优先于长任务提醒——高置信真派发且校验失败才到这。
   if (contractAsk) {
@@ -347,7 +428,10 @@ function main() {
   // strip the nudge from every path.
   const sentinelSuffix =
     hintEnabled && !sentinelOnDuty ? " " + sentinelHintText() : "";
-  const contractSuffix = contractMsg ? " [agent-orchestrator] " + contractMsg : "";
+  const contractSuffix =
+    contractMsg || contractSkip
+      ? " [agent-orchestrator] " + (contractMsg || contractSkip)
+      : "";
 
   if (policy === "ask") {
     process.stdout.write(
@@ -385,6 +469,21 @@ function main() {
 try {
   main();
 } catch {
-  /* fail-open */
+  // v0.6 (V6-52): fail-open 保留——尽力把静默放行降为明示放行（输出失败仍 exit 0，
+  // 不新增失败面）。所有写出口都紧邻各分支 return，走到此处即未产出过输出。
+  try {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          permissionDecisionReason: "bg-gate: fail-open",
+          additionalContext: "[agent-orchestrator] 契约校验跳过：bg-gate 内部异常（fail-open），本次检查未执行。",
+        },
+      }),
+    );
+  } catch {
+    /* 输出失败不阻塞 */
+  }
 }
 process.exit(0);

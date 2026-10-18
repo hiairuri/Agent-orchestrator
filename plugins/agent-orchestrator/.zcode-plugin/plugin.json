@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
@@ -51,14 +51,14 @@
     "wake_timeout_min": {
       "type": "string",
       "title": "哨兵超时窗口（分钟）/ Sentinel timeout window",
-      "description": "结果落盘后主控未签收，每隔该分钟数计一次超时，累计 wake_retries 次后哨兵告警退出。默认 10。经 sentinel.cfg.json 传递给哨兵，可 CLI 覆盖。/ Minutes per timeout window before the sentinel gives up and alerts; combined with wake_retries. Default 10. Passed to the sentinel via sentinel.cfg.json; CLI can override.",
+      "description": "v0.3 兼容存根：原意桥接为哨兵两枪最小间隔（分钟）。当前实装下 server 无条件写入 refire_gap_min=5 遮蔽该桥接分支，改此键无实际效果；两枪间隔请用 CLI --refire-gap-min（修复跟踪 V6-24）。默认 10。/ v0.3 compatibility stub: originally bridged as the sentinel refire gap (minutes). The current build unconditionally writes refire_gap_min=5, shadowing this bridge key, so it has no effect; use CLI --refire-gap-min instead (fix tracked as V6-24). Default 10.",
       "default": "10",
       "required": false
     },
     "wake_retries": {
       "type": "string",
       "title": "哨兵重试次数 / Sentinel retries",
-      "description": "哨兵放弃并告警前允许的超时窗口次数。默认 3。经 sentinel.cfg.json 传递给哨兵，可 CLI 覆盖。/ Number of timeout windows before the sentinel alerts and exits. Default 3. Passed to the sentinel via sentinel.cfg.json; CLI can override.",
+      "description": "v0.3 兼容存根：原意桥接为单条件封顶枪数。当前实装下 server 无条件写入 wake_cap=3 遮蔽该桥接分支，改此键无实际效果；封顶枪数请用 CLI --wake-cap（修复跟踪 V6-24）。默认 3。/ v0.3 compatibility stub: originally bridged as the per-condition shot cap. The current build unconditionally writes wake_cap=3, shadowing this bridge key, so it has no effect; use CLI --wake-cap instead (fix tracked as V6-24). Default 3.",
       "default": "3",
       "required": false
     },

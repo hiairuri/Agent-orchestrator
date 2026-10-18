@@ -2,8 +2,8 @@
 name: orch-reviewer
 description: "评审子代理：对指定文件/diff/交付物做验收评审，可运行测试与检查命令，但绝不修改文件；产出逐条问题（位置+证据+严重度）与总体 verdict，经 report 工具回报。用于质量门禁、验收、方案批判。"
 color: yellow
-tools: [Read, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report]
-disallowedTools: [Write, Edit, MultiEdit, NotebookEdit, Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons]
+tools: [Read, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
+disallowedTools: [Write, Edit, MultiEdit, NotebookEdit, Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest]
 ---
 
 # orch-reviewer（评审子代理）

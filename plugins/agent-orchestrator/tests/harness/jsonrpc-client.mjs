@@ -97,7 +97,7 @@ if (process.argv[1] && import.meta.url === (await import("node:url")).pathToFile
   await s.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "selfcheck", version: "0.0.1" } });
   s.notify("notifications/initialized");
   const tl = await s.tools();
-  ck.ok("tools/list = 10", tl.tools?.length === 10, tl.tools?.length);
+  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", tl.tools?.length === 11, tl.tools?.length);
   const up = await s.call("board", { action: "upsert", mission: { title: "selfcheck" } });
   ck.ok("board upsert ok", up.json?.ok === true && !up.isError, up.text.slice(0, 120));
   const id = up.json?.mission?.id || up.json?.id;
