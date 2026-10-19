@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.6.1 ｜ 日期：2026-10-19 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.7.0 ｜ 日期：2026-10-19 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -784,3 +784,9 @@ v0.6.0 的增量设计权威是 `designs/agent-orchestrator-v0.6-DESIGN.md`（re
 ## 24. v0.6.1 增量指针：ENV-01 稳定化 / hooks 冗余声明根治 / 计数对齐
 
 v0.6.1 为稳定性小批（配套：plugin.json 0.6.1、workspace 的 plugins/marketplace.json 同步 0.6.1、server SERVER_VERSION 对齐 0.6.1），增量要点：crv5-apply-envelope 两慢 merge 场景（ENV-01/07）套内失败重试一次（全新临时根重跑、断言集与语义不变）+marker 轮询窗 12s→30s，收编 QA m-20261019-042917-43c1 首跑时序抖动；plugin.json 删 `"hooks"` 冗余声明字段——W-F4 根治（宿主对约定路径 hooks/hooks.json 无条件自动发现，manifest 声明被去重跳过并双告警；hooks.json 本体与四 hooks 注册面不变，诊断权威 designs/agent-orchestrator-v0.6-W-F4-findings.md）；AGENTS.md L11 计数对齐（16 套 592 断言+server.mjs 行数 wc 实测）。
+
+---
+
+## 25. v0.7 增量指针：哨兵三机制修复/lite 隔离/cfg 桥接/读缓存/sentinel_health/P2P 直通/发版 lint
+
+v0.7.0 的增量设计权威是 `designs/agent-orchestrator-v0.7-DESIGN.md`（rev.a 总装单一事实源，工作区 designs/ 目录），断言链权威是 `tests/assertions/v0.7.x.md`（A-v070 族 28 条 ID/75 检查点，落 sentinel-teardown/bbgate/crv5-auth/probe-caps/crv6-statemachine/lint-manifest 六载体，工具数仍 11、hooks.json 事件集不变），本文其余章节描述基线与 v0.2–v0.6.1 增量（见 §15–§24）。配套：plugin.json 0.7.0、workspace 的 plugins/marketplace.json 同步 0.7.0、server SERVER_VERSION 对齐 0.7.0、tests 扩至 17 套。

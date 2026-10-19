@@ -13,6 +13,13 @@
  *           LIMIT ≤100、禁注释/多语句/INTO、写语句拒绝、缺文件明确报错、blob 不裸吐）
  *   PROBE-09 db 分页（50 行/页包装走到尽、行字节帽、COUNT 聚合）
  *   PROBE-10 page_token 完整性（垃圾令牌/跨 action 令牌/文件变化后令牌一律拒绝；未知 action 明确报错）
+ *   CACHE-01 写后读不回吐（改写文件 mtime/size 变 → 同参重探返回新内容非存根）
+ *   CACHE-02 同参重复 probe 折算存根（cached:true+prior_hash+精确键面；db.query 显式排除；bin.inspect 亦可缓存）
+ *   CACHE-03 no_cache:true 恒全量且不写缓存（首个 no_cache 调用零残留）+ schema 增参
+ *   CACHE-04 page_token 续页不读不写缓存（续页不折存根；续页误写会被首页存根 prior_hash 当场抓获）
+ *   CACHE-05 LRU 帽 64：第 65 个不同文件入帽逐最老（#1 被逐全量、末位仍存根）
+ *   CACHE-06 环境探针：同进程连续两次 rename 原子写 mtimeMs 必不同（env-fact 留档）+
+ *           同尺寸改写仅凭 mtime 因子完成写失效（size 因子失效时的兜底实证）
  *
  * 运行方式：node tests/suites/probe-caps.mjs [--root <临时根>]
  * 前置：node >= 20（db 用例需 node:sqlite 内建，Node ≥22.13/23.4——缺失时 db 族降级为跳过注记）；无网。
@@ -132,7 +139,9 @@ try {
     }
     const over = J(await probe({ action: "file.head", path: "sample.log", lines: 500 }));
     ck.ok("PROBE-03d lines 超帽请求收敛到 50（帽强制不拒客）", over.lines.length === 50, over.lines.length);
-    const exact = J(await probe({ action: "file.head", path: "exact50.log" }));
+    // v0.7 A2：PROBE-02 已同参探过 exact50.log → 会命中读缓存存根；本断言验证的是
+    // eof 语义而非缓存，故 no_cache:true 绕开（缓存行为归 CACHE-01..06 专组）。
+    const exact = J(await probe({ action: "file.head", path: "exact50.log", no_cache: true }));
     ck.ok("PROBE-03e 恰 50 行文件：eof 直达不空翻页",
       exact.lines.length === 50 && exact.eof === true && exact.rows_truncated === false && exact.page_token === null,
       { eof: exact.eof, t: exact.rows_truncated });
@@ -289,7 +298,8 @@ try {
 
   // ---- PROBE-10 page_token 完整性与 action 面
   {
-    const g = J(await probe({ action: "file.grep", path: "sample.log", pattern: "line-", max_count: 3 }));
+    // no_cache:true：PROBE-07a 已同参探过 → 不绕存根就拿不到 page_token（缓存归 CACHE 组管）
+    const g = J(await probe({ action: "file.grep", path: "sample.log", pattern: "line-", max_count: 3, no_cache: true }));
     const misuse = await probe({ action: "file.head", path: "sample.log", page_token: g.page_token });
     ck.ok("PROBE-10a 跨 action 令牌拒绝", misuse.isError && misuse.text.includes("不匹配"), misuse.text.slice(0, 90));
     const garbage = await probe({ action: "file.head", path: "sample.log", page_token: "not-a-token" });
@@ -303,6 +313,114 @@ try {
       unk.text.slice(0, 110));
     const noPath = await probe({ action: "file.head" });
     ck.ok("PROBE-10e 缺 path 明确报错", noPath.isError && noPath.text.includes("path"), noPath.text.slice(0, 90));
+  }
+
+  // ---- CACHE-01..06 会话级读缓存（v0.7 A2, V7-01：W-A findings §2.4 断言草案定稿）
+  {
+    // CACHE-01 写后读不回吐（survey 点名验收）
+    fs.writeFileSync(path.join(PROJ, "cache01.txt"), "alpha-content-AAAA\n");
+    const r1 = J(await probe({ action: "file.head", path: "cache01.txt" }));
+    ck.ok("CACHE-01a 首探全量：无 cached 字段、内容=A",
+      r1.cached === undefined && r1.lines[0] === "alpha-content-AAAA", { cached: r1.cached, line: r1.lines?.[0] });
+    fs.writeFileSync(path.join(PROJ, "cache01.txt"), "beta-content-BBBBBBBB\n"); // mtime+size 双变
+    const r2 = J(await probe({ action: "file.head", path: "cache01.txt" }));
+    ck.ok("CACHE-01b 写后读不回吐：key 失效返回 B 非 A、非存根",
+      r2.cached === undefined && r2.lines[0] === "beta-content-BBBBBBBB", { cached: r2.cached, line: r2.lines?.[0] });
+    const r3 = J(await probe({ action: "file.head", path: "cache01.txt" }));
+    ck.ok("CACHE-01c 同参重探 → 存根：cached:true 且 prior_hash=首次(B) hash、不含 payload",
+      r3.cached === true && r3.prior_hash === r2.hash && r3.lines === undefined,
+      { cached: r3.cached, h: r3.prior_hash });
+
+    // CACHE-02 存根形态 + db.query 显式排除 + bin.inspect 可缓存
+    fs.writeFileSync(path.join(PROJ, "cache02.log"), mkLines(30, 3).join("\n") + "\n");
+    const a1 = J(await probe({ action: "file.head", path: "cache02.log" }));
+    const a2 = J(await probe({ action: "file.head", path: "cache02.log" }));
+    const STUB_KEYS = ["action", "cached", "cached_at", "note", "ok", "path", "prior_bytes", "prior_hash", "tool"]; // 预排序（对比 Object.keys().sort()）
+    ck.ok("CACHE-02a 存根：cached:true、prior_hash/prior_bytes=首次值、键面恰 9 键无 payload、字节远小于首次",
+      a2.cached === true && a2.prior_hash === a1.hash && a2.prior_bytes === a1.bytes &&
+      JSON.stringify(Object.keys(a2).sort()) === JSON.stringify(STUB_KEYS) &&
+      JSON.stringify(a2).length < JSON.stringify(a1).length / 2,
+      { stubB: JSON.stringify(a2).length, fullB: JSON.stringify(a1).length, keys: Object.keys(a2),
+        a1cached: a1.cached, h1: a1.hash, h2: a2.prior_hash, b1: a1.bytes, b2: a2.prior_bytes });
+    if (sqliteOk) {
+      const d1 = J(await probe({ action: "db.query", path: "test.db", query: "SELECT COUNT(*) AS n FROM t" }));
+      const d2 = J(await probe({ action: "db.query", path: "test.db", query: "SELECT COUNT(*) AS n FROM t" }));
+      ck.ok("CACHE-02b db.query 显式排除：同参重探恒全量非存根（SQLite 外部可变，mtime 不可靠）",
+        d1.cached === undefined && d2.cached === undefined && d2.row_count === 1,
+        { d2cached: d2.cached });
+    } else {
+      ck.ok("CACHE-02b (skip) node:sqlite 不可用，db 排除降级注记", true, "node:sqlite unavailable");
+    }
+    // bin.inspect 目标须全新（img.png/raw.bin/minified.json 已在 PROBE-06 被探入缓存）
+    const binBuf = Buffer.from([0x42, 0x4d, 0, 0, 9, 9, 0, 0]);
+    const binHash06 = crypto.createHash("sha256").update(binBuf).digest("hex");
+    fs.writeFileSync(path.join(PROJ, "cache02.bin"), binBuf);
+    const b1 = J(await probe({ action: "bin.inspect", path: "cache02.bin" }));
+    const b2 = J(await probe({ action: "bin.inspect", path: "cache02.bin" }));
+    ck.ok("CACHE-02c bin.inspect 亦可缓存：重探存根 prior_hash=文件全量 hash、无 head_b64",
+      b1.cached === undefined && b2.cached === true && b2.prior_hash === binHash06 && b2.head_b64 === undefined,
+      { b1cached: b1.cached, cached: b2.cached, h: b2.prior_hash, expect: binHash06 });
+
+    // CACHE-03 no_cache:true 恒全量且不写缓存 + schema 增参
+    fs.writeFileSync(path.join(PROJ, "cache03.txt"), "nc-v1\n");
+    const n1 = J(await probe({ action: "file.head", path: "cache03.txt", no_cache: true }));
+    const n2 = J(await probe({ action: "file.head", path: "cache03.txt" }));
+    ck.ok("CACHE-03a no_cache 首探恒全量且零残留（随后的普通探针仍 miss 全量）",
+      n1.cached === undefined && n1.lines[0] === "nc-v1" && n2.cached === undefined && n2.lines[0] === "nc-v1",
+      { n1cached: n1.cached, n2cached: n2.cached });
+    const n3 = J(await probe({ action: "file.head", path: "cache03.txt" }));
+    const n4 = J(await probe({ action: "file.head", path: "cache03.txt", no_cache: true }));
+    ck.ok("CACHE-03b 缓存在位：普通探针得存根；no_cache 命中在旁亦恒全量不回吐存根",
+      n3.cached === true && n3.prior_hash === n2.hash &&
+      n4.cached === undefined && n4.lines[0] === "nc-v1",
+      { n3cached: n3.cached, n4cached: n4.cached });
+    const prProps = (await s.tools()).tools.find((t) => t.name === PRE + "probe").inputSchema.properties;
+    ck.ok("CACHE-03c schema 增 no_cache:boolean 可选参数", prProps.no_cache?.type === "boolean", prProps.no_cache);
+
+    // CACHE-04 续页不读不写缓存（行为与 0.6 逐字节一致的回归由 PROBE-03/07 覆盖）
+    fs.writeFileSync(path.join(PROJ, "cache04.log"), mkLines(120, 3).join("\n") + "\n");
+    const c1 = J(await probe({ action: "file.head", path: "cache04.log" })); // 首页：miss → 存
+    const c2 = J(await probe({ action: "file.head", path: "cache04.log", page_token: c1.page_token }));
+    ck.ok("CACHE-04a 续页永不折存根：全量第 2 页、无 cached 字段",
+      c2.cached === undefined && c2.start_line === 51 && c2.lines.length === 50,
+      { cached: c2.cached, start: c2.start_line });
+    const c3 = J(await probe({ action: "file.head", path: "cache04.log" }));
+    ck.ok("CACHE-04b 续页未污染缓存：首页存根 prior_hash=首页 hash（续页若误写会同 key 覆盖为页2 hash 而当场抓获）",
+      c3.cached === true && c3.prior_hash === c1.hash, { h: c3.prior_hash, expect: c1.hash });
+
+    // CACHE-05 LRU 帽 64：第 65 个不同文件入帽逐最老
+    const nm = (i) => `cache05-${String(i).padStart(2, "0")}.txt`;
+    for (let i = 1; i <= 65; i++) fs.writeFileSync(path.join(PROJ, nm(i)), `f${i}\n`);
+    let full65 = null;
+    for (let i = 1; i <= 65; i++) {
+      const r = J(await probe({ action: "file.head", path: nm(i) }));
+      if (i === 65) full65 = r;
+    }
+    const e1 = J(await probe({ action: "file.head", path: nm(1) }));
+    const e65 = J(await probe({ action: "file.head", path: nm(65) }));
+    ck.ok("CACHE-05 帽 64 逐最老：#1 被逐（全量非存根）、#65 最新在位（存根 prior_hash=#65 首探 hash）",
+      e1.cached === undefined && e1.lines[0] === "f1" &&
+      e65.cached === true && e65.prior_hash === full65.hash,
+      { e1cached: e1.cached, e65cached: e65.cached, h: e65.prior_hash });
+
+    // CACHE-06 环境探针（W-A §2.4：Windows rename 原子写 mtime 精度 env-fact）+ 同尺寸改写
+    const f06 = path.join(PROJ, "cache06.txt");
+    const atomicWrite = (p, s2) => {
+      const tmp = p + ".tmp";
+      fs.writeFileSync(tmp, s2);
+      fs.renameSync(tmp, p);
+    };
+    atomicWrite(f06, "same-length-A\n");
+    const st1 = fs.statSync(f06);
+    await probe({ action: "file.head", path: "cache06.txt" }); // 入缓存
+    atomicWrite(f06, "same-length-B\n"); // 同尺寸（14B=14B）：size 因子失效，唯 mtime 可辨
+    const st2 = fs.statSync(f06);
+    const p06 = J(await probe({ action: "file.head", path: "cache06.txt" }));
+    ck.ok("CACHE-06a 环境探针：同进程连续两次 rename 原子写 statSync mtimeMs 必不同（env-fact 实证）",
+      st2.mtimeMs !== st1.mtimeMs, { t1: st1.mtimeMs, t2: st2.mtimeMs });
+    ck.ok("CACHE-06b 同尺寸改写不回吐：mtime 因子单独完成写失效（返回 B 非 A、非存根）",
+      p06.cached === undefined && p06.lines[0] === "same-length-B",
+      { cached: p06.cached, line: p06.lines?.[0] });
   }
 } finally {
   s.close();

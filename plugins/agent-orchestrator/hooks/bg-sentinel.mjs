@@ -8,9 +8,14 @@
  * 同命令连发 N 次（默认 3）= 错峰哨兵家族；--once 接受并忽略（0.3.1 肌肉记忆兼容）。
  * 退出 = 完成通知：主控空闲时开新回合、忙时并入当前回合。
  *
+ * V7-08/R4 版本偏斜注记：开发期拉起应显式用 repo 路径（或先核插件市场缓存版本与
+ * repo 一致）——hooks 家族经宿主市场缓存加载，缓存滞后时旧实例按旧语义行为（历史
+ * 「全清自毁」三连唤即 0.5.0 旧实例所为），此类行为不再以「过渡窗口预期」解释。
+ *
  * v2 语义（直至型，60s 判定；v2.1 全清转待命不退出）：
  *   - 启动即认领最低空闲槽位 <存储根>/sentinel/instance-<k>.json（wx 原子创建）；
- *     全满且全部新鲜 → exit 0 静默让位（家族拒绝超编）。
+ *     全满且全部新鲜 → exit 0 让位并输出一行明示文案（V7-08/R2，家族拒绝超编——
+ *     让位发生在板面读取之前，与在飞与否无关；平台把退出变通知，静默被误读为失明）。
  *   - 错峰：槽位 k 首个 tick 前 sleep k×stagger_sec；此后 poll 周期加 k×5% 抖动。
  *   - 心跳：每 tick 改写自己的槽位文件；接管判定 = pid 死或心跳龄 >90s（B3 沿用）。
  *   - 状态分级条件（每 mission 至多一条，C3 > C1 > C2）：
@@ -19,7 +24,7 @@
  *       C2  在飞失联（timeline 龄期） 宽限 stall_grace_min(30)  refire 5  cap 3
  *       C3  崩溃实锤（rollout model-io 停更 + tool_usage 佐证/无佐证 ×3 保守档）
  *                                   宽限 crash_grace_min(10)  绕过双空闲门  cap 3
- *       C0  board 连续 3 tick 不可读 立即                      refire 5  cap 2
+ *       C0  board 连续 3 tick 不可读 立即 → V7-04：转观测隔离（聚合告警一条 + quarantined 值守，不退出）
  *   - 双空闲门（C1/C2）：子代理等待中 ∧ 主控信号停滞（tool_usage 主 / rollout 副 /
  *     journal 三 / board 四 / 全缺失按空闲）；逃逸口 = anchor 龄期 ≥ 2×宽限 无视门开枪
  *     ——门只可能推迟开枪，不可能取消开枪。
@@ -34,6 +39,13 @@
  *     90s 在岗新鲜度，补员提醒天然抑制），板面读评节流到 standby_poll_sec
  *     （默认 max(poll, 300s)）；板面出现新在飞/未签收 → 自动复活回 active 正常
  *     盯守与告警。待命期板不可读 → 静默续待命（不计数不告警）。常态全清 0 条通知。
+ *   - 观测型隔离（V7-04 lite，替代 C0 旧"开枪退出"）：观测异常满 cap → 写
+ *     sentinel/quarantine.json（wx 仲裁唯一首告者，含证据快照）+ 既有通道一条聚合
+ *     告警 + 槽位转 state=quarantined 低频值守（心跳照旧；不退出、不杀进程、不写
+ *     board、不删文件）。家族级告警抑制：标记新鲜期（cap_window 刻度）内
+ *     firedEligible 首检 false——三实例并发恰一条告警，超窗自动恢复开枪能力。
+ *     恢复：异常消失（板可读）→ unlink 标记回 active/standby；quarantined 与
+ *     standby 互斥，复活/解除共享 mtime 门与 standby_poll 节流（同一低频门）。
  *   - 寿命 ≥ max_lifetime_min（默认 24h）→ 家族轮换单赢家选举（v2.1，替代旧
  *     "各自安静退出"三连唤）：认领 sentinel/family-teardown.json（wx 原子创建；
  *     陈旧/损坏标记可夺位；新鲜窗 = 读者自身 lifetimeMs）——赢家 exit 0 退出
@@ -440,7 +452,7 @@ function slotDoc(startedAt, slot, tookOver, prev, state, rootDir) {
   return {
     pid: process.pid,
     slot,
-    state: state === "standby" ? "standby" : "active", // v2.1 待命制；旧版文件无此字段 = active
+    state: state === "standby" ? "standby" : state === "quarantined" ? "quarantined" : "active", // v2.1 待命制 + V7-04 隔离；旧版文件无此字段 = active
     root: rootDir ?? null, // V6-56 观测性：槽位自证解析根（root-id 契约下排障用）
     started_at: new Date(startedAt).toISOString(),
     heartbeatAt: new Date().toISOString(),
@@ -611,6 +623,73 @@ function claimTeardown(rootDir, slot, freshMs) {
 }
 
 /* ================================================================== */
+/* 观测型隔离（V7-04 lite）：quarantine.json 标记 + 家族级告警抑制        */
+/* ================================================================== */
+
+const Q_CLAIM = { key: "__quarantine__", category: "quarantine", final: false };
+
+function quarantineFile(rootDir) {
+  return path.join(rootDir, "sentinel", "quarantine.json");
+}
+
+/** 读隔离标记；null = 无标记/损坏（损坏标记由认领方夺位重写，不在此处理）。 */
+function readQuarantine(rootDir) {
+  try {
+    const doc = JSON.parse(fs.readFileSync(quarantineFile(rootDir), "utf8"));
+    if (!doc || typeof doc !== "object") return null;
+    const at = Date.parse(String(doc.at ?? ""));
+    return { doc, atMs: Number.isFinite(at) ? at : 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** 标记新鲜 = age < capWindowMs（与 fired 封顶窗同刻度）；新鲜期内全家族告警挂起。 */
+function quarantineFresh(rootDir, cfg) {
+  const q = readQuarantine(rootDir);
+  return q !== null && Date.now() - q.atMs < cfg.capWindowMs;
+}
+
+/**
+ * 认领隔离标记（wx 原子创建；返回 true = 本实例是本 episode 唯一首告者）。
+ * EEXIST 时：新鲜标记 → false（他人已隔离，静默加入——三实例恰一条告警的仲裁点）；
+ * 陈旧/损坏标记 → unlink 夺位重写（true，超窗 episode 的合理再提醒）。
+ */
+function claimQuarantine(rootDir, slot, reason, evidence, freshMs) {
+  const write = () => {
+    try {
+      fs.mkdirSync(path.dirname(quarantineFile(rootDir)), { recursive: true });
+      fs.writeFileSync(
+        quarantineFile(rootDir),
+        JSON.stringify({ at: new Date().toISOString(), pid: process.pid, slot, reason, evidence: evidence ?? null }) + "\n",
+        { flag: "wx" },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (write()) return true;
+  const q = readQuarantine(rootDir);
+  if (q && Date.now() - q.atMs < freshMs) return false;
+  try {
+    fs.unlinkSync(quarantineFile(rootDir));
+  } catch {
+    /* gone：下方 write 直接认领 */
+  }
+  return write();
+}
+
+/** 隔离聚合告警文案（既有通道一条：平台邮箱 + 本地回声；不退出、无 toast）。 */
+function buildQuarantineAlert(reason) {
+  return (
+    `[orch-sentinel] 观测异常隔离告警：${reason}。哨兵实例转 quarantined 低频值守` +
+    `（不退出不杀进程不写 board；异常解除自动恢复 active/standby）。隔离期内全家族告警挂起` +
+    `（新条件不触发 fired，超 cap_window 自动恢复），证据快照见 sentinel/quarantine.json。`
+  );
+}
+
+/* ================================================================== */
 /* fired 协议（开枪仲裁 + 封顶放弃）                                     */
 /* ================================================================== */
 
@@ -642,8 +721,10 @@ function firedEntries(rootDir, key, category) {
   return out;
 }
 
-/** 仲裁：Δ 内他人已开枪 → false；cap 窗口内满额 → false；否则 true。 */
+/** 仲裁：隔离标记新鲜期内 → false（V7-04 家族级告警抑制：聚合告警已由首告者发出）；
+ *  Δ 内他人已开枪 → false；cap 窗口内满额 → false；否则 true。 */
 function firedEligible(rootDir, cond, cfg) {
+  if (quarantineFresh(rootDir, cfg)) return false; // V7-04：隔离期告警挂起（超 cap_window 自动恢复）
   const entries = firedEntries(rootDir, cond.key, cond.category);
   const now = Date.now();
   if (entries.length && now - entries[0].atMs < cfg.refireGapMs) return false;
@@ -1102,13 +1183,34 @@ function main() {
     process.exit(code);
   };
 
-  // --- 家族槽位认领：失败（全满且全部新鲜）→ exit 0 静默让位，无输出 ---
+  // --- 家族槽位认领：失败（全满且全部新鲜）→ exit 0 让位（V7-08/R2：明示一行） ---
   fs.mkdirSync(sentDir, { recursive: true });
   const first = resolveCfg();
   const staleDocs = pruneStaleSlots(sentDir, first.familySize);
   const claimed = claimSlot(sentDir, first.familySize, startedAt, staleDocs, root);
   const slot = claimed.slot;
-  if (slot < 0) process.exit(0);
+  if (slot < 0) {
+    // V7-08/R2 让位明示一行：让位退出发生在任何板面读取之前，与 mission 是否在飞
+    // 完全无关；平台把任何后台退出都变成完成通知，静默 exit 0 被误读为「失明/故障」
+    // （乙机制历史感知来源）。通知不可免，语义自解释——一行文案根除误读。
+    let freshN = 0;
+    for (let k = 0; k < first.familySize; k++) {
+      const f = path.join(sentDir, `instance-${k}.json`);
+      let doc = null;
+      let mtimeMs = NaN;
+      try {
+        doc = JSON.parse(fs.readFileSync(f, "utf8"));
+        mtimeMs = fs.statSync(f).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (slotFresh(doc, mtimeMs)) freshN += 1;
+    }
+    process.stdout.write(
+      `[orch-sentinel] 家族已在岗（fresh ${freshN}/${first.familySize}，standby 亦在岗），本次启动让位退出；新派发由在岗实例自动接管。\n`,
+    );
+    process.exit(0);
+  }
   let tookOverClaim = claimed.tookOver;
   let tookOverPrevClaim = claimed.prev;
 
@@ -1120,15 +1222,18 @@ function main() {
   let tookOver = tookOverClaim; // 接管痕迹：touch 时保留（V2 可观测性）
   let tookOverPrev = tookOverPrevClaim;
   let standby = false; // v2.1 待命制：全清不退出 → true 转低频待命
+  let quarantined = false; // V7-04 lite：观测异常隔离值守（与 standby 互斥，低频门共享）
+  const stateLabel = () => (quarantined ? "quarantined" : standby ? "standby" : "active"); // 三态标签（V7-04）
   let lifetimeAnchor = startedAt; // 寿命 cap 锚：轮换输家顺延时重置
   let lastEvalAt = 0; // 最近一次全量板面评估时刻（待命节流用）
+  let lastEvalBoardMtime = -1; // V7-08/R1：最近一次全量评估时的 board.json mtime（standby mtime 门基准）
 
   const tick = () => {
     const cfg = resolveCfg(); // B6
     const signals = signalsOf(cfg.raw);
-    const prevState = standby;
+    const prevLabel = stateLabel(); // V7-04：状态迁移检测以三态标签计
 
-    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, standby ? "standby" : "active", root);
+    touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
 
     if (Date.now() - lifetimeAnchor >= cfg.lifetimeMs) {
       // 寿命 cap（v2.1 家族轮换）：单赢家选举——赢家唯一退出（退出即通知，每寿命
@@ -1153,13 +1258,29 @@ function main() {
       firstTick = false;
     }
 
-    // v2.1 待命节流：active 每 tick 全量评估；standby 每 standby_poll_sec 才读板
-    // （心跳 touch 不节流，保 90s 在岗新鲜度）。板面出现新在飞/未签收即自动复活。
-    if (standby && Date.now() - lastEvalAt < cfg.standbyPollMs) {
+    // v2.1 待命节流（V7-04 起隔离值守同门共享）：active 每 tick 全量评估；
+    // standby/quarantined 每 standby_poll_sec 才读板（心跳 touch 不节流，保 90s
+    // 在岗新鲜度）。板面出现新在飞/未签收即自动复活。
+    // V7-08/R1 standby mtime 门：节流前置一次 board.json mtime 探测（每 poll 周期
+    // 1 次 syscall）——server 原子写=改名，mtime 严格递增；mtime 晚于上次全量评估
+    // 基准 → 跳过节流立即评估。复活延迟 standby_poll(≤300s) → ≤poll(60s)；mtime
+    // 未变维持节流（不退化为全量轮询，防评估放大）。基线 NaN（上次评估时板缺失）
+    // + 有限新值 = 板（重）现，必为有新活——V7-04 隔离解除判定同门依赖此分支。
+    let boardMtimeProbe = NaN;
+    try {
+      boardMtimeProbe = fs.statSync(path.join(root, "board.json")).mtimeMs;
+    } catch {
+      /* 板缺失 → 无可证明的新活，维持节流判定（待命期板不可读分支照旧兜底） */
+    }
+    const boardTouched =
+      Number.isFinite(boardMtimeProbe) &&
+      (!Number.isFinite(lastEvalBoardMtime) || boardMtimeProbe > lastEvalBoardMtime);
+    if ((standby || quarantined) && !boardTouched && Date.now() - lastEvalAt < cfg.standbyPollMs) {
       tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
       return;
     }
     lastEvalAt = Date.now();
+    lastEvalBoardMtime = boardMtimeProbe; // mtime 门基准随每次全量评估推进
 
     let boardMtime = NaN;
     try {
@@ -1169,43 +1290,56 @@ function main() {
     }
     const board = readBoardSafe(root);
     if (board === null) {
-      if (standby) {
-        // 待命期板不可读：无法证明有新活，静默续待命（不计数不告警——全清期 0 通知）
+      if (standby || quarantined) {
+        // 待命/隔离期板不可读：无法证明有新活，静默续当前态（不计数不告警——
+        // 全清期 0 通知；隔离 episode 的聚合告警已由首告者发出，解除走下方可读分支）
         tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
         return;
       }
       if (boardFailTicks === 0) boardFailSince = Date.now(); // C0 anchor
       boardFailTicks += 1; // B2
       if (boardFailTicks >= BOARD_BAD_TICKS_LIMIT) {
-        const due = [
-          {
-            key: "__board__",
-            category: "board_unreadable",
-            title: "",
-            status: "",
-            anchorMs: boardFailSince,
-            graceMs: 0,
-            bypassGate: true,
-            cap: 2,
-          },
-        ];
-        const eligible = due.filter((c) => firedEligible(root, c, cfg));
-        const claims = claimShots(root, eligible, cfg, slot);
-        if (claims.length) {
-          const summary = buildSummary(claims, cfg);
-          const finalShot = claims.some((c) => c.final);
-          let toastAttempted = false;
-          if (finalShot) toastAttempted = toastAbandon(cfg.raw);
-          mailboxEcho(root, claims, summary, cfg.raw, slot);
-          appendEcho(root, claims, summary, { toast_attempted: toastAttempted });
-          finish(1, summary);
-          return;
+        // V7-04 lite 观测型隔离：满 cap 不再开枪退出——写 quarantine.json（wx 仲裁
+        // 唯一首告者，含证据快照）+ 既有通道一条聚合告警 + 转 quarantined 低频值守
+        // （心跳照旧；不杀进程不写 board 不删文件）。家族级抑制：新鲜标记期内其余
+        // 实例与新条件由 firedEligible 首检 false 静默挡下（三实例并发恰一条告警）。
+        const qReason = `board.json 连续 ${BOARD_BAD_TICKS_LIMIT} 次轮询不可读（缺失/损坏）`;
+        const qEvidence = { ticks: boardFailTicks, since: new Date(boardFailSince).toISOString() };
+        const qFirst = claimQuarantine(root, slot, qReason, qEvidence, cfg.capWindowMs);
+        quarantined = true;
+        boardFailTicks = 0; // 隔离看护不再重复计数（重隔离 = 新 episode 才再告警）
+        if (stateLabel() !== prevLabel) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
+        if (qFirst) {
+          const qSummary = buildQuarantineAlert(qReason);
+          mailboxEcho(root, [Q_CLAIM], qSummary, cfg.raw, slot);
+          appendEcho(root, [Q_CLAIM], qSummary, {});
         }
       }
       tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05)); // 无正据不决策，但只容忍有限次数
       return;
     }
     boardFailTicks = 0;
+
+    // V7-04 自愈：隔离实例读到板 = 异常形态消失 → 清标记回正常态（active/standby
+    // 由下方常规流程按板面内容定）。读板成功同时顺手清理已超窗的陈旧标记（无抑制
+    // 力，仅文件卫生——新鲜标记保留，其抑制窗口未过）。
+    if (quarantined) {
+      quarantined = false;
+      try {
+        fs.unlinkSync(quarantineFile(root));
+      } catch {
+        /* ENOENT best effort */
+      }
+    } else {
+      const qSeen = readQuarantine(root);
+      if (qSeen && Date.now() - qSeen.atMs >= cfg.capWindowMs) {
+        try {
+          fs.unlinkSync(quarantineFile(root));
+        } catch {
+          /* ENOENT best effort */
+        }
+      }
+    }
 
     const conds = classify(board, boardMtime, cfg, root, signals);
     const missions = Array.isArray(board.missions) ? board.missions : [];
@@ -1220,12 +1354,12 @@ function main() {
       // 未签收 → 下一轮评估自动复活回 active 正常值守。
       standby = true;
       boardFailTicks = 0;
-      if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "standby", root);
+      if (stateLabel() !== prevLabel) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
       tickTimer = setTimeout(tick, cfg.pollMs * (1 + slot * 0.05));
       return;
     }
     standby = false; // 有活干（在飞或未签收）→ 恢复 active 值守
-    if (standby !== prevState) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, "active", root);
+    if (stateLabel() !== prevLabel) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
 
     const due = conds.filter(
       (c) => matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),

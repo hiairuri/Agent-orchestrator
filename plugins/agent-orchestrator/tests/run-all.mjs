@@ -2,7 +2,8 @@
 /*!
  * tests/run-all.mjs —— 全量回归入口（=发版门）。按 CR-15 分层跑断言 ID 子集对应的 suites。
  *
- * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=11〔v0.6 A6 probe 转正〕/BOARD_VERSION/hooks.json/SB09+M07/B07）
+ * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=11〔v0.6 A6 probe 转正〕/BOARD_VERSION/hooks.json/SB09+M07/B07
+ *   + lint-manifest：V7-12 发版 lint LM-01 约定路径防复发〔W-F4 钉〕/LM-02 manifest 引用存在/LM-03 版本三方一致）
  *   + L1 直接层全跑（sb-normalize=SB01/02/05+M01/02；crv1-scope=CRV1-01..08+E4+M04；
  *   crv2-pack=CRV2-01..08+CR-V22/23/24/25；crv4-audit=CRV4-01..05+CR-V18..V21/V29；
  *   crv3-present=CRV3-01..03+CR-V26/27/28+M03/05/06；condense=CR-V9/10/16；bggate=M08..M10+B01..07+S09；sentinel-teardown=哨兵 v2.1 待命/轮换 T1..T4）。
@@ -27,6 +28,7 @@ const SUITES_DIR = path.join(TESTS_DIR, "suites");
 
 const REGISTRY = [
   { name: "l0-skeleton", layer: "L0" },
+  { name: "lint-manifest", layer: "L0" },
   { name: "sb-normalize", layer: "L1" },
   { name: "crv1-scope", layer: "L1" },
   { name: "crv2-pack", layer: "L1" },
