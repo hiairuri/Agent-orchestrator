@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.6.0 ｜ 日期：2026-10-19 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.6.1 ｜ 日期：2026-10-19 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -778,3 +778,9 @@ v0.6.0 的增量设计权威是 `designs/agent-orchestrator-v0.6-DESIGN.md`（re
 - **簇 B hooks/哨兵修复**：locateRoot 契约化六处+root-id 分代门（契约八条权威 v0.6-DESIGN §3.1；矩阵 tests/suites/root-contract.mjs 35 例，含 V6-12 server 行回扫）；哨兵 C3 板面龄期反证（V6-32）；契约头正则统一+代理对回退（V6-53/57）；明示放行半项+claimShots 去 pid+touchSlot 归属校验（V6-52/54/55）。
 - **簇 C 文档·角色·断言**：W-C 编辑单 E-01..E-18 落 SKILL/AGENTS/agents/plugin.json（勘误补课、dispatch-probe 补课、文档漂移批量、角色对齐、C-ADD 四项）；typed-dispatch-docs.mjs 18 断言+RECYCLE_LIST 宿主修复事件回收机制（断言双模，ORCH_HOST_FIXED=1 反向）；E-19/E-20 CONFLICT-1 裁决回写 designs/adv-review-20261014/SUMMARY.md（采信 V4-P1-2）。
 - **非代码随行**：W-F/W-F2 唤醒通道调研入库（remote v4 通道协议逆向，V1 改判「可行-约束型」；watcher 0.7 立项建议）——调研产物，非本版代码内容。
+
+---
+
+## 24. v0.6.1 增量指针：ENV-01 稳定化 / hooks 冗余声明根治 / 计数对齐
+
+v0.6.1 为稳定性小批（配套：plugin.json 0.6.1、workspace 的 plugins/marketplace.json 同步 0.6.1、server SERVER_VERSION 对齐 0.6.1），增量要点：crv5-apply-envelope 两慢 merge 场景（ENV-01/07）套内失败重试一次（全新临时根重跑、断言集与语义不变）+marker 轮询窗 12s→30s，收编 QA m-20261019-042917-43c1 首跑时序抖动；plugin.json 删 `"hooks"` 冗余声明字段——W-F4 根治（宿主对约定路径 hooks/hooks.json 无条件自动发现，manifest 声明被去重跳过并双告警；hooks.json 本体与四 hooks 注册面不变，诊断权威 designs/agent-orchestrator-v0.6-W-F4-findings.md）；AGENTS.md L11 计数对齐（16 套 592 断言+server.mjs 行数 wc 实测）。
