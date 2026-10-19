@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { startServer, Checker } from "../harness/jsonrpc-client.mjs";
-import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
+import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { postures } from "../harness/fixture-board.mjs";
 
 const ck = new Checker("crv3-present");
@@ -35,6 +35,16 @@ const report = async (args) => J(await s.call("report", args));
 const mailbox = async (args) => J(await s.call("mailbox", args));
 const resume = async (args) => J(await s.call("resume", args));
 const rawBoard = () => JSON.parse(fs.readFileSync(path.join(T.root, "board.json"), "utf8"));
+// v0.6 A4 夹具适配（主控批复，见 v0.6.x.md §0）：create-as-running/ready 被 V6-20 迁移
+// 白名单合法拒绝（→running 仅 claim 可达、drafted→ready 仅 sweep unlock 可达）——在飞态
+// 夹具改直写 board.json 种子（server 每调用 fresh load），断言主句零改动。
+const seedMission = (over) => {
+  const p = path.join(T.root, "board.json");
+  const b = rawBoard();
+  // 浅合并 over：blankMission 骨架无 scope_paths 等键，over 携带时以 over 为准
+  b.missions.push({ ...blankMission(over), ...over });
+  fs.writeFileSync(p, JSON.stringify(b, null, 2) + "\n");
+};
 
 try {
   // ---------- CR-V26 懒迁移 ----------
@@ -58,7 +68,8 @@ try {
   ck.ok("V26 board version 仍 2", raw1.version === 2, raw1.version);
 
   // ---------- M-03 未登记：预检+审计双跳过 ----------
-  const upReg = await board({ action: "upsert", mission: { id: "m-reg", status: "running", scope_paths: ["C:/x/"] } });
+  seedMission({ id: "m-reg", status: "running" });
+  const upReg = await board({ action: "upsert", mission: { id: "m-reg", scope_paths: ["C:/x/"] } });
   ck.ok("M-03 预检跳过未登记（无 scope_warnings）", !("scope_warnings" in upReg));
   const rpLeg = await report({ mission_id: "m-leg", worker: "w0", kind: "milestone", summary: "prog", files_touched: ["C:/anywhere/rogue.txt"] });
   ck.ok("M-03 审计跳过未登记（无 warn_scope）", !("warn_scope" in rpLeg), rpLeg.warn_scope);
@@ -69,7 +80,7 @@ try {
   ck.ok("M-04 未知键 → ignored_keys", Array.isArray(upIgn.ignored_keys) && upIgn.ignored_keys.includes("bogus"), upIgn.ignored_keys);
 
   // ---------- CRV3 + M-05 ----------
-  await board({ action: "upsert", mission: { id: "m1", status: "running", scope_paths: ["C:/proj/src/"] } });
+  seedMission({ id: "m1", status: "running", scope_paths: ["C:/proj/src/"] });
   const upM2 = await board({ action: "upsert", mission: { id: "m2", status: "drafted", scope_paths: ["C:/proj/src/app.ts"] } });
   ck.ok("M-05 upsert 相交警告指向 m1", Array.isArray(upM2.scope_warnings) && upM2.scope_warnings.some((w) => w.with_mission_id === "m1"), upM2.scope_warnings);
   ck.ok("M-05 警告形状 {with_mission_id, overlap, hint}", upM2.scope_warnings[0] && Array.isArray(upM2.scope_warnings[0].overlap) && typeof upM2.scope_warnings[0].hint === "string" && upM2.scope_warnings[0].overlap.includes("C:/proj/src/app.ts"), upM2.scope_warnings[0]);
@@ -94,7 +105,7 @@ try {
   ck.ok("CRV3-03 ready 无主仅信息性", Array.isArray(rv3.ready_unclaimed) && rv3.ready_unclaimed.some((r) => r.id === "m2") && !rv3.actions.some((a) => a.priority < 2 && a.action.includes("m2")));
 
   // ---------- CR-V27 呈现面 ----------
-  await board({ action: "upsert", mission: { id: "m7", status: "running", artifacts: ["p/a.md", "p/b.md"], output_files: ["o.txt"] } });
+  seedMission({ id: "m7", status: "running", artifacts: ["p/a.md", "p/b.md"], output_files: ["o.txt"] });
   const S200 = "S".repeat(200);
   await report({ mission_id: "m7", worker: "w7", kind: "done", summary: S200 });
   const g7 = await board({ action: "get", mission_id: "m7" });
@@ -111,33 +122,35 @@ try {
   const rv7b = await resume({});
   const r7b = rv7b.missions.find((r) => r.id === "m7");
   ck.ok("V27 已签收 done 行 resume 无 t1_head 键", r7b && !("t1_head" in r7b));
-  await board({ action: "upsert", mission: { id: "m-q", status: "running" } });
+  seedMission({ id: "m-q", status: "running" });
   const Q300 = "Q".repeat(300);
   await report({ mission_id: "m-q", worker: "wq", kind: "question", summary: "need input", question: Q300 });
   const rvq = await resume({});
   const rq = rvq.missions.find((r) => r.id === "m-q");
   ck.ok("V27 question 行 question_head≤160+逐字头", rq && rq.blocked && rq.blocked.question_head === Q300.slice(0, 160), rq && rq.blocked);
   ck.ok("V27 question 行无全量 question 键", rq && rq.blocked && !("question" in rq.blocked));
-  await board({ action: "upsert", mission: { id: "m-c", status: "ready" } });
+  seedMission({ id: "m-c", status: "ready" });
   const cl = await board({ action: "claim", mission_id: "m-c", worker: "wc" });
   ck.ok("V27 claim 小对象无 t1_head", cl && !("t1_head" in cl), Object.keys(cl));
 
   // ---------- CR-V28 mailbox 帽 ----------
-  await board({ action: "upsert", mission: { id: "m8", status: "running" } });
+  seedMission({ id: "m8", status: "running" });
   const D = "x".repeat(2000) + "y".repeat(3000);
   const rp8 = await report({ mission_id: "m8", worker: "w8", kind: "done", summary: "done m8", details: D });
   const pk = await mailbox({ action: "peek", mission_id: "m8" });
   ck.ok("V28 peek 不含 details", pk.events.length === 1 && !("details" in pk.events[0]), pk.events[0] && Object.keys(pk.events[0]));
   const rd = await mailbox({ action: "read", mission_id: "m8" });
   const ev = rd.events[0];
-  ck.ok("V28 read details=头 2000+标记+提示句逐字", ev.details === D.slice(0, 2000) + "…[截断于5000字]" + HINT, ev.details.slice(1990) + "...");
+  // v0.6 (V6-18, INJ-04)：details 帽 DETAILS_MAX_CHARS=4000 正落 spool 写入点——
+  // 存储面 5000→截 4000，read 呈现标记随之 [截断于4000字]（主控 2026-10-15 批复授权适配）
+  ck.ok("V28 read details=头 2000+标记+提示句逐字", ev.details === D.slice(0, 2000) + "…[截断于4000字]" + HINT, ev.details.slice(1990) + "...");
   const spoolEv = JSON.parse(fs.readFileSync(path.join(T.root, "spool", "m8", "read", rp8.event_id + ".json"), "utf8"));
-  ck.ok("V28 spool 事件保 5000 字全文", spoolEv.details === D && spoolEv.details.length === 5000, spoolEv.details.length);
+  ck.ok("V28 spool 事件保存储帽 4000 字（V6-18）", spoolEv.details === D.slice(0, 4000) && spoolEv.details.length === 4000, spoolEv.details.length);
   const rd2 = await mailbox({ action: "read", mission_id: "m8" });
   ck.ok("V28 二次 read consumed=0", rd2.consumed === 0, rd2.consumed);
 
   // ---------- M-06 warn_scope 分键 ----------
-  await board({ action: "upsert", mission: { id: "m6", status: "running", scope_paths: ["C:/proj/src/"] } });
+  seedMission({ id: "m6", status: "running", scope_paths: ["C:/proj/src/"] });
   const rp6 = await report({ mission_id: "m6", worker: "w6", kind: "milestone", summary: "prog", files_touched: ["C:/proj/src/ok.ts", "C:/other/rogue.ts"] });
   ck.ok("M-06 warn_scope 独立分键", JSON.stringify(rp6.warn_scope) === JSON.stringify(["C:/other/rogue.ts"]), rp6.warn_scope);
   ck.ok("M-06 warn 合计行仍提及 scope", typeof rp6.warn === "string" && rp6.warn.includes("scope 越界"), rp6.warn);
@@ -147,7 +160,7 @@ try {
 
   // ---------- 不变量 ----------
   const tl = await s.tools();
-  ck.ok("invariant tools/list = 10", Array.isArray(tl.tools) && tl.tools.length === 10, tl.tools && tl.tools.length);
+  ck.ok("invariant tools/list = 11（v0.6 A6 probe 转正口径）", Array.isArray(tl.tools) && tl.tools.length === 11, tl.tools && tl.tools.length);
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));
 } finally {

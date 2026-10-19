@@ -2,7 +2,8 @@
  * suites/l0-skeleton.mjs —— L0 骨架组（0.4.1 回归组 R01 口径的 v0.5 复核 + M-07/SB09 + B07）
  *
  * 覆盖断言组：A-v041-R01（node --check 全脚本 / 无 require / db 只读静态 grep / hooks.json 4 事件
- *   且 bg-gate args 含 --contract 传参 / tools/list=10 复核口径）、A-v030-R03 与 A-v040-I03（工具数口径）、
+ *   且 bg-gate args 含 --contract 传参 / tools/list=11 复核口径〔v0.6 A6 probe 转正〕）、
+ *   A-v030-R03 与 A-v040-I03（工具数口径）、
  *   A-v040-SB09 + A-v050-M07（server.mjs 无 git transfer argv 静态红线）、A-v041-V13（sentinel_health
  *   形状机械项）、A-v020-B07（bg-gate fail-open）、BOARD_VERSION=2、plugin.json 可解析。
  *
@@ -67,13 +68,13 @@ try {
   ck.ok("plugin.json parse + version string", typeof pj.version === "string");
   ck.ok("plugin.json dispatch_contract default remind", pj.userConfig?.dispatch_contract?.default === "remind", pj.userConfig?.dispatch_contract);
 
-  // ---- server 黑盒：tools/list=10、board 回环、version=2、sentinel_health 形状
+  // ---- server 黑盒：tools/list=11、board 回环、version=2、sentinel_health 形状
   const s = startServer({ root: T.root });
   const tl = await s.tools();
   const names = (tl.tools || []).map((t) => t.name);
-  ck.ok("tools/list = 10（v0.5 复核口径）", names.length === 10, names.length);
-  ck.ok("tools all orchestrator-prefixed, no probe-ish tool",
-    names.every((n) => n.startsWith("mcp__plugin_agent-orchestrator_orch__")) && !names.some((n) => /probe|condense|usage/i.test(n)),
+  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", names.length === 11, names.length);
+  ck.ok("tools all orchestrator-prefixed, no unregistered feature-track tool（probe 已于 A6 入版；condense/usage 仍未立项）",
+    names.every((n) => n.startsWith("mcp__plugin_agent-orchestrator_orch__")) && !names.some((n) => /condense|usage/i.test(n)),
     names);
   const up = await s.call("board", { action: "upsert", mission: { title: "l0" } });
   ck.ok("board upsert ok", !up.isError && up.json?.ok === true, up.text.slice(0, 120));

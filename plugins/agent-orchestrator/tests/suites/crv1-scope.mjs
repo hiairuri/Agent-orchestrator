@@ -22,7 +22,9 @@ try {
   // ---------- 场景 A ----------
   {
     const s = startServer({ root: TA.root });
-    let r = await s.call("board", { action: "upsert", mission: { id: "m1", title: "m1", status: "running", scope_paths: ["src/"] } });
+    // v0.6 A4 夹具适配：→running 仅 claim 可达（V6-20 白名单），建板后走合法 claim
+    await s.call("board", { action: "upsert", mission: { id: "m1", title: "m1", scope_paths: ["src/"] } });
+    let r = await s.call("board", { action: "claim", mission_id: "m1", worker: "w-crv1" });
     ck.ok("CRV1-01 m1 upsert ok, no scope_warnings", noWarn(r), r.text);
     r = await s.call("board", { action: "upsert", mission: { id: "m2", title: "m2", status: "drafted", scope_paths: ["src/a.js", "docs/"] } });
     const w = r.json?.scope_warnings;
@@ -38,8 +40,8 @@ try {
     await s.call("board", { action: "upsert", mission: { id: "m1", status: "done" } });
     r = await s.call("board", { action: "upsert", mission: { id: "m3", title: "m3", status: "drafted", scope_paths: ["src/b.js"] } });
     ck.ok("CRV1-08 done not live", noWarn(r), r.text);
-    // CRV1-06：m1 closed → 终态释放
-    await s.call("board", { action: "upsert", mission: { id: "m1", status: "closed" } });
+    // CRV1-06：m1 closed → 终态释放（v0.6 A4：外部归档需 close_confirmed 一次性确认）
+    await s.call("board", { action: "upsert", mission: { id: "m1", status: "closed", close_confirmed: true } });
     r = await s.call("board", { action: "upsert", mission: { id: "m4", title: "m4", status: "drafted", scope_paths: ["src/x.js"] } });
     ck.ok("CRV1-06 closed releases", noWarn(r), r.text);
     s.close();
@@ -47,7 +49,9 @@ try {
   // ---------- 场景 B ----------
   {
     const s = startServer({ root: TB.root });
-    await s.call("board", { action: "upsert", mission: { id: "m1", title: "m1", status: "running", scope_paths: ["src/"] } });
+    // v0.6 A4 夹具适配：→running 仅 claim 可达（V6-20 白名单），建板后走合法 claim
+    await s.call("board", { action: "upsert", mission: { id: "m1", title: "m1", scope_paths: ["src/"] } });
+    await s.call("board", { action: "claim", mission_id: "m1", worker: "w-crv1" });
     let r = await s.call("board", { action: "upsert", mission: { id: "m2", title: "m2", status: "drafted", strict_scope: true, scope_paths: ["src/a.js"] } });
     ck.ok("CRV1-05a strict upsert isError", r.isError === true, r.text);
     ck.ok("CRV1-05b error mentions m1 + overlap path", r.isError && r.text.includes("m1") && r.text.includes("src/a.js"), r.text);
@@ -55,7 +59,9 @@ try {
     ck.ok("CRV1-05c m2 not found", r.isError === true && r.text.includes("not found"), r.text);
     r = await s.call("board", { action: "get", mission_id: "m1" });
     ck.ok("CRV1-05d m1 untouched", r.json?.status === "running" && JSON.stringify(r.json?.scope_paths) === JSON.stringify(["src/"]), r.text);
-    await s.call("board", { action: "upsert", mission: { id: "m1", status: "closed" } });
+    // v0.6 A4 夹具适配：running→closed 非法（白名单），经 done 合法到站再归档
+    await s.call("board", { action: "upsert", mission: { id: "m1", status: "done" } });
+    await s.call("board", { action: "upsert", mission: { id: "m1", status: "closed", close_confirmed: true } });
     // E4 形状门
     r = await s.call("board", { action: "upsert", mission: { id: "m9", scope_paths: "src/" } });
     ck.ok("E4 scope_paths non-array rejected", r.isError && r.text.includes("scope_paths must be an array of strings"), r.text);

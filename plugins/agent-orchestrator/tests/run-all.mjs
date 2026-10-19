@@ -2,10 +2,14 @@
 /*!
  * tests/run-all.mjs —— 全量回归入口（=发版门）。按 CR-15 分层跑断言 ID 子集对应的 suites。
  *
- * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=10/BOARD_VERSION/hooks.json/SB09+M07/B07）
+ * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=11〔v0.6 A6 probe 转正〕/BOARD_VERSION/hooks.json/SB09+M07/B07）
  *   + L1 直接层全跑（sb-normalize=SB01/02/05+M01/02；crv1-scope=CRV1-01..08+E4+M04；
  *   crv2-pack=CRV2-01..08+CR-V22/23/24/25；crv4-audit=CRV4-01..05+CR-V18..V21/V29；
  *   crv3-present=CRV3-01..03+CR-V26/27/28+M03/05/06；condense=CR-V9/10/16；bggate=M08..M10+B01..07+S09；sentinel-teardown=哨兵 v2.1 待命/轮换 T1..T4）。
+ *   v0.6 新增七套（G 胶水波入册）：crv5-auth=A-v060-AUTH/SCOPE/INJ-01；crv6-statemachine=SM/P2P-01；
+ *   crv5-apply-envelope=QUOT/LOCK/ENV；crv6-resilience=SG/SPL/RES/HRV/ATW/GC/INJ-02..04；
+ *   root-contract=root-id 契约矩阵（P1..P10+S1..S5）；typed-dispatch-docs=文档在位 18 断言+RECYCLE_LIST；
+ *   probe-caps=PROBE-01..10。断言主句权威见 tests/assertions/v0.6.x.md。
  *   L2 邻接层（哨兵 live V 组、lessons/journal/stop-check）与 L3 手工/文档项不在本入口自动化——
  *   执行载体见 tests/assertions/v0.4.x.md §3 映射表与 §10 总表。
  *
@@ -31,6 +35,13 @@ const REGISTRY = [
   { name: "condense", layer: "L1" },
   { name: "bggate", layer: "L1" },
   { name: "sentinel-teardown", layer: "L1" },
+  { name: "crv5-auth", layer: "L1" },
+  { name: "crv6-statemachine", layer: "L1" },
+  { name: "crv5-apply-envelope", layer: "L1" },
+  { name: "crv6-resilience", layer: "L1" },
+  { name: "root-contract", layer: "L1" },
+  { name: "typed-dispatch-docs", layer: "L1" },
+  { name: "probe-caps", layer: "L1" },
 ];
 
 function argOf(flag) {

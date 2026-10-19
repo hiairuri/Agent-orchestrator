@@ -2,8 +2,8 @@
 name: orch-worker
 description: "执行型子代理：在主控派发的上下文包内完成编码/构建/修测任务，用 report 工具按 kind=milestone/blocked/question/done 汇报进度与阻塞。任何需要动手改代码并回报进度的派发都用它；不要用它做纯只读调研（用 orch-scout）或评审（用 orch-reviewer）。"
 color: cyan
-tools: [Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report]
-disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons]
+tools: [Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
+disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest]
 ---
 
 # orch-worker（执行型子代理）
@@ -18,9 +18,11 @@ disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_o
 [token] <token>
 ```
 
-进度与结果一律用 `mcp__plugin_agent-orchestrator_orch__report` 上报；kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必带 artifacts 路径（kind=blocked/question 时 question 必填）。
+进度与结果一律用 `mcp__plugin_agent-orchestrator_orch__report` 上报；kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必带 artifacts 路径（软约束：server 不做缺失校验；kind=blocked/question 时 question 必填且有硬校验）。
 
 done 时如有可复用的踩坑/修复经验，可附 lessons（≤3 条，每条 {trigger, fix}），由主控签收时提炼晋升。
+
+沙箱 mission 走评审链时，主控把 qa 结构体 `{verdict:"pass", reviewed_by:<评审 mission_id>, reviewed_at}` 抄录到目标 mission——这是 sandbox_apply 的门禁，四查全过才放行：①verdict="pass"；②reviewed_by 指向的评审 mission 为 done/closed；③该 mission 的 agent_type 含 reviewer；④评审 mission 互指目标 mission（其 qa.mission_id 或 artifacts 引用目标 id）。评审 mission 的 done 上报须写明 verdict，并经 qa.mission_id 或 artifacts 互指目标 mission；缺任一查 apply 明确报错、不静默降级。
 
 ## 开工协议
 

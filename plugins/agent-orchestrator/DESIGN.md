@@ -1,6 +1,6 @@
 # agent-orchestrator 插件设计文档
 
-版本：0.5.1 ｜ 日期：2026-10-15 ｜ 读者：编码子代理（可据此直接照写代码）
+版本：0.6.1 ｜ 日期：2026-10-19 ｜ 读者：编码子代理（可据此直接照写代码）
 本文档是唯一设计权威。所有平台事实均经 ZCode CLI 源码核实，编码时不得偏离第五节的平台约束。
 
 ---
@@ -766,3 +766,21 @@ v0.5.1 为实战修订版（配套：plugin.json 0.5.1、workspace 的 plugins/m
 - **哨兵全清零唤醒改造**：全清转 standby 待命零通知、新在飞自动复活、cap 单赢家轮换选举（每周期 ≤1 条）、告警路径零改动——细则权威 SKILL §14 与 tests/suites/sentinel-teardown.mjs。
 - **typed 派发快照缺陷应对**：宿主校验读冻结 MCP 快照，含 mcp 工具名的角色派发恒拒；插件侧正式化 GP+persona 主派发形态（SKILL §10）与角色正文双通道上报（report 主 / KIND=xxx 次），根因与评估权威 designs/dispatch-probe-20261014/{DESIGN.md,eval-role-tools.md,findings-S1..S3.md}。
 - **对抗性审查全链文档入库** designs/adv-review-20261014/（实锤 47/P0×5——修复工程未启动，非本版内容；QQagent 卡死调查 designs/qqagent-hang-20261014/ 亦未结）。
+
+---
+
+## 23. v0.6 增量指针：probe 第 11 工具 / 鉴权·状态机·apply 包络修复 / root-id 契约 / 文档勘误与断言扩容
+
+v0.6.0 的增量设计权威是 `designs/agent-orchestrator-v0.6-DESIGN.md`（rev.a 总装单一事实源；施工卡片集 `designs/agent-orchestrator-v0.6-impl-plan.md` 13 卡，W-A1/A2/B/C/D/E/F/F2 findings 收编其内；工作区 designs/ 目录），本文其余章节描述基线与 v0.2–v0.5.1 增量（见 §15–§22）。配套：plugin.json 0.6.0、workspace 的 plugins/marketplace.json 同步 0.6.0、server SERVER_VERSION 对齐 0.6.0；tests/ 扩至 16 套（run-all REGISTRY 全入册，A-v060 代码断言族 65 条主句权威 tests/assertions/v0.6.x.md）。增量要点：
+
+- **第 11 号工具 probe（上下文经济第二支柱）**：db.query（拒裸 SELECT *、强制 LIMIT ≤100）/ file.head / file.grep（服务端 -m 语义）/ bin.inspect 四 action；单响应帽 ≤50 行或 ≤10KB、page_token 分页、统一摘要 envelope（rows_truncated/bytes/hash）——帽语义权威 SKILL §20.4，断言 tests/suites/probe-caps.mjs PROBE-01..10（42 检查点）。
+- **簇 A server 修复**：report 门 fail-closed+token 熵 hex(16) 双铸点+成对鉴权+claim 必换发+qa 四查+`--strict-tokens` 窄口径开关默认 off（V6-09/14/17/42/19A）；ALLOWED_TRANSITIONS 白名单+closed 双门+sweep 回收扩容（V6-20/11/21）；apply/discard 两阶段 intent+git 管线出锁+幂等三态（V6-08/13/35）；快赢九件+韧性六件+注入三层+V6-12 发布侧 root-id（V6-29/27/36/49/15/33/10/16/22/26/28/48/50/51/18/12）。
+- **簇 B hooks/哨兵修复**：locateRoot 契约化六处+root-id 分代门（契约八条权威 v0.6-DESIGN §3.1；矩阵 tests/suites/root-contract.mjs 35 例，含 V6-12 server 行回扫）；哨兵 C3 板面龄期反证（V6-32）；契约头正则统一+代理对回退（V6-53/57）；明示放行半项+claimShots 去 pid+touchSlot 归属校验（V6-52/54/55）。
+- **簇 C 文档·角色·断言**：W-C 编辑单 E-01..E-18 落 SKILL/AGENTS/agents/plugin.json（勘误补课、dispatch-probe 补课、文档漂移批量、角色对齐、C-ADD 四项）；typed-dispatch-docs.mjs 18 断言+RECYCLE_LIST 宿主修复事件回收机制（断言双模，ORCH_HOST_FIXED=1 反向）；E-19/E-20 CONFLICT-1 裁决回写 designs/adv-review-20261014/SUMMARY.md（采信 V4-P1-2）。
+- **非代码随行**：W-F/W-F2 唤醒通道调研入库（remote v4 通道协议逆向，V1 改判「可行-约束型」；watcher 0.7 立项建议）——调研产物，非本版代码内容。
+
+---
+
+## 24. v0.6.1 增量指针：ENV-01 稳定化 / hooks 冗余声明根治 / 计数对齐
+
+v0.6.1 为稳定性小批（配套：plugin.json 0.6.1、workspace 的 plugins/marketplace.json 同步 0.6.1、server SERVER_VERSION 对齐 0.6.1），增量要点：crv5-apply-envelope 两慢 merge 场景（ENV-01/07）套内失败重试一次（全新临时根重跑、断言集与语义不变）+marker 轮询窗 12s→30s，收编 QA m-20261019-042917-43c1 首跑时序抖动；plugin.json 删 `"hooks"` 冗余声明字段——W-F4 根治（宿主对约定路径 hooks/hooks.json 无条件自动发现，manifest 声明被去重跳过并双告警；hooks.json 本体与四 hooks 注册面不变，诊断权威 designs/agent-orchestrator-v0.6-W-F4-findings.md）；AGENTS.md L11 计数对齐（16 套 592 断言+server.mjs 行数 wc 实测）。
