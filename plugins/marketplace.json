@@ -1,0 +1,18 @@
+{
+  "name": "dev-default-20557cfb",
+  "plugins": [
+    {
+      "name": "agent-orchestrator",
+      "source": "./agent-orchestrator",
+      "version": "0.7.1",
+      "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
+      "displayName": "Agent Orchestrator",
+      "displayName_i18n": {
+        "zh-CN": "子代理主控台"
+      },
+      "description_i18n": {
+        "zh-CN": "派发/分叉/恢复子代理、按角色选模型、问答续跑、后台并行与收工清点"
+      }
+    }
+  ]
+}

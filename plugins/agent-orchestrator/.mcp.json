@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "orch": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${ZCODE_PLUGIN_ROOT}/mcp/server.mjs",
+        "--root", "${user_config.storage_dir}",
+        "--wake-timeout-min", "${user_config.wake_timeout_min}",
+        "--wake-retries", "${user_config.wake_retries}",
+        "--poll-sec", "${user_config.wake_poll_sec}",
+        "--sandbox-default", "${user_config.sandbox_default}",
+        "--claim-lease-min", "${user_config.claim_lease_min}",
+        "--sentinel-family", "${user_config.sentinel_family}",
+        "--sentinel-grace-min", "${user_config.sentinel_grace_min}"
+      ],
+      "cwd": "${ZCODE_PROJECT_DIR}",
+      "timeoutMs": 120000
+    }
+  }
+}
