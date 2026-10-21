@@ -93,7 +93,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.6.1";
+const SERVER_VERSION = "0.7.1";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -185,6 +185,10 @@ const PROBE_HASH_FULL_MAX = 32 * 1024 * 1024;
 // page_token continues past the window. Windows always cut at a line boundary.
 const PROBE_SCAN_WINDOW = 1024 * 1024;
 const PROBE_DB_TIMEOUT_MS = 10000;
+// v0.7 (V7-01, W-A §2): session-level read cache for the file actions. Each
+// cached envelope is already ≤10KB by the probe's own caps, so 64 entries
+// bound the whole cache at ≤640KB — no second byte cap needed.
+const PROBE_CACHE_MAX_ENTRIES = 64;
 // v0.6 (V6-01): out-of-process SQLite reader for probe db.query. Runs as
 // `node --input-type=module -e <script>` with the db path and SQL passed via
 // env (no argv quoting hazards); opens readOnly so even a validation miss
@@ -742,6 +746,22 @@ function numArg(argv, flag, def, min, max) {
 }
 
 /**
+ * v0.7 (V7-05) optional variant: ONLY an explicitly passed valid number returns
+ * (clamped, same clamp as numArg); absent / empty / "${" template / invalid all
+ * return null so the caller can skip the write entirely. Serves the sentinel
+ * bridge keys — an unconditional default would shadow the sentinel's own
+ * bridge chain (see writeSentinelCfg). Existing numArg is untouched.
+ */
+function numArgOpt(argv, flag, min, max) {
+  const raw = parseArgValue(argv, flag);
+  const s = raw === undefined ? "" : String(raw).trim();
+  if (!s || s.startsWith("${")) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
  * v0.3: the server never spawns the sentinel; it only publishes the user's
  * wake-sentinel settings to <root>/sentinel.cfg.json so the separately started
  * bg-sentinel.mjs (host background Bash task) can pick them up. CLI > cfg file
@@ -751,14 +771,25 @@ function numArg(argv, flag, def, min, max) {
  * arbitration) + the rev.b signals block. 0.3.1 keys keep their names and
  * meanings as bridge sources (refire_gap_min←wake_timeout_min,
  * wake_cap←wake_retries — the bridging itself happens in the sentinel).
+ *
+ * v0.7 (V7-05): the four bridge keys (wake_timeout_min / wake_retries /
+ * refire_gap_min / wake_cap) are written SPARSELY — only when the user
+ * explicitly passed them on the server CLI (numArgOpt, key absent rather than
+ * null). The old unconditional defaults shadowed the sentinel's bridge chain
+ * forever: cfg.refire_gap_min (always the finite 5) was consulted before the
+ * bridge source cfg.wake_timeout_min, so --wake-timeout-min never reached the
+ * refire gap. An absent key reads as NaN in the sentinel's numArgBridge and
+ * falls through to its builtin default (5/3 — same numbers as the old server
+ * defaults, zero drift). The remaining v2 keys keep writing their recommended
+ * defaults unconditionally (numerically equal to the sentinel builtins; the
+ * signals block must stay constant). Full-sparse mode for all keys is a 0.8
+ * candidate, not this change.
  */
 function writeSentinelCfg() {
   try {
     const argv = process.argv.slice(2);
     const cfg = {
-      // —— 0.3.1 existing three keys: kept verbatim (bridge sources) ——
-      wake_timeout_min: numArg(argv, "--wake-timeout-min", 10, 1, 1440),
-      wake_retries: Math.round(numArg(argv, "--wake-retries", 3, 1, 100)),
+      // —— 0.3.1 existing key, unconditional default (not a bridge source) ——
       wake_poll_sec: numArg(argv, "--poll-sec", 60, 1, 3600),
       // —— v2 keys (defaults = recommended values) ——
       wake_grace_min: numArg(argv, "--sentinel-grace-min", 5, 0.01, 1440),
@@ -766,8 +797,6 @@ function writeSentinelCfg() {
       stall_grace_min: numArg(argv, "--stall-grace-min", 30, 0.01, 1440),
       crash_grace_min: numArg(argv, "--crash-grace-min", 10, 0.01, 1440),
       coord_idle_min: numArg(argv, "--coord-idle-min", 3, 0.01, 1440),
-      refire_gap_min: numArg(argv, "--refire-gap-min", 5, 0.01, 1440),
-      wake_cap: Math.round(numArg(argv, "--wake-cap", 3, 1, 100)),
       cap_window_min: numArg(argv, "--cap-window-min", 120, 1, 10080),
       family_size: Math.round(numArg(argv, "--sentinel-family", 3, 1, 5)),
       stagger_sec: numArg(argv, "--stagger-sec", 20, 0, 600),
@@ -781,6 +810,18 @@ function writeSentinelCfg() {
         toast_on_abandon: true,
       },
     };
+    // —— bridge keys (0.3.1 wake_timeout_min / wake_retries + v2 refire_gap_min /
+    //    wake_cap): written only when explicitly passed — an absent key lets the
+    //    sentinel's numArgBridge (CLI > cfg[new key] > cfg[bridge key] > builtin)
+    //    see NaN and fall through. Clamps match the sentinel-side ranges. ——
+    const vWakeTimeout = numArgOpt(argv, "--wake-timeout-min", 1, 1440);
+    if (vWakeTimeout !== null) cfg.wake_timeout_min = vWakeTimeout;
+    const vWakeRetries = numArgOpt(argv, "--wake-retries", 1, 100);
+    if (vWakeRetries !== null) cfg.wake_retries = Math.round(vWakeRetries);
+    const vRefireGap = numArgOpt(argv, "--refire-gap-min", 0.01, 1440);
+    if (vRefireGap !== null) cfg.refire_gap_min = vRefireGap;
+    const vWakeCap = numArgOpt(argv, "--wake-cap", 1, 100);
+    if (vWakeCap !== null) cfg.wake_cap = Math.round(vWakeCap);
     atomicWriteFileSync(path.join(root, "sentinel.cfg.json"), JSON.stringify(cfg, null, 2) + "\n");
   } catch (err) {
     log("sentinel.cfg.json write skipped: " + (err && err.message ? err.message : err));
@@ -813,6 +854,10 @@ const claimLeaseMinDefault = numArg(process.argv.slice(2), "--claim-lease-min", 
 //   ③ board(claim) unchanged (claim always re-mints, V6-14 — nothing to steal).
 // Off = exact v0.5.1 behavior for the no-token face (AUTH-03 baseline).
 const strictTokens = process.argv.slice(2).includes("--strict-tokens");
+// v0.7 (V7-02, P2P): open p2p record TTL in minutes — gcP2pFiles flips overdue
+// records to expired (with the two-sided echo) at startup and lazily on
+// p2p_ask / p2p_answer / board list (a time-driven expiry has no other ticker).
+const p2pTtlMinDefault = numArg(process.argv.slice(2), "--p2p-ttl-min", 30, 1, 1440);
 
 /* ------------------------------------------------------------------ */
 /* git subprocess block (v0.4 sandbox dispatch)                        */
@@ -2518,10 +2563,13 @@ function consumeEventFile(srcFile, missionId) {
 }
 
 /* ------------------------------------------------------------------ */
-/* sentinel health (v0.4.1, read-only view of <root>/sentinel/)        */
+/* sentinel health（v0.4.1 只读视图；v0.7-A3 V7-06 三态聚合展示面）      */
 /* ------------------------------------------------------------------ */
 
 const SENTINEL_HEARTBEAT_STALE_MS = 90000; // twin of bg-sentinel / bg-gate B3 rule
+// v0.7-A3 (V7-06): slotDoc state 枚举（bg-sentinel v2.1 待命制 + V7-04 隔离值守）。
+// 旧版槽位文件无 state 字段 = active（与 bg-sentinel touchSlot 归一规则同规）。
+const SENTINEL_ON_DUTY_STATES = ["active", "standby", "quarantined"];
 
 function serverPidAlive(pid) {
   try {
@@ -2532,7 +2580,9 @@ function serverPidAlive(pid) {
   }
 }
 
-/** Read-only health view; ANY failure returns {available:false} (never throws). */
+/** Read-only health view; ANY failure returns {available:false} (never throws).
+ * v0.7-A3 (V7-06): 附三态 summary（在岗 active/待命 standby/隔离值守 quarantined、
+ * 可补员=无任何存活实例、无哨兵=零实例）——standby 家族对主控全程可观测。 */
 function sentinelHealth() {
   try {
     const dir = path.join(root, "sentinel");
@@ -2545,7 +2595,9 @@ function sentinelHealth() {
     } catch {
       /* keep default */
     }
-    // instances: fresh slot files = on duty
+    // instances: V7-06 定稿形状 {slot, pid_alive, state, hb_age_sec, took_over, root}
+    //（在岗 on_duty = pid 活 ∧ 心跳新鲜；state ∈ {active,standby,quarantined} 全部归在岗
+    // 语义——quarantined 仅挂起告警，心跳照旧，不降格为死亡）
     const now = Date.now();
     const names = fs.readdirSync(dir).filter((n) => /^instance-\d+\.json$/.test(n));
     for (const n of names) {
@@ -2555,20 +2607,48 @@ function sentinelHealth() {
         const hb = Date.parse(String(doc.heartbeatAt ?? ""));
         let age = Number.isFinite(hb) ? now - hb : NaN;
         if (!Number.isFinite(age)) age = now - fs.statSync(f).mtimeMs;
-        const alive = serverPidAlive(Number(doc.pid)) && Math.max(0, age) <= SENTINEL_HEARTBEAT_STALE_MS;
+        const pidAlive = serverPidAlive(Number(doc.pid));
+        const state = SENTINEL_ON_DUTY_STATES.includes(doc.state) ? doc.state : "active";
         out.instances.push({
           slot: Number(doc.slot ?? n.match(/^instance-(\d+)\./)?.[1] ?? -1),
           pid: Number(doc.pid ?? 0),
-          alive,
-          heartbeat_age_s: Math.max(0, Math.round(age / 1000)),
-          started_at: doc.started_at ?? null,
+          pid_alive: pidAlive,
+          state,
+          hb_age_sec: Math.max(0, Math.round(age / 1000)),
           took_over: Boolean(doc.took_over),
+          root: typeof doc.root === "string" ? doc.root : null,
+          started_at: doc.started_at ?? null,
+          on_duty: pidAlive && Math.max(0, age) <= SENTINEL_HEARTBEAT_STALE_MS,
         });
       } catch {
         /* skip bad slot file */
       }
     }
     out.instances.sort((a, b) => a.slot - b.slot);
+    // V7-06 家族级三态 summary：在岗 active／在岗待命 standby／隔离值守 quarantined
+    //（三者同属在岗语义，quarantined 归在岗）；可补员=无任何存活实例；无哨兵=零实例。
+    // 混编取最强在岗态 active > quarantined > standby；stale 明细由逐实例 pid_alive/on_duty 呈现。
+    {
+      const duty = out.instances.filter((i) => i.on_duty);
+      if (out.instances.length === 0) {
+        out.summary = { state: "none", on_duty: false, on_duty_n: 0, total: 0, text: "无哨兵（建议拉起）" };
+      } else if (duty.length === 0) {
+        out.summary = { state: "reinforce", on_duty: false, on_duty_n: 0, total: out.instances.length, text: "槽位 stale（可补员）" };
+      } else {
+        const famState = duty.some((i) => i.state === "active")
+          ? "active"
+          : duty.some((i) => i.state === "quarantined")
+            ? "quarantined"
+            : "standby";
+        const text =
+          famState === "active"
+            ? "在岗盯守（新派发在飞，分级告警值守中）"
+            : famState === "quarantined"
+              ? "隔离值守（在岗：观测异常期告警挂起，低频值守中）"
+              : "在岗待命（自动接管新派发）";
+        out.summary = { state: famState, on_duty: true, on_duty_n: duty.length, total: out.instances.length, text };
+      }
+    }
     // fired entries (24h window), newest first
     const cutoff = now - 24 * 3600 * 1000;
     const firedDir = path.join(dir, "fired");
@@ -2668,6 +2748,203 @@ function sentinelHealth() {
   } catch {
     return { available: false };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* v0.7 (V7-02, W-A §3): P2P direct-channel arbitration                */
+/*                                                                     */
+/* Peer questions ride the board tool as actions p2p_ask/p2p_answer    */
+/* (ruling ①: no 12th tool). Three frozen boundaries (W-A1 token-P2P)  */
+/* are mechanized here:                                                */
+/*   ① no credentials in transit — callers authenticate with THEIR OWN */
+/*      mission's (mission_id, worker, token) via the report-gate      */
+/*      mirror below; the token never enters the p2p record, any       */
+/*      payload, or a response (record identity is mission_id+worker). */
+/*   ② answer-only — p2p_answer writes the p2p record plus the forced  */
+/*      echoes and NOTHING else; the asker's status/fields/lease are   */
+/*      zero-touch (the Q&A result is advisory data the asker digests  */
+/*      through its own report).                                       */
+/*   ③ audit echo (ruling ②: server-forced, replacing the worker-      */
+/*      voluntary report of the frozen text) — every ask/answer/expire */
+/*      appends one echo event to BOTH missions' timelines, written by */
+/*      the server as neutral arbiter; board get replays the trail,    */
+/*      the full text lives in the p2p record.                         */
+/* Records live at <root>/p2p/p2p-<id>.json (single-question file,     */
+/* spool precedent) — never inside board.json (anti-giant-board).      */
+/* Lease ruling (W-D dependency 2): p2p events NEVER renew a claim     */
+/* lease (renewal stays exclusive to report, V6-17 undiluted);         */
+/* liveness is unaffected — the sentinel's lastActivityMs counts ANY   */
+/* timeline event, so the echoes count automatically. Sentinel side is */
+/* zero-change by construction.                                        */
+/* ------------------------------------------------------------------ */
+
+const P2P_TERMINAL_STATUSES = ["done", "failed", "skipped", "closed"];
+// Ask precondition (ruling ③): P2P is the alternate channel of the
+// blocked/question wait — same semantics family as sentinel question_grace_min.
+const P2P_ASK_PRECONDITION_STATUSES = ["blocked", "question"];
+const P2P_ECHO_SUMMARY_CAP = 200;
+
+const p2pDir = () => path.join(root, "p2p");
+const P2P_FILE_RE = /^p2p-([A-Za-z0-9._-]+)\.json$/;
+
+function p2pFilePath(id) {
+  return path.join(p2pDir(), `p2p-${safeSegment(id, "p2p id")}.json`);
+}
+
+function loadP2pRecord(id) {
+  let raw;
+  try {
+    raw = fs.readFileSync(p2pFilePath(id), "utf8");
+  } catch {
+    return null; // ENOENT / transient read race → "not found" to the caller
+  }
+  try {
+    const rec = JSON.parse(raw);
+    return rec && typeof rec === "object" && !Array.isArray(rec) ? rec : null;
+  } catch {
+    return null; // malformed file behaves as absent (no quarantine: p2p is advisory data)
+  }
+}
+
+function saveP2pRecord(rec) {
+  fs.mkdirSync(p2pDir(), { recursive: true });
+  atomicWriteFileSync(p2pFilePath(rec.id), JSON.stringify(rec, null, 2) + "\n");
+}
+
+/**
+ * Boundary ③ writer: append one echo event to a mission's timeline. The append
+ * is the ONLY touch — status, updated_at and every other field stay verbatim
+ * (an echo is an audit fact, not a state change; the sentinel reads timeline
+ * event `at` directly, so liveness needs no updated_at bump). Missing mission
+ * → skipped (false), never fatal: the p2p record remains the source of truth.
+ */
+function appendP2pEcho(board, missionId, event, summary, at) {
+  const m = findMission(board, missionId);
+  if (!m) return false;
+  m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
+  m.timeline.push({ at, event, summary });
+  return true;
+}
+
+/** Echo summary head: control-escaped (V6-18 family) + capped. */
+function p2pEchoHead(text) {
+  return truncateStr(escapeDataLine(text), P2P_ECHO_SUMMARY_CAP);
+}
+
+/**
+ * report-gate mirror (V6-09/17/19 semantics; message family aligned with
+ * report's "missing token"/"token mismatch"): expectedToken present → the call
+ * MUST carry the token and match exactly; --strict-tokens closes the no-token
+ * face; a claim-holder mismatch rejects (paired auth). Unlike report there is
+ * no archive-anyway fallback — p2p has no board write to withhold, so a
+ * stranger gets a hard ToolError.
+ */
+function p2pTokenGate(mission, missionId, worker, token) {
+  const expectedToken =
+    mission.dispatch && mission.dispatch.token ? String(mission.dispatch.token) : null;
+  if (expectedToken != null) {
+    if (token == null || token === "") {
+      throw new ToolError(
+        `p2p missing token for mission ${missionId}: refusing ` +
+          `(该 mission 已带派发 token，调用必须携带；check the [token] line of your dispatch prompt)`,
+      );
+    }
+    if (token !== expectedToken) {
+      throw new ToolError(
+        `p2p token mismatch for mission ${missionId}: refusing ` +
+          `(check the [token] line of your dispatch prompt)`,
+      );
+    }
+  } else if (strictTokens) {
+    throw new ToolError(
+      `p2p rejected for mission ${missionId}: --strict-tokens 模式下不接受无派发 token 的调用`,
+    );
+  }
+  const claimHolder =
+    mission.claim && typeof mission.claim === "object" && mission.claim.worker != null
+      ? String(mission.claim.worker)
+      : null;
+  if (claimHolder !== null && claimHolder !== worker) {
+    throw new ToolError(
+      `p2p 成对鉴权不过：mission ${missionId} 租约属于 ${claimHolder}，调用方 worker=${worker} 拒绝`,
+    );
+  }
+  return expectedToken;
+}
+
+/**
+ * TTL sweep: open records past the TTL flip to expired, each with the two-sided
+ * `p2p:expired` echo. Time-driven expiry has no ticker, so the sweep rides
+ * startup + p2p_ask/p2p_answer + board list (sweepGraph-on-write philosophy).
+ * Invalid/future created_at reads as NOT due (safe direction: keep open).
+ */
+function gcP2pFiles() {
+  let names;
+  try {
+    names = fs.readdirSync(p2pDir());
+  } catch {
+    return 0; // no p2p dir → zero side effects
+  }
+  const cutoff = Date.now() - p2pTtlMinDefault * 60000;
+  const due = [];
+  for (const name of names) {
+    const m = P2P_FILE_RE.exec(name);
+    if (!m) continue;
+    const rec = loadP2pRecord(m[1]);
+    if (!rec || rec.status !== "open") continue;
+    const created = Date.parse(String(rec.created_at ?? ""));
+    if (!Number.isFinite(created) || created > cutoff) continue;
+    due.push(rec);
+  }
+  if (!due.length) return 0;
+  const at = nowIso();
+  withRootLock(() => {
+    const board = loadBoard();
+    let touched = false;
+    for (const rec of due) {
+      rec.status = "expired";
+      rec.expired_at = at;
+      const head = p2pEchoHead(rec.question);
+      touched =
+        appendP2pEcho(
+          board,
+          rec.from && rec.from.mission_id,
+          "p2p:expired",
+          `P2P ask<${rec.id}> TTL 到期未答（→${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}）：${head}`,
+          at,
+        ) || touched;
+      touched =
+        appendP2pEcho(
+          board,
+          rec.to && rec.to.mission_id,
+          "p2p:expired",
+          `P2P ask<${rec.id}> TTL 到期未答（←${rec.from && rec.from.mission_id}/${rec.from && rec.from.worker}）：${head}`,
+          at,
+        ) || touched;
+      saveP2pRecord(rec);
+    }
+    if (touched) saveBoard(board);
+  });
+  return due.length;
+}
+gcP2pFiles(); // once at startup
+
+/** Open-record counter riding board list (gc first so the count is honest). */
+function countOpenP2p() {
+  let names;
+  try {
+    names = fs.readdirSync(p2pDir());
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const name of names) {
+    const m = P2P_FILE_RE.exec(name);
+    if (!m) continue;
+    const rec = loadP2pRecord(m[1]);
+    if (rec && rec.status === "open") n += 1;
+  }
+  return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2824,6 +3101,7 @@ function toolBoard(args) {
   }
   if (action === "list") {
     const filter = Array.isArray(args.filter_status) ? args.filter_status.map(String) : null;
+    gcP2pFiles(); // lazy TTL sweep keeps the open_p2p count honest (v0.7 V7-02)
     const board = loadBoard();
     let missions = board.missions.slice();
     if (filter) missions = missions.filter((m) => m && filter.includes(m.status));
@@ -2831,6 +3109,9 @@ function toolBoard(args) {
     missions.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
     // v0.4.1: sentinel family health rides on list (read-only view of sentinel/)
     const out = { missions: missions.map(withComputed), sentinel_health: sentinelHealth() };
+    // v0.7 (V7-02): open p2p record count rides on list too — the coordinator's
+    // one-glance view of pending peer questions (answered/expired/closed excluded).
+    out.open_p2p = countOpenP2p();
     // v0.6 (V6-26): a corrupt board was quarantined and rebuilt empty this
     // process — surface it once (conditional key, consumed by this response).
     if (boardDegradedFrom) {
@@ -2914,7 +3195,174 @@ function toolBoard(args) {
       };
     });
   }
-  throw new ToolError(`unknown board action: ${JSON.stringify(action)} (use upsert|get|list|ack|claim)`);
+  if (action === "p2p_ask") {
+    // v0.7 (V7-02): ask a peer worker a directed question. The asker
+    // authenticates with its OWN mission credentials (report-gate mirror); the
+    // asker mission must sit in blocked/question (precondition ruling ③). The
+    // target must exist, be non-terminal, and — when it has a current holder —
+    // the designated to_worker must be that holder, so the ask cannot point at
+    // a worker that could never legitimately answer. Target invalid → hard
+    // error WITHOUT creating a record: P2P is an optimization channel, the
+    // fallback (report(question)) is always available.
+    const askerId = safeSegment(args.mission_id, "mission_id");
+    const worker = String(args.worker ?? "").trim();
+    if (!worker) throw new ToolError('board p2p_ask requires "worker"');
+    const toMissionId = safeSegment(args.to_mission_id, "to_mission_id");
+    const toWorker = String(args.to_worker ?? "").trim();
+    if (!toWorker) throw new ToolError('board p2p_ask requires "to_worker"');
+    const rawQuestion = args.question == null ? "" : String(args.question);
+    if (!rawQuestion.trim()) throw new ToolError('board p2p_ask requires "question"');
+    // v0.6 (V6-18) cap family: storage-side DETAILS_MAX_CHARS, response warn.
+    const questionTruncated = rawQuestion.length > DETAILS_MAX_CHARS;
+    const question = questionTruncated ? rawQuestion.slice(0, DETAILS_MAX_CHARS) : rawQuestion;
+    return withRootLock(() => {
+      gcP2pFiles(); // lazy TTL sweep (re-entrant lock)
+      const board = loadBoard();
+      const asker = findMission(board, askerId);
+      if (!asker) throw new ToolError(`mission not found: ${askerId}`);
+      const token = args.token == null ? null : String(args.token);
+      // Boundary ①: own-mission report-gate auth; the token never leaves this call.
+      p2pTokenGate(asker, askerId, worker, token);
+      if (!P2P_ASK_PRECONDITION_STATUSES.includes(asker.status)) {
+        throw new ToolError(
+          `p2p_ask 前置态不满足：${askerId} status=${asker.status}（仅 blocked/question 可问；` +
+            `主等待通道 report(blocked|question) 恒可用）`,
+        );
+      }
+      const target = findMission(board, toMissionId);
+      if (!target) {
+        throw new ToolError(
+          `p2p_ask target mission 不存在：${toMissionId}（不建档；降级 = report(question)）`,
+        );
+      }
+      if (target.id === asker.id) {
+        throw new ToolError("p2p_ask 不能自问自答（from 与 to 为同一 mission）");
+      }
+      if (P2P_TERMINAL_STATUSES.includes(target.status)) {
+        throw new ToolError(
+          `p2p_ask target mission 已终态（${target.status}）：${toMissionId}（不建档；降级 = report(question)）`,
+        );
+      }
+      const holder = target.owner || (target.claim && target.claim.worker) || null;
+      if (holder && holder !== toWorker) {
+        throw new ToolError(
+          `p2p_ask target worker 非该 mission 当前持有者：${toMissionId} holder=${holder}，` +
+            `to_worker=${toWorker}（不建档，否则无人能合法应答）`,
+        );
+      }
+      const at = nowIso();
+      const p2pId = String(Date.now()).padStart(15, "0") + "-" + hex(4);
+      const rec = {
+        v: 1,
+        id: p2pId,
+        from: { mission_id: askerId, worker },
+        to: { mission_id: toMissionId, worker: toWorker },
+        question,
+        status: "open",
+        created_at: at,
+        answered_at: null,
+        answer: null,
+        expired_at: null,
+        // Echo markers (design sketch named *_event_id; timeline events here are
+        // id-less, so the markers are the echo timestamps instead).
+        echo: { ask: at, answer: null },
+      };
+      // Boundary ③: server-forced two-sided echo (truncated head + p2p pointer;
+      // the full text stays in the record).
+      const qHead = p2pEchoHead(question);
+      appendP2pEcho(board, askerId, "p2p:ask", `P2P ask<${p2pId}> → ${toMissionId}/${toWorker}：${qHead}`, at);
+      appendP2pEcho(board, toMissionId, "p2p:ask", `P2P ask<${p2pId}> ← ${askerId}/${worker}：${qHead}`, at);
+      saveP2pRecord(rec);
+      saveBoard(board);
+      return {
+        ok: true,
+        p2p_id: p2pId,
+        status: "open",
+        created_at: at,
+        from: { mission_id: askerId, worker },
+        to: { mission_id: toMissionId, worker: toWorker },
+        question_truncated: questionTruncated,
+        hint:
+          "等待对方 p2p_answer 直答（server 双向强制 echo，board get 回放双方 timeline）。" +
+          "收到答案后自行消化并经自己的 report 入账——mission 状态演进仍只经 report，租约不因 p2p 续期。",
+        next_hint: `对方应答：board(action="p2p_answer", mission_id="${toMissionId}", worker="${toWorker}", token=<对方 token>, p2p_id="${p2pId}", answer=…)`,
+      };
+    });
+  }
+  if (action === "p2p_answer") {
+    // v0.7 (V7-02): the designated peer answers. The answerer authenticates
+    // with its OWN mission credentials and must be the record's to side.
+    // Boundary ②: this writes the p2p record + the forced echoes and NOTHING
+    // else — the asker's status/fields/lease are zero-touch (only the timeline
+    // gains the echo event, written by the server as neutral arbiter).
+    const answererId = safeSegment(args.mission_id, "mission_id");
+    const worker = String(args.worker ?? "").trim();
+    if (!worker) throw new ToolError('board p2p_answer requires "worker"');
+    const p2pId = safeSegment(args.p2p_id, "p2p_id");
+    const rawAnswer = args.answer == null ? "" : String(args.answer);
+    if (!rawAnswer.trim()) throw new ToolError('board p2p_answer requires "answer"');
+    const answerTruncated = rawAnswer.length > DETAILS_MAX_CHARS;
+    const answer = answerTruncated ? rawAnswer.slice(0, DETAILS_MAX_CHARS) : rawAnswer;
+    return withRootLock(() => {
+      gcP2pFiles(); // lazy TTL sweep (re-entrant lock)
+      const board = loadBoard();
+      const answerer = findMission(board, answererId);
+      if (!answerer) throw new ToolError(`mission not found: ${answererId}`);
+      const token = args.token == null ? null : String(args.token);
+      // Boundary ①: own-mission report-gate auth first — no record facts leak
+      // to a caller that cannot authenticate.
+      p2pTokenGate(answerer, answererId, worker, token);
+      const rec = loadP2pRecord(p2pId);
+      if (!rec) throw new ToolError(`p2p 记录不存在：${p2pId}`);
+      if (rec.status !== "open") {
+        throw new ToolError(`p2p 记录非 open（status=${rec.status}）：${p2pId}`);
+      }
+      if (
+        String(rec.to && rec.to.worker) !== worker ||
+        String(rec.to && rec.to.mission_id) !== answererId
+      ) {
+        throw new ToolError(
+          `p2p_answer 仅限记录 to 侧（${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}）：` +
+            `调用方 ${answererId}/${worker} 非指定应答者`,
+        );
+      }
+      const at = nowIso();
+      rec.status = "answered";
+      rec.answered_at = at;
+      rec.answer = answer;
+      rec.echo.answer = at;
+      const aHead = p2pEchoHead(answer);
+      appendP2pEcho(
+        board,
+        rec.to.mission_id,
+        "p2p:answer",
+        `P2P answer<${p2pId}> → ${rec.from.mission_id}/${rec.from.worker}：${aHead}`,
+        at,
+      );
+      appendP2pEcho(
+        board,
+        rec.from.mission_id,
+        "p2p:answer",
+        `P2P answer<${p2pId}> ← ${rec.to.mission_id}/${rec.to.worker}：${aHead}`,
+        at,
+      );
+      saveP2pRecord(rec);
+      saveBoard(board);
+      return {
+        ok: true,
+        p2p_id: p2pId,
+        status: "answered",
+        answered_at: at,
+        answer_truncated: answerTruncated,
+        hint:
+          "双向 echo 已落（board get 回放双方 timeline）；提问方自行消化后经自己的 report 入账，" +
+          "其 mission 状态/字段未被本调用触碰（p2p 不续租）。",
+      };
+    });
+  }
+  throw new ToolError(
+    `unknown board action: ${JSON.stringify(action)} (use upsert|get|list|ack|claim|p2p_ask|p2p_answer)`,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -5441,7 +5889,7 @@ function toolResume(args) {
   // takeover suggestion (priority 2, board-driven, no sentinel files written).
   const health = sentinelHealth();
   if (health.available) {
-    const live = health.instances.filter((i) => i.alive).length;
+    const live = health.instances.filter((i) => i.on_duty).length;
     const understaffed = live < health.family_size;
     if ((understaffed || health.abandoned.length) && openMissions.some((m) => m.status !== "ready")) {
       actions.push({
@@ -6475,8 +6923,52 @@ function probeBinInspect(args) {
 
 /* -- probe: dispatch -------------------------------------------------- */
 
-function toolProbe(args) {
-  const action = String(args.action ?? "");
+/* -- probe: session read cache (v0.7 A2, V7-01) ------------------------ */
+
+// W-A §2: repeated identical probes fold into a ~100B stub at the single
+// dispatch choke point — "don't re-probe" stops being discipline and becomes
+// mechanism. Only the file actions are cacheable: db.query reads an externally
+// mutable SQLite file whose mtime is not a trustworthy invalidator, so it is
+// excluded by construction. Calls carrying page_token never read nor write the
+// cache (offset semantics make a stub meaningless; the token's own sz binding
+// at probeDecodeToken already guards continuation freshness). Invalidation
+// needs no protocol: the key carries mtimeMs+size, so any host write shifts
+// the key → miss → full re-read.
+const PROBE_CACHE_ACTIONS = new Set(["file.head", "file.grep", "bin.inspect"]);
+const probeCache = new Map(); // insertion order = LRU: hit = delete+set touch; evict-oldest past cap
+
+/** Cache key: action + args minus page_token/no_cache (canonical: sorted keys,
+ *  undefined dropped) + mtimeMs + size. The mtime+size dual factor IS the write
+ *  invalidation — no write-notification protocol, same philosophy as the
+ *  page_token sz binding. */
+function probeCacheKey(action, args, st) {
+  const flat = {};
+  for (const k of Object.keys(args).sort()) {
+    if (k === "page_token" || k === "no_cache") continue;
+    if (args[k] !== undefined) flat[k] = args[k];
+  }
+  return JSON.stringify([action, flat, st.mtimeMs, st.size]);
+}
+
+/** ~100B hit stub: a machine-honest pointer, never the payload (carrying the
+ *  payload would erase the byte savings). no_cache:true is the escape hatch
+ *  for the residual case where the first full response was already condensed
+ *  out of the session context and only the hash pointer remains. */
+function probeCacheStub(entry, action, p) {
+  return {
+    ok: true,
+    tool: "probe",
+    action,
+    path: displayPath(p),
+    cached: true,
+    cached_at: entry.at,
+    prior_hash: entry.hash,
+    prior_bytes: entry.bytes,
+    note: "本会话上文已含同 hash 完整结果；no_cache:true 可强制重读",
+  };
+}
+
+function probeDispatchAction(action, args) {
   if (action === "db.query") return probeDbQuery(args);
   if (action === "file.head") return probeFileHead(args);
   if (action === "file.grep") return probeFileGrep(args);
@@ -6484,6 +6976,38 @@ function toolProbe(args) {
   throw new ToolError(
     `unknown probe action: ${JSON.stringify(truncateStr(action, 32))} (use db.query|file.head|file.grep|bin.inspect)`,
   );
+}
+
+function toolProbe(args) {
+  const action = String(args.action ?? "");
+  if (PROBE_CACHE_ACTIONS.has(action) && args.page_token == null && args.no_cache !== true) {
+    let p = null;
+    let st = null;
+    try {
+      p = probeResolvePath(args.path);
+      st = probeStatFile(p); // same ToolError wording as the handler's own checks
+    } catch {
+      /* unresolvable target: fall through — the handler owns the error */
+    }
+    if (p && st) {
+      const key = probeCacheKey(action, args, st);
+      const hit = probeCache.get(key);
+      if (hit) {
+        probeCache.delete(key);
+        probeCache.set(key, hit); // LRU touch
+        return probeCacheStub(hit, action, p);
+      }
+      const res = probeDispatchAction(action, args);
+      if (res && res.ok === true && typeof res.hash === "string") {
+        probeCache.set(key, { at: new Date().toISOString(), hash: res.hash, bytes: res.bytes });
+        while (probeCache.size > PROBE_CACHE_MAX_ENTRIES) {
+          probeCache.delete(probeCache.keys().next().value); // evict oldest
+        }
+      }
+      return res;
+    }
+  }
+  return probeDispatchAction(action, args);
 }
 
 /* ------------------------------------------------------------------ */
@@ -6509,17 +7033,40 @@ const TOOLS = [
     name: PREFIX + "board",
     description:
       "持久任务板的增查与签收（upsert=创建或按字段合并更新；get=按 id 取单条；list=按状态过滤列出，默认排除 closed；" +
-      "ack=主控签收——已知悉结果、暂缓处置时打标，避免再被列为疑似唤醒失败；claim=池工自领取（CAS），领取即 running）。" +
-      "跨会话恢复的数据源。Persistent mission board: upsert/get/list/ack/claim; the data source for cross-session resume.",
+      "ack=主控签收——已知悉结果、暂缓处置时打标，避免再被列为疑似唤醒失败；claim=池工自领取（CAS），领取即 running；" +
+      "p2p_ask/p2p_answer=P2P 直通问答（server 仲裁+双向 echo；ask 限 blocked/question 前置态）。" +
+      "跨会话恢复的数据源。Persistent mission board: upsert/get/list/ack/claim/p2p_ask/p2p_answer; the data source for cross-session resume.",
     inputSchema: {
       type: "object",
       properties: {
         action: {
-          enum: ["upsert", "get", "list", "ack", "claim"],
+          enum: ["upsert", "get", "list", "ack", "claim", "p2p_ask", "p2p_answer"],
           description:
             "upsert=创建或按字段合并更新；get=按 id 取单条；list=按状态过滤列出；" +
             "ack=主控签收（已知悉该 mission 的结果、暂缓处置时打标，避免再被列为疑似唤醒失败）；" +
-            "claim=池工自领取（CAS）：worker 领取 ready 任务并写租约，领取即 running",
+            "claim=池工自领取（CAS）：worker 领取 ready 任务并写租约，领取即 running；" +
+            "p2p_ask=向指定 peer mission 定向提问（仅 blocked/question 态，携本方 token，token 不入档）；" +
+            "p2p_answer=以记录 to 侧身份直答（只写 p2p 档+双向 echo，提问方 mission 零触碰）",
+        },
+        to_mission_id: {
+          type: "string",
+          description: "p2p_ask 的目标 mission id（应答方所在 mission，须存在且非终态）",
+        },
+        to_worker: {
+          type: "string",
+          description: "p2p_ask 的指定应答 worker（目标 mission 有持有者时必须为其本人）",
+        },
+        question: {
+          type: "string",
+          description: "p2p_ask 的提问正文（≤DETAILS_MAX_CHARS 截断；全文存 p2p 档，双方 timeline 各得截断 echo）",
+        },
+        p2p_id: {
+          type: "string",
+          description: "p2p_answer 目标记录 id（p2p_ask 响应给出；仅 open 状态可答）",
+        },
+        answer: {
+          type: "string",
+          description: "p2p_answer 的回答正文（≤DETAILS_MAX_CHARS 截断；建议性数据，提问方经自己的 report 入账）",
         },
         mission: {
           type: "object",
@@ -6987,7 +7534,9 @@ const TOOLS = [
       "db.query=受限只读 SQL（SQLite 文件经 node:sqlite 只读子进程；仅 SELECT/WITH；禁裸 SELECT *（COUNT(*) 除外）；" +
       "LIMIT ≤100 强制，缺省由分页接管，50 行/页）；file.head=文件首 ≤50 行（tail=true 取末尾 ≤50 行，日志尾窗语义，无分页）；" +
       "file.grep=服务端 grep -m 语义（max_count ≤50/页，可 ignore_case）；bin.inspect=只回 类型/大小/sha256/首 256 字节。" +
-      "路径可为任意可读文件（探针管帽不管沙箱）。主控与子代理双面可用。" +
+      "路径可为任意可读文件（探针管帽不管沙箱）。会话级读缓存：file 类 action 同参重复 probe 自动折算为" +
+      "存根（cached:true+prior_hash，不含 payload）；no_cache:true 强制全量重读（db.query 与续页恒不缓存）。" +
+      "主控与子代理双面可用。" +
       "Structured probe (read-only): server-enforced §20.4 caps; summary JSON envelope, never a raw dump.",
     inputSchema: {
       type: "object",
@@ -7032,6 +7581,12 @@ const TOOLS = [
           type: "string",
           description:
             "分页续传：把上一 probe 响应的 page_token 原样传回（与 action 绑定，跨 action/文件变化会被拒绝）",
+        },
+        no_cache: {
+          type: "boolean",
+          description:
+            "true=跳过会话级读缓存并强制全量重读（本次结果不写缓存）。缺省 false——同参数重复 probe " +
+            "自动折算为存根（cached:true+prior_hash，不含 payload；db.query 与带 page_token 的续页恒不缓存）",
         },
       },
     },

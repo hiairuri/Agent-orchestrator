@@ -5,10 +5,13 @@
  * 如实声明：纯 Node 断言测不了宿主 typed 派发行为；本 suite 只测文档/配置在位，防回退。
  * 覆盖 18 组断言（W-C §2 表）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1。
- * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-5 导出常量（宿主修复事件触发的人工维护清单）；
+ * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-4 导出常量（宿主修复事件触发的人工维护清单）；
  *   默认模式断言各 anchor 在位（防缺陷期被误删）；env ORCH_HOST_FIXED=1 反向断言各 anchor 已回收，
  *   并断言 R-2 永久条款（「report 全名保留不删」）仍在位——该条款为永久不变量，不在回收范围。
  *   E-05/E-06/E-07 条目中「宿主快照缺陷期间」限定语随 R-2 同批复核；E-13/E-14 不回收。
+ *   R-5（plugin.json 两键「兼容存根」）已于 2026-10-21 随 E-18 方案乙开关出清册（回收完成）：
+ *   V6-24 实现侧（V7-05 numArgOpt 稀疏写）先行落地、桥接语义复邦；A-DOC-V4P12/A-PLUGIN-STUB
+ *   同步切换为断言乙稿桥接措辞在位，方案甲存根短语改列 ban（防复发回退）。
  *
  * TODO(issue): 上游 issue 稿（宿主 startup snapshot 缺陷，证据链 designs/dispatch-probe-20261014/）
  *   待 V6-61 定稿提交后回填编号，并同步回填 RECYCLE_LIST 各条 issue 字段。
@@ -72,14 +75,6 @@ export const RECYCLE_LIST = [
     file: FILES.agentsMd,
     anchor: "勿重试同一角色",
     recycleAction: "改写为历史注记（保留 designs/dispatch-probe-20261014/ 链接），删「勿重试」禁令",
-    trigger: "host-fixed",
-    issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
-  },
-  {
-    id: "R-5",
-    file: FILES.pluginJson,
-    anchor: "兼容存根",
-    recycleAction: "随 V6-24 实现侧最终语义同步改写（与 E-18 方案乙同开关）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -152,7 +147,7 @@ function main() {
   subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona"] }, "E-07");
   subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
   subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");
-  subGroup(ck, "A-DOC-V4P12", "SKILL.md", skill, { need: ["v0.3 兼容存根", "无实际效果"] }, "E-10");
+  subGroup(ck, "A-DOC-V4P12", "SKILL.md", skill, { need: ["V7-05 起桥接可达", "桥接键", "两枪最小间隔"], ban: ["无实际效果", "v0.3 兼容存根"] }, "E-10");
   subGroup(ck, "A-DOC-V4P23/24", "SKILL.md", skill, { need: ["软约束", "仅 schema 声明"] }, "E-11");
   subGroup(ck, "A-DOC-V4P31", "SKILL.md", skill, { need: ["action ∈ upsert/get/list/ack/claim"] }, "E-12");
   subGroup(ck, "A-DOC-SIGNALS", "SKILL.md", skill, { need: ["signals", "空串语义 = 哨兵侧内建默认"] }, "E-13");
@@ -182,21 +177,30 @@ function main() {
       bad.length ? `A-ROLE-DISALLOWED 缺失子串: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-16` : "");
   }
 
-  { // A-PLUGIN-STUB：wake_timeout_min/wake_retries 两键 description 均含「兼容存根」（E-18，方案甲现状诚实）
+  { // A-PLUGIN-STUB：E-18 方案乙开关已执行（2026-10-21，V7-05 实现侧先行落地）——两键 description 断言乙稿桥接语义在位，方案甲存根短语改列 ban（防复发回退）
     const d1 = pj.userConfig?.wake_timeout_min?.description || "";
     const d2 = pj.userConfig?.wake_retries?.description || "";
     const bad = [];
-    if (!d1.includes("兼容存根")) bad.push("wake_timeout_min.description 缺「兼容存根」");
-    if (!d2.includes("兼容存根")) bad.push("wake_retries.description 缺「兼容存根」");
+    for (const sub of ["桥接键", "V7-05 起桥接可达"]) {
+      if (!d1.includes(sub)) bad.push(`wake_timeout_min.description 缺「${sub}」`);
+      if (!d2.includes(sub)) bad.push(`wake_retries.description 缺「${sub}」`);
+    }
+    if (!d1.includes("--refire-gap-min")) bad.push("wake_timeout_min.description 缺桥接目标 --refire-gap-min");
+    if (!d2.includes("--wake-cap")) bad.push("wake_retries.description 缺桥接目标 --wake-cap");
+    for (const [k, d] of [["wake_timeout_min", d1], ["wake_retries", d2]]) {
+      for (const stale of ["无实际效果", "兼容存根"]) {
+        if (d.includes(stale)) bad.push(`${k}.description 残留方案甲旧措辞「${stale}」`);
+      }
+    }
     ck.ok("A-PLUGIN-STUB @ plugin.json 两键 description", bad.length === 0,
-      bad.length ? `A-PLUGIN-STUB 缺失子串: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-18` : "");
+      bad.length ? `A-PLUGIN-STUB 断言未过: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-18（乙稿）` : "");
   }
 
   { // A-RECYCLE-1：RECYCLE_LIST 形状（四字段+host-fixed）+ 双模断言（默认在位 / ORCH_HOST_FIXED=1 已回收）
     let shapeErr = "";
     try {
-      assert.equal(RECYCLE_LIST.length, 5, "应恰 5 条 R-1..R-5");
-      ["R-1", "R-2", "R-3", "R-4", "R-5"].forEach((wantId, i) => {
+      assert.equal(RECYCLE_LIST.length, 4, "应恰 4 条 R-1..R-4（R-5 已随 E-18 方案乙开关于 2026-10-21 出清册，V7-05 桥接复邦）");
+      ["R-1", "R-2", "R-3", "R-4"].forEach((wantId, i) => {
         const e = RECYCLE_LIST[i];
         assert.equal(e.id, wantId, `第 ${i + 1} 条 id 应为 ${wantId}`);
         for (const k of ["file", "anchor", "recycleAction", "trigger", "issue"]) {

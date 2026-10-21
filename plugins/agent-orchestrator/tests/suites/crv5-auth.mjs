@@ -497,6 +497,153 @@ function startStrictServer(extraArgs, { root, env = {} }) {
   ck.ok("AUTH-07e 静态：--strict-tokens 旗标已注册（默认 off 由既有探针零变更承载）", src.includes('"--strict-tokens"'), "");
 }
 
+// ================= 场景 D：CFG-01..05（v0.7 V7-05 桥接四键稀疏语义） =================
+// writeSentinelCfg 在 server 模块加载时同步写 <root>/sentinel.cfg.json（W-A findings §1：
+// 旧实现四桥接键恒写默认值 → 哨兵 numArgBridge 桥接分支永不被咨询）。每例独立临时根 +
+// 独立 argv 起 server，轮询 cfg 落盘（原子写，读到即全文）后即收进程；哨兵侧解析行为用
+// numArgBridge 同款语义的表驱动复刻器锁定（CLI 层探针不给哨兵旗标 → 恒落空）。
+{
+  const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  const sentSrc = fs.readFileSync(path.join(path.dirname(DEFAULT_SERVER), "..", "hooks", "bg-sentinel.mjs"), "utf8");
+  const spawnForCfg = (extraArgs, rootDir) => {
+    fs.mkdirSync(rootDir, { recursive: true });
+    return spawn(process.execPath, [DEFAULT_SERVER, "--root", rootDir, ...extraArgs], {
+      cwd: rootDir,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ORCH_ROLLOUT_DIR: ROLL },
+    });
+  };
+  const waitCfg = (rootDir) => {
+    const p = path.join(rootDir, "sentinel.cfg.json");
+    const t0 = Date.now();
+    while (!fs.existsSync(p)) {
+      if (Date.now() - t0 > 15000) throw new Error("sentinel.cfg.json not written: " + p);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); // 同步睡 50ms
+    }
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  };
+  const killChild = (child) => { try { child.stdin.end(); } catch {} try { child.kill(); } catch {} };
+  // bg-sentinel numArgBridge 复刻（L96-108 同款语义；CLI 层恒空 → cfg[新键]>cfg[桥接键]>内建）
+  const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+  const bridgeReplica = (cfg, cfgKey, bridgeKey, def, min, max) => {
+    const c = Number(cfg ? cfg[cfgKey] : NaN);
+    if (Number.isFinite(c)) return clamp(c, min, max);
+    const b = bridgeKey ? Number(cfg ? cfg[bridgeKey] : NaN) : NaN;
+    if (Number.isFinite(b)) return clamp(b, min, max);
+    return def;
+  };
+  // 桥接表（bg-sentinel L1091-1092 逐参数转录：refire←wake_timeout_min 内建 5、cap←wake_retries 内建 3）
+  const BRIDGE_TABLE = [
+    { key: "refire_gap_min", bridge: "wake_timeout_min", def: 5, min: 0.01, max: 1440 },
+    { key: "wake_cap", bridge: "wake_retries", def: 3, min: 1, max: 100 },
+  ];
+  const BRIDGE_KEYS = ["wake_timeout_min", "wake_retries", "refire_gap_min", "wake_cap"];
+  const V2_DEFAULTS = {
+    wake_poll_sec: 60, wake_grace_min: 5, answer_grace_min: 3, stall_grace_min: 30,
+    crash_grace_min: 10, coord_idle_min: 3, cap_window_min: 120, family_size: 3,
+    stagger_sec: 20, max_lifetime_min: 1440,
+  };
+
+  // ---- CFG-01：无 argv 启动 → 桥接四键全省略；其余 v2 键在位且=现行默认 ----
+  {
+    const R = path.join(BASE.root, "root-cfg1");
+    const child = spawnForCfg([], R);
+    const cfg = waitCfg(R);
+    killChild(child);
+    const hit = BRIDGE_KEYS.filter((k) => k in cfg);
+    ck.ok(
+      "CFG-01a 无 argv 启动 → sentinel.cfg.json 无桥接四键（键缺失，非 null 占位）",
+      hit.length === 0,
+      { hit, head: JSON.stringify(cfg).slice(0, 100) },
+    );
+    const drift = Object.entries(V2_DEFAULTS).filter(([k, v]) => cfg[k] !== v).map(([k]) => k);
+    ck.ok(
+      "CFG-01b 其余 v2 键在位且=现行默认（恒写不回归）+ signals 块在位",
+      drift.length === 0 && cfg.signals && typeof cfg.signals === "object" && typeof cfg.signals.rollout_dir === "string",
+      { drift, hasSignals: !!cfg.signals },
+    );
+  }
+  // ---- CFG-02：--wake-timeout-min 30 → 直写 30、refire 键省略；桥接复刻解析 refire=30 ----
+  {
+    const R = path.join(BASE.root, "root-cfg2");
+    const child = spawnForCfg(["--wake-timeout-min", "30"], R);
+    const cfg = waitCfg(R);
+    killChild(child);
+    ck.ok(
+      "CFG-02a --wake-timeout-min 30 → cfg.wake_timeout_min=30 且 refire_gap_min 键省略",
+      cfg.wake_timeout_min === 30 && !("refire_gap_min" in cfg),
+      { wtm: cfg.wake_timeout_min, hasRefire: "refire_gap_min" in cfg },
+    );
+    const resolved = BRIDGE_TABLE.map((row) => ({ k: row.key, v: bridgeReplica(cfg, row.key, row.bridge, row.def, row.min, row.max) }));
+    ck.ok(
+      "CFG-02b numArgBridge 三层复刻（CLI 层空）：refire 解析=30（桥接生效，用户旗标可达两枪间隔）、cap=内建 3",
+      resolved[0].v === 30 && resolved[1].v === 3,
+      resolved,
+    );
+  }
+  // ---- CFG-03：--refire-gap-min 8 显式直写生效，优先于桥接（CLI>cfg[新键]>cfg[桥接键]>内建 层序回归） ----
+  {
+    const R = path.join(BASE.root, "root-cfg3");
+    const child = spawnForCfg(["--refire-gap-min", "8"], R);
+    const cfg = waitCfg(R);
+    killChild(child);
+    const replica = bridgeReplica(cfg, "refire_gap_min", "wake_timeout_min", 5, 0.01, 1440);
+    ck.ok(
+      "CFG-03 --refire-gap-min 8 → cfg 直写 8、wake_timeout_min 键省略、复刻解析=8（直读优先于桥接）",
+      cfg.refire_gap_min === 8 && !("wake_timeout_min" in cfg) && replica === 8,
+      { rg: cfg.refire_gap_min, hasWtm: "wake_timeout_min" in cfg, replica },
+    );
+  }
+  // ---- CFG-04：${…} 模板/空串/非法值 → 视同未传（键省略），不写垃圾值 ----
+  {
+    const R = path.join(BASE.root, "root-cfg4");
+    const child = spawnForCfg(
+      ["--wake-timeout-min", "${WAKE_TIMEOUT_MIN}", "--wake-retries", "", "--refire-gap-min", "abc", "--wake-cap", "3x"],
+      R,
+    );
+    const cfg = waitCfg(R);
+    killChild(child);
+    const hit = BRIDGE_KEYS.filter((k) => k in cfg);
+    ck.ok(
+      "CFG-04 ${…}/空串/非法值/尾随垃圾 → 四键全省略（numArgOpt 判空面完备）；其余 v2 键不受染",
+      hit.length === 0 && cfg.wake_poll_sec === 60 && cfg.max_lifetime_min === 1440,
+      { hit, poll: cfg.wake_poll_sec },
+    );
+  }
+  // ---- CFG-05（默认值漂移锁）：四键缺省时哨兵解析结果=bg-sentinel 内建默认（5/3）；
+  //      双文件常量子串断言——防未来任一侧改默认复活 shadow（W-A findings §1.4）。 ----
+  {
+    const R = path.join(BASE.root, "root-cfg5");
+    const child = spawnForCfg([], R);
+    const cfg = waitCfg(R);
+    killChild(child);
+    const resolved = BRIDGE_TABLE.map((row) => bridgeReplica(cfg, row.key, row.bridge, row.def, row.min, row.max));
+    ck.ok(
+      "CFG-05a 四键缺省 → 复刻解析 refire=5、cap=3（与今日哨兵内建默认零漂移）",
+      resolved[0] === 5 && resolved[1] === 3,
+      resolved,
+    );
+    // server 面：桥接四键必须走 numArgOpt 条件写（无条件默认写无法回潮）
+    const srvHasOpt = [
+      'numArgOpt(argv, "--wake-timeout-min", 1, 1440)',
+      'numArgOpt(argv, "--wake-retries", 1, 100)',
+      'numArgOpt(argv, "--refire-gap-min", 0.01, 1440)',
+      'numArgOpt(argv, "--wake-cap", 1, 100)',
+    ].every((s) => srvSrc.includes(s));
+    const srvNoLegacy = [
+      "--wake-timeout-min", "--wake-retries", "--refire-gap-min", "--wake-cap",
+    ].every((f) => !srvSrc.includes(`numArg(argv, "${f}"`));
+    // 哨兵面：桥接连线与内建默认（5/3）原样在位（哨兵侧零改动锚）
+    const sentBridge = sentSrc.includes('"refire_gap_min", "wake_timeout_min", 5,') &&
+      sentSrc.includes('"wake_cap", "wake_retries", 3,');
+    ck.ok(
+      "CFG-05b 双文件常量锁：server 四键全为 numArgOpt 条件写（numArg 无遗留）、哨兵桥接连线+内建 5/3 在位",
+      srvHasOpt && srvNoLegacy && sentBridge,
+      { srvHasOpt, srvNoLegacy, sentBridge },
+    );
+  }
+}
+
 BASE.cleanup();
 const { fail } = ck.summary();
 process.exit(fail ? 1 : 0);

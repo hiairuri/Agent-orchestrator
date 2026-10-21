@@ -225,7 +225,7 @@ function markHint(rootDir) {
 
 function sentinelHintText() {
   const p = SENTINEL_SCRIPT.split(path.sep).join("/");
-  return `派发完成 → 记得后台拉起哨兵家族（建议 3 实例错峰冗余，防完成通知丢失）：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次即可（同命令重复发，自动认领不同槽位）。全部签收它们静默自毁；未签收会分级告警（blocked/question 3 分钟、done 5 分钟、在飞失联 30 分钟、崩溃实锤 10 分钟）。`;
+  return `派发完成 → 仅当无存活家族时才后台拉起哨兵（board list 的 sentinel_health 可查；建议 3 实例错峰冗余，防完成通知丢失）：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次即可；家族已在岗（standby 亦在岗）勿重复连发——新派发由待命实例自动接管盯守。全部签收后哨兵转待命静默值守（常态 0 通知）；未签收会分级告警（blocked/question 3 分钟、done 5 分钟、在飞失联 30 分钟、崩溃实锤 10 分钟）。`;
 }
 
 /**

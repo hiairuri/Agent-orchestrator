@@ -12,6 +12,18 @@
  *   T6 V6-54/V6-55（B4 末波）：claimShots 文件名去 pid 恢复同名 wx 互斥（固定时钟
  *      单元级，剥入口导入）+ touchSlot 前 pid 归属校验（他人槽位让位；黑盒集成：
  *      被接管实例持续让位退为无槽幽灵）
+ *   T7 V7-08（WS-1..3）：R1 standby mtime 门（板写 ≤3s 复活 active，修前需 ~300s；
+ *      mtime 未变 10×poll 维持 standby 且 fired/echo 零新增防评估放大）+ R2 让位
+ *      明示一行（满编 + running → 第 4 实例 exit 0 ∧ stdout 含「让位」「自动接管」）
+ *   T8 V7-04 lite（WS-5..6）：观测型隔离——C0 板不可读满 cap 三实例转 quarantined
+ *      零退出、quarantine.json 恰一份（wx 仲裁）+ 聚合告警恰一条（家族级抑制）；
+ *      板恢复可读 → 共享 mtime 门 ≤3s 自愈（标记被清回 standby/active）+ 告警面
+ *      恢复（未签收条件照旧开枪恰 1 实例）；新鲜标记期内新条件不触发 fired、
+ *      超 cap_window 后抑制解除照旧开枪 + 陈旧标记被清
+ *   T9 V7-06（WS-8..9，v0.7-A3）：board list 的 sentinel_health 三态聚合——空目录=无哨兵；
+ *      混编（fresh standby + stale）逐实例分类正确且 summary 归在岗待命（可补员=无任何
+ *      存活实例，含 stale 不误判）；全死槽=可补员；quarantined 第三态认得且归在岗
+ *      （隔离值守）；板全清全 fresh standby=在岗待命（自动接管新派发）
  *
  * live 行为无法自动化的部分（手动验收步骤）：
  *   - 平台通知面：全清后主控 0 唤醒（旧版实测三实例三连唤）——需宿主后台任务真跑 3 实例
@@ -22,12 +34,12 @@
  *     确认 bg-gate 输出无"拉起哨兵"句（本套件以 T1b 心跳新鲜度间接覆盖在岗判定）。
  *
  * 运行方式：node tests/suites/sentinel-teardown.mjs
- * 前置：node >= 20；无 git/网络依赖；总时长 ~60s（全部加速参数驱动， Windows/linux 均可）。
+ * 前置：node >= 20；无 git/网络依赖；总时长 ~110s（全部加速参数驱动， Windows/linux 均可）。
  */
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { PLUGIN_DIR, Checker } from "../harness/jsonrpc-client.mjs";
+import { PLUGIN_DIR, Checker, startServer } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot } from "../harness/temp-root.mjs";
 import { captureBackground } from "../harness/capture.mjs";
 
@@ -427,6 +439,318 @@ try {
     );
     bg6.kill();
     await bg6.done;
+  }
+
+  // ---- T7 V7-08（WS-1..3）：R1 standby mtime 门 + R2 让位明示一行
+  const cleanSlots = () => {
+    for (const n of fs.readdirSync(SENT_DIR).filter((n) => /^instance-\d+\.json$/.test(n))) {
+      fs.rmSync(path.join(SENT_DIR, n), { force: true });
+    }
+  };
+  const firedCount = () => {
+    try {
+      return fs.readdirSync(path.join(SENT_DIR, "fired")).length;
+    } catch {
+      return 0;
+    }
+  };
+  {
+    // WS-1：standby 实例（standby_poll_sec 强置 300、poll=1s）注入 running mission
+    // → mtime 门探测到板写 → ≤3s 内 state 变 active（修前需 ~300s 待命节流后才评估）。
+    cleanSlots();
+    writeBoard([{ id: "m-closed7", title: "quiet", status: "closed" }]);
+    const bg7 = spawnSentinel({ standbyPollSec: 300 });
+    const standby7 = await waitFor(() => {
+      const d = readJson(slotFile(0));
+      return Boolean(d) && d.state === "standby" && d.pid === bg7.proc.pid;
+    }, 8000);
+    await sleep(2500); // 跨过数个被节流 tick（mtime 未变 → 维持节流不评估）
+    const t1 = Date.now();
+    writeBoard([{ id: "m-ws1", title: "live", status: "running", dispatch: {} }]);
+    const wake1 = await waitFor(() => {
+      const d = readJson(slotFile(0));
+      return Boolean(d) && d.state === "active";
+    }, 3000, 100);
+    ck.ok(
+      "WS-1 standby mtime 门：板写后 ≤3s 复活 active（修前需 ~300s）",
+      Boolean(standby7) && Boolean(wake1) && bg7.proc.exitCode === null,
+      { standby7, wakeMs: Date.now() - t1, doc: readJson(slotFile(0)) },
+    );
+    bg7.kill();
+    await bg7.done;
+  }
+  {
+    // WS-2：mtime 未变 → 10×poll 内保持 standby 且 fired/echo 零新增（防评估放大）。
+    cleanSlots();
+    writeBoard([{ id: "m-closed8", title: "quiet", status: "closed" }]);
+    const bg8 = spawnSentinel({ standbyPollSec: 300 });
+    const standby8 = await waitFor(() => {
+      const d = readJson(slotFile(0));
+      return Boolean(d) && d.state === "standby" && d.pid === bg8.proc.pid;
+    }, 8000);
+    const echoBefore8 = countLines(ECHO);
+    const firedBefore8 = firedCount();
+    await sleep(10000); // 10×poll（poll=1s）
+    const d8 = readJson(slotFile(0));
+    ck.ok(
+      "WS-2 mtime 未变维持节流：10×poll 保持 standby 且 fired/echo 零新增",
+      Boolean(standby8) && bg8.proc.exitCode === null && Boolean(d8) && d8.state === "standby" && countLines(ECHO) === echoBefore8 && firedCount() === firedBefore8,
+      { standby8, state: d8 && d8.state, echo: [echoBefore8, countLines(ECHO)], fired: [firedBefore8, firedCount()] },
+    );
+    bg8.kill();
+    await bg8.done;
+  }
+  {
+    // WS-3（E4 场景回归化）：满编 fixture + running mission → 第 4 实例 exit 0 ∧
+    // stdout 含「让位」（R2 明示一行；修前此处 stdout 为空 = 乙机制误读源）。
+    cleanSlots();
+    writeBoard([{ id: "m-ws3", title: "live", status: "running", dispatch: {} }]);
+    const fam3 = [];
+    for (let i = 0; i < 3; i++) fam3.push(spawnSentinel({}));
+    const full3 = await waitFor(() => fs.existsSync(slotFile(2)), 8000);
+    ck.ok("WS-3a 三实例满编认领 slot0..2", Boolean(full3), fs.readdirSync(SENT_DIR).filter((n) => n.startsWith("instance-")));
+    const bg4 = spawnSentinel({});
+    const r4 = await Promise.race([bg4.done, sleep(8000).then(() => null)]);
+    ck.ok(
+      "WS-3 让位明示一行：第 4 实例 exit 0 ∧ stdout 含「让位」「自动接管」",
+      Boolean(r4) && r4.code === 0 && r4.stdout.includes("让位") && r4.stdout.includes("自动接管"),
+      r4 && { code: r4.code, out: r4.stdout.slice(0, 160) },
+    );
+    fam3.forEach((b) => b.kill());
+    bg4.kill();
+    await Promise.allSettled([...fam3.map((b) => b.done), bg4.done]);
+  }
+
+  // ---- T8 V7-04 lite（观测型隔离）：隔离进入/家族抑制/自愈/告警面恢复/抑制窗口
+  const QMARK = path.join(SENT_DIR, "quarantine.json");
+  const echoQCount = () => readText(ECHO).split("\n").filter((x) => x.includes('"category":"quarantine"')).length;
+  {
+    // WS-5a/b 隔离进入 + 家族级抑制：板缺失（不可读）×3 tick（standby_poll 强置 300，
+    // 证明进入路径不受待命节流影响）→ 三实例全转 quarantined 零退出、quarantine.json
+    // 恰一份（wx 仲裁唯一首告者，含证据快照）、聚合告警恰一条（echo 类别计数 + 总行数
+    // 恰 +1）、fired 零新增。
+    cleanSlots();
+    fs.rmSync(path.join(ROOT, "board.json"), { force: true });
+    const echoBeforeT8 = countLines(ECHO);
+    const firedBeforeT8 = firedCount();
+    const fam8 = [];
+    for (let i = 0; i < 3; i++) fam8.push(spawnSentinel({ standbyPollSec: 300 }));
+    const qAll = await waitFor(() => {
+      return [0, 1, 2].every((k) => {
+        const d = readJson(slotFile(k));
+        return Boolean(d) && d.state === "quarantined";
+      });
+    }, 10000);
+    const qdoc = readJson(QMARK);
+    ck.ok(
+      "WS-5a 隔离进入：C0 满 cap 三实例转 quarantined 且零退出（不杀进程）",
+      Boolean(qAll) && fam8.every((b) => b.proc.exitCode === null),
+      { qAll, exited: fam8.filter((b) => b.proc.exitCode !== null).length, slots: [0, 1, 2].map((k) => readJson(slotFile(k))) },
+    );
+    ck.ok(
+      "WS-5b 聚合告警恰一条 + 标记含证据快照（wx 仲裁唯一首告者，家族级抑制）",
+      Boolean(qdoc) && String(qdoc.reason || "").includes("不可读") && Boolean(qdoc.evidence) && Number(qdoc.evidence && qdoc.evidence.ticks) >= 3 && echoQCount() === 1 && countLines(ECHO) === echoBeforeT8 + 1 && firedCount() === firedBeforeT8,
+      { reason: qdoc && qdoc.reason, evidence: qdoc && qdoc.evidence, qEcho: echoQCount(), echoDelta: countLines(ECHO) - echoBeforeT8, firedDelta: firedCount() - firedBeforeT8 },
+    );
+
+    // WS-5c 自愈：板恢复可读 → mtime 门（NaN 基线 + 有限新值 = 板重现即有新活）
+    // ≤3s 解除：标记被清、回正常态（全清板 → standby），三实例仍存活。
+    writeBoard([{ id: "m-closed8c", title: "quiet", status: "closed" }]);
+    const healed = await waitFor(() => {
+      if (fs.existsSync(QMARK)) return false;
+      return [0, 1, 2].every((k) => {
+        const d = readJson(slotFile(k));
+        return Boolean(d) && (d.state === "standby" || d.state === "active");
+      });
+    }, 6000);
+    ck.ok(
+      "WS-5c 自愈：板可读 → 标记被清回 standby/active（共享 mtime 门 ≤3s），零退出",
+      Boolean(healed) && fam8.every((b) => b.proc.exitCode === null),
+      { healed, slots: [0, 1, 2].map((k) => readJson(slotFile(k))) },
+    );
+
+    // WS-5d 告警面恢复：解除后注入未签收终态（updated_at -10min，逃逸口开，T2b 同款）
+    // → 照旧开枪：恰 1 实例 exit 1 唤醒失败告警，其余实例 refire_gap 内不再开枪。
+    writeBoard([
+      {
+        id: "m-ws5d",
+        title: "finished",
+        status: "done",
+        dispatch: { agent_id: "agent_x", mode: "agent" },
+        timeline: [],
+        updated_at: new Date(Date.now() - 600000).toISOString(),
+      },
+    ]);
+    const exits8d = [];
+    fam8.forEach((f) => f.done.then((r) => exits8d.push({ pid: f.proc.pid, code: r.code, out: r.stdout })));
+    const woke8d = await waitFor(() => exits8d.some((e) => e.code === 1 && e.out.includes("唤醒失败告警")), 10000);
+    await sleep(2500); // refire_gap（默认 5min）内其余实例不得再开枪
+    ck.ok(
+      "WS-5d 告警面恢复：隔离解除后未签收条件照旧开枪（恰 1 实例 exit 1）",
+      Boolean(woke8d) && exits8d.length === 1 && exits8d[0].code === 1 && exits8d[0].out.includes("唤醒失败告警"),
+      { woke8d, exits: exits8d.map((e) => ({ code: e.code, wake: e.out.includes("唤醒失败告警") })) },
+    );
+    fam8.forEach((f) => f.kill());
+    await Promise.allSettled(fam8.map((f) => f.done));
+  }
+  {
+    // WS-6 告警抑制窗口：新鲜标记期内新条件不触发 fired；超 cap_window 后恢复。
+    // 刻度注：cap_window_min 有 1min clamp 下限（加速不可低于此）→ 取下限 1min；
+    // 两相位覆盖：相位 1 新鲜标记（at=now，窗内）抑制；相位 2 标记 at 回拨 -2min
+    //（> 1min 窗）→ 下一 tick 抑制解除照旧开枪 + 陈旧标记被顺手清理（hygiene）。
+    cleanSlots();
+    fs.mkdirSync(SENT_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(ROOT, "sentinel.cfg.json"),
+      JSON.stringify({ cap_window_min: 1, wake_grace_min: 0.01, coord_idle_min: 0.01 }) + "\n",
+    );
+    writeBoard([
+      {
+        id: "m-ws6",
+        title: "finished",
+        status: "done",
+        dispatch: { agent_id: "agent_y", mode: "agent" },
+        timeline: [],
+        updated_at: new Date(Date.now() - 600000).toISOString(),
+      },
+    ]);
+    fs.writeFileSync(
+      QMARK,
+      JSON.stringify({ at: new Date().toISOString(), pid: 1, slot: 0, reason: "fixture-fresh", evidence: null }) + "\n",
+    );
+    const firedWs6 = () => {
+      try {
+        return fs.readdirSync(path.join(SENT_DIR, "fired")).filter((n) => n.startsWith("m-ws6--"));
+      } catch {
+        return [];
+      }
+    };
+    const bg9 = spawnSentinel({});
+    await sleep(1600); // 跨 1-2 个 tick：标记新鲜（cap_window ≥1min）→ 新条件被抑制
+    ck.ok(
+      "WS-6a 新鲜标记期内新条件不触发 fired（家族告警挂起，实例不退出）",
+      bg9.proc.exitCode === null && firedWs6().length === 0,
+      { alive: bg9.proc.exitCode === null, fired: firedWs6() },
+    );
+    // 相位 2：标记回拨超窗（-2min > cap_window 1min 下限）→ 抑制解除
+    fs.writeFileSync(
+      QMARK,
+      JSON.stringify({ at: new Date(Date.now() - 120000).toISOString(), pid: 1, slot: 0, reason: "fixture-stale", evidence: null }) + "\n",
+    );
+    const r9 = await Promise.race([bg9.done, sleep(10000).then(() => null)]);
+    ck.ok(
+      "WS-6b 超 cap_window 恢复：抑制解除照旧开枪 exit 1 + fired 落盘 + 陈旧标记被清",
+      Boolean(r9) && r9.code === 1 && r9.stdout.includes("唤醒失败告警") && firedWs6().length >= 1 && !fs.existsSync(QMARK),
+      r9 && { code: r9.code, fired: firedWs6(), markerGone: !fs.existsSync(QMARK) },
+    );
+    try {
+      fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生：不污染后续
+    } catch {
+      /* best effort */
+    }
+  }
+
+  // ---- T9 V7-06（WS-8..9）：A3 standby 展示面——board list 的 sentinel_health 三态聚合
+  //（server 侧只读聚合 instance-*.json；纯 fixture + MCP RPC，零哨兵进程，黑盒过 server.mjs）
+  {
+    cleanSlots();
+    writeBoard([{ id: "m-closed9", title: "quiet", status: "closed" }]);
+    fs.mkdirSync(SENT_DIR, { recursive: true });
+    const nowIso = () => new Date().toISOString();
+    const s = startServer({ root: ROOT });
+    try {
+      // WS-8：空 sentinel 目录（零 instance-*.json）→ instances=[] ∧ summary=无哨兵
+      const ls8 = await s.call("board", { action: "list" });
+      const sh8 = ls8.json && ls8.json.sentinel_health;
+      ck.ok(
+        "WS-8 空目录 → instances=[] ∧ summary 无哨兵（available:true 不报错）",
+        !ls8.isError && sh8 && sh8.available === true && Array.isArray(sh8.instances) && sh8.instances.length === 0
+          && sh8.summary && sh8.summary.state === "none" && sh8.summary.on_duty === false
+          && String(sh8.summary.text).includes("无哨兵"),
+        sh8,
+      );
+
+      // WS-9a 混编 fixture：1 fresh standby + 1 stale 死槽 → 逐实例分类正确
+      //（pid_alive/state/hb_age_sec/took_over/root/on_duty 全字段形状）
+      fs.writeFileSync(
+        slotFile(0),
+        JSON.stringify({ pid: process.pid, slot: 0, state: "standby", root: ROOT, started_at: nowIso(), heartbeatAt: nowIso() }) + "\n",
+      );
+      fs.writeFileSync(
+        slotFile(1),
+        JSON.stringify({ pid: 999999901, slot: 1, state: "active", root: ROOT, started_at: "2020-01-01T00:00:00.000Z", heartbeatAt: "2020-01-01T00:00:00.000Z" }) + "\n",
+      );
+      const ls9 = await s.call("board", { action: "list" });
+      const sh9 = ls9.json && ls9.json.sentinel_health;
+      const i0 = sh9 && sh9.instances.find((i) => i.slot === 0);
+      const i1 = sh9 && sh9.instances.find((i) => i.slot === 1);
+      ck.ok(
+        "WS-9a 逐实例分类：fresh standby pid_alive/on_duty ∧ stale 死槽非在岗（V7-06 形状全字段）",
+        Boolean(i0) && i0.pid_alive === true && i0.state === "standby" && i0.on_duty === true
+          && i0.hb_age_sec <= 5 && i0.took_over === false && typeof i0.root === "string"
+          && Boolean(i1) && i1.pid_alive === false && i1.state === "active" && i1.on_duty === false && i1.hb_age_sec > 90,
+        { i0, i1 },
+      );
+      // WS-9b 混编 summary 归在岗待命——可补员=无任何存活实例（含 stale 不误判，pack 规）
+      ck.ok(
+        "WS-9b 混编 summary=在岗待命（可补员不因含 stale 误判）",
+        Boolean(sh9 && sh9.summary) && sh9.summary.state === "standby" && sh9.summary.on_duty === true
+          && sh9.summary.on_duty_n === 1 && sh9.summary.total === 2
+          && String(sh9.summary.text).includes("在岗待命"),
+        sh9 && sh9.summary,
+      );
+
+      // WS-9c 全死槽（零存活实例）→ summary=可补员
+      fs.rmSync(slotFile(0), { force: true });
+      const ls9c = await s.call("board", { action: "list" });
+      const sum9c = ls9c.json && ls9c.json.sentinel_health && ls9c.json.sentinel_health.summary;
+      ck.ok(
+        "WS-9c 无任何存活实例 → summary 槽位 stale（可补员）",
+        Boolean(sum9c) && sum9c.state === "reinforce" && sum9c.on_duty === false && sum9c.on_duty_n === 0
+          && String(sum9c.text).includes("可补员"),
+        sum9c,
+      );
+
+      // WS-9d quarantined 第三态（S2）认得且归在岗语义：fresh quarantined → 隔离值守 on_duty=true
+      fs.writeFileSync(
+        slotFile(0),
+        JSON.stringify({ pid: process.pid, slot: 0, state: "quarantined", root: ROOT, started_at: nowIso(), heartbeatAt: nowIso() }) + "\n",
+      );
+      fs.rmSync(slotFile(1), { force: true });
+      const ls9d = await s.call("board", { action: "list" });
+      const sh9d = ls9d.json && ls9d.json.sentinel_health;
+      ck.ok(
+        "WS-9d quarantined 第三态归在岗：summary 隔离值守 on_duty=true（不误判可补员）",
+        Boolean(sh9d && sh9d.summary) && sh9d.summary.state === "quarantined" && sh9d.summary.on_duty === true
+          && sh9d.instances.length === 1 && sh9d.instances[0].state === "quarantined" && sh9d.instances[0].on_duty === true,
+        { summary: sh9d && sh9d.summary, i0: sh9d && sh9d.instances[0] },
+      );
+
+      // WS-9e 板全清且全 fresh standby → summary=在岗待命（W-S WS-9 后半定稿口径）
+      fs.writeFileSync(
+        slotFile(0),
+        JSON.stringify({ pid: process.pid, slot: 0, state: "standby", root: ROOT, started_at: nowIso(), heartbeatAt: nowIso() }) + "\n",
+      );
+      fs.writeFileSync(
+        slotFile(1),
+        JSON.stringify({ pid: process.pid, slot: 1, state: "standby", root: ROOT, started_at: nowIso(), heartbeatAt: nowIso() }) + "\n",
+      );
+      const ls9e = await s.call("board", { action: "list" });
+      const sum9e = ls9e.json && ls9e.json.sentinel_health && ls9e.json.sentinel_health.summary;
+      ck.ok(
+        "WS-9e 全 fresh standby → summary 在岗待命（自动接管新派发）",
+        Boolean(sum9e) && sum9e.state === "standby" && sum9e.on_duty === true && sum9e.on_duty_n === 2
+          && String(sum9e.text).includes("在岗待命") && String(sum9e.text).includes("自动接管"),
+        sum9e,
+      );
+    } finally {
+      try {
+        s.close();
+      } catch {
+        /* already closed */
+      }
+      cleanSlots();
+    }
   }
 } finally {
   for (const k of kids) {
