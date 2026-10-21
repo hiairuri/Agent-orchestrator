@@ -250,7 +250,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`
 
-`--once` 接受并忽略（旧版肌肉记忆兼容）。bg-gate 的派发提醒也会在（家族缺员且过 10 分钟冷却时）附带这句话。参数默认取 userConfig（sentinel_family=3 / sentinel_grace_min=5 / wake_poll_sec=60），可 CLI 覆盖（`--wake-grace-min`、`--family-size` 等）。**桥接注记（CONFLICT-1 裁决 2026-10-15）**：wake_timeout_min/wake_retries 为 v0.3 兼容存根——server 写 cfg 时无条件写入 refire_gap_min=5/wake_cap=3（server.mjs:498-499），哨兵桥接分支（读这两个键，bg-sentinel.mjs:87-101）永不可达，改此二键无实际效果；两枪间隔/单条件封顶枪数请用 CLI `--refire-gap-min`/`--wake-cap`（恢复桥接可达的实现侧修复跟踪 V6-24，归簇 A）。
+`--once` 接受并忽略（旧版肌肉记忆兼容）。bg-gate 的派发提醒也会在（家族缺员且过 10 分钟冷却时）附带这句话。参数默认取 userConfig（sentinel_family=3 / sentinel_grace_min=5 / wake_poll_sec=60），可 CLI 覆盖（`--wake-grace-min`、`--family-size` 等）。**桥接注记（V7-05 起桥接可达；CONFLICT-1 存根状态终结）**：wake_timeout_min/wake_retries 为桥接键——server 仅显式传参才写 cfg（numArgOpt 稀疏语义，未传则键省略），哨兵按 CLI > cfg 直读键 > 桥接键 > 内建默认解析（bg-sentinel `numArgBridge`），此二键在未传对应 CLI 旗标时分别生效为**两枪最小间隔**/单条件封顶枪数；全不传时哨兵用内建默认 5/3（与历史数值零漂移，CFG-05 默认值漂移锁在案）。
 
 **分级告警阈值**（宽限满 + 双空闲门才叫；逃逸口 2×宽限保证最坏延迟有界，门只推迟不取消）：
 
@@ -336,7 +336,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - `TaskOutput(task_id, block, timeout≤600000)`；`TaskStop(task_id)`。
 - workflow：`CreateWorkflow{script|saved|path, name, max_concurrency, subagent_model}`、`AmendWorkflow{run_id, path|script, subagent_model, max_concurrency}`（任何状态可改，旧完成工作导入为缓存）、`ResumeWorkflowRun{run_id}`（仅 stopped）、`GetWorkflowRun`（pendingQuestions）、`ListWorkflowRuns{statuses}`、`ResolveWorkflowQuestion{question_id(dwfq-…), answer}`、`EvalWorkflowSnippet`、`ListModels`、`SaveWorkflow`（需用户同意）。子代理 `escalate` 每 ask 限 3 次。模型：可按子代理在 persona 指定——`agent(name, { system?, model? })`，model 取编译期字面量（可带 `$reasoningLevel`）或 `model("…")` 的 ModelRef，id 取自 `ListModels`；未指定继承 run 级 `subagent_model`；启动期模型名对照 host 模型目录校验并经确认窗口批准；诊断码 9010（编译期 model 值非法）/9011（解析失败，含 fill 引入 run 未绑定的新模型）；工具面仍全局同一、无 per-agent 工具集。
 - hooks 仅 7 事件；插件注册 SessionStart（恢复简报）、Stop（镜像记录 + 收工清点，含疑似唤醒失败）、PreToolUse（Agent|Task 后台闸门 + 哨兵派发提醒）、UserPromptSubmit（镜像记录，恒静默）四个；Stop 用 hookSpecificOutput.hookEventName="Stop"+additionalContext；PreToolUse 用 permissionDecision allow/ask + additionalContext；退出码 0 放行。
-- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、dispatch_contract（remind|ask|off，默认 remind；派发契约校验独立开关，bg-gate --contract，background_gate=off 不连坐）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10；v0.3 兼容存根，当前无实际效果，见第 14 章桥接注记）、wake_retries（默认 3；同左）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；哨兵家族实例数，N=1 无冗余等于旧版）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 自动 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
+- userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、dispatch_contract（remind|ask|off，默认 remind；派发契约校验独立开关，bg-gate --contract，background_gate=off 不连坐）、wake_sentinel（on|off，默认 on；派发提醒是否附带哨兵提示）、wake_timeout_min（默认 10；桥接键：未显式传 `--refire-gap-min` 时经 cfg 桥接生效为哨兵两枪最小间隔，V7-05 起桥接可达，见第 14 章桥接注记）、wake_retries（默认 3；桥接键：未显式传 `--wake-cap` 时桥接生效为单条件封顶枪数，同上）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；哨兵家族实例数，N=1 无冗余等于旧版）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 自动 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on；off 停止落盘镜像）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none；context_pack 未显式传 isolation 时的默认值）、claim_lease_min（默认 30，最小 1；board claim 自领取租约分钟数）。
 
 **成本速查**：写集 ≥3 拆分、≥8 强制拆；预算档 S≤20 / M≤60 / L≤120 步，硬顶约 120 步或 230K 上下文（L 档派发前预拆）；探针单次 ≤50 行/≤10KB、DB 禁 `SELECT *`；回归 = 新断言全跑 + 旧断言抽样，全量仅发版前/骨架变更/信号链变更；血缘优先：续聊 > workflow 重放 > 重新派发。
 
@@ -471,3 +471,29 @@ context_pack(isolation="worktree")            # materialize：分支+worktree+�
 | workflow 在飞/pending | 状态与 pendingQuestions | recommendedAction 四支不动 | 无差距 |
 
 manifest/inputs 速查：done 可带 `manifest_entries`（≤12 条；条目七字段 id/layer/type/title/text/ref/source，type 封闭五值 assertion｜env_fact｜anchor｜conclusion｜directive，断言条目 ref.loc 用断言文件 ID 如 `tests/assertions/v0.4.x.md#V-12`）→ server 收口校验/截断后写 sidecar 并挂 mission.manifest 指针；`context_pack(inputs=[mission_id])`（≤4 个）按层确定性路由——T0 逐字块入 CONTEXT（合计 ≤24KB）、T1 一行入 SUMMARY（合计 ≤4KB）、T2 指针追加 READ FIRST（≤20 条）；**快照语义**：牵引发生在组包瞬间、逐字物化进包，上游 manifest 之后更新不回灌旧包——要新鲜就重打包。
+
+## 21. 唤醒 watcher（远程唤醒守护进程，v0.7.1）
+
+**定位与分工**：哨兵家族（第 14 章）管「本地后台完成通知丢失」的分级补枪；watcher 管「异地/移动场景把主控会话敲醒」——经平台 remote 中继（ws2）向目标会话注入固定模板壳（`[orch-watch] mission=<id> state=<…> summary=<≤200字模板摘要> 指引=请消费 spool/<event_id>.json`），**只发 id+状态+指针、禁内联 worker 原文**（提示注入放大器纪律，正文永远留在 spool 走既有闸门）。board 签收/消费流程零改动：watcher 只敲醒、不替代你消费。两通道互补不互替：远程唤醒走云、本地唤醒走哨兵。
+
+**启动（常驻进程；须用户显式授权——W-G §5 条件 C1；停用=进程退出+token 自然过期，一键可断）**：
+
+`Bash(command="node <插件根>/watcher/watcher.mjs --root <存储根>", run_in_background=true)`
+
+参数（解析三层 CLI > `<存储根>/watcher.cfg.json` > 内建默认；零 npm 依赖，node ≥ 20）：`--origin`（默认 https://zcode.z.ai）、`--poll-sec 30`、`--min-interval-sec 90`（两事务最小间隔=60s 防抖窗+50% 裕量）、`--wake-cap 3`（per-mission 封顶，沿哨兵 cap 语义）、`--hold-max-sec 40`（单事务持有帽 ≤60s TTL）、`--busy-silence-min 30`、`--trigger-statuses done,failed,blocked,question`、`--heartbeat-sec 60`、`--once`（单轮试跑）。定根 `--root` 优先、**从不读 root.txt 指针**（站 server 侧）；每 60s 写 `<存储根>/sentinel/watcher-heartbeat`（mtime 即心跳）。
+
+**两道门（施工前置，均已实测通过）**：
+- 门 A 凭证合规（EXP-1 已过）：terminal token 签发强制平台登录态（无 Bearer 即 401）；`expires_in=60s` → **签发即用、用后即弃、不落盘不缓存**（JWT 只在签发瞬间经手，续签语义问题消解）。
+- 门 B 互踢级联（EXP-2 已过+边界条件）：terminal 槽位短事务（连-发-断）不触碰桌面 device 连接的 kick 计数，级联未发生（护栏内两事务全净）。**边界条件如实**：对手终端互踢不可观测（实验窗桌面无挂接终端、护栏禁止自造对手连接），故保守频控（≥90s 间隔/cap=3/busy 静默 30min）维持不放宽。EXP-3 定案：token TTL 只是握手门票非硬切，单连 30×TTL 零异常。
+
+**成功判定（三证合一，替代哨兵回声计数）**：① rpc-frame-ack（传输送达）② session/send 受理无 -32010 ③ 判定窗 60s 内 rollout 心跳复活/prompt_started。②=busy → 主控本就在跑，**no-op 成功不计失败**（防对活跃会话连枪）；①②成③不成 → 记 accepted-not-revived，哨兵照常兜底、不重复注入。
+
+**降级树（degrade.mjs；终态不退出进程——「永不因失败退出」，停事务面保心跳等人工）**：
+- **D1 凭证终态**：签发 401/AUTH_FAILED/close 4004·4013、4011 重签再败 → standby+桌面重登指引（`[orch-watch] D1 凭证终态…`），唤醒由哨兵全量接管。
+- **D2 临时弃发**：ws 建连败/握手超时/心跳判死/桥接错误重试 1 次仍败/rpc-frame 无 ack → 本轮弃发写 signals，下轮 POLLER 自动恢复。
+- **D3 配置终态**：workspace-list 空/close 4004·4012（coord-session 失效或桌面未开远控）→ 配置告警等人工。
+- **kicked**（用户顶掉 watcher）=正常生命周期，静默退出且**绝不重连**（复刻桌面侧自动重连=60s 防抖窗内制造第二踢，全设计第一禁令）。事件流：`<存储根>/sentinel/watcher-signals.jsonl`。
+
+**安全清单（凭证五禁+EXP 实测六条）**：凭证文件在 orchestrator 存储根**外**独立路径；JWT 用后即弃不落盘；唯一允许落盘的凭证物=role token（短时效）。五禁：禁入 git、禁入日志（任何出口对 token 形态 REDACTED 并可 grep 自检）、禁入 spool、禁入 echo.jsonl/mission timeline、禁入上下文包（inputs 机械牵引面）；probe 白名单排除凭证路径。EXP 实测六条：①expires_in=60s 是握手门票非硬切（长连穿越 TTL 边界稳定存活）；②全链建连 ~0.26s（sign 93ms+ws_open 97ms+auth_ack 166ms）；③auth_ack `pair_status:"matched"` ~100-166ms 即插即配（slot 空时）；④terminal 侧无心跳要求，30 分钟静默存活不被切断（挂接 burst 2×data=状态同步非心跳）；⑤桌面日志 `%USERPROFILE%/.zcode/v2/logs/<date>.log` 的 `[web-remote-control] V2 device state` ±0.2s 精确镜像 watcher 挂/拆（独立观测点）；⑥事务期间桌面 device 连接全程 online、状态仅 paired↔waiting_terminal 干净迁移。
+
+**与哨兵职责互换（反向监控）**：设计分工=watcher 接管唤醒、哨兵 v2.1 降为「watcher 存活监控+回退唤醒」（心跳超龄即告警并按回退路径补枪）；watcher 进程死亡**不自动拉起**（不做守护守护进程的无限递归），交用户/主控处置。**现状如实**：watcher 侧心跳/watcher-signals 写入面已落地，bg-sentinel 对 `watcher-heartbeat` 的消费面**尚未接线**（hooks 零 watcher 引用）——反向监控告警当前靠人工巡检心跳文件 mtime，哨兵侧接线列后续卡。

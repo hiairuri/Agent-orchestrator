@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
@@ -50,14 +50,14 @@
     "wake_timeout_min": {
       "type": "string",
       "title": "哨兵超时窗口（分钟）/ Sentinel timeout window",
-      "description": "v0.3 兼容存根：原意桥接为哨兵两枪最小间隔（分钟）。当前实装下 server 无条件写入 refire_gap_min=5 遮蔽该桥接分支，改此键无实际效果；两枪间隔请用 CLI --refire-gap-min（修复跟踪 V6-24）。默认 10。/ v0.3 compatibility stub: originally bridged as the sentinel refire gap (minutes). The current build unconditionally writes refire_gap_min=5, shadowing this bridge key, so it has no effect; use CLI --refire-gap-min instead (fix tracked as V6-24). Default 10.",
+      "description": "桥接键（V7-05 起桥接可达）：未显式传 --refire-gap-min 时，经 sentinel.cfg.json 桥接为哨兵两枪最小间隔（分钟）；解析层序 CLI --refire-gap-min > cfg refire_gap_min > 本桥接键 > 哨兵内建默认 5。显式设置才写入 cfg，未设置则键省略。默认 10。/ Bridge key (reachable since V7-05): when --refire-gap-min is not passed explicitly, bridges via sentinel.cfg.json to the sentinel refire gap (minutes); precedence CLI --refire-gap-min > cfg refire_gap_min > this bridge key > sentinel built-in default 5. Written to cfg only when explicitly set. Default 10.",
       "default": "10",
       "required": false
     },
     "wake_retries": {
       "type": "string",
       "title": "哨兵重试次数 / Sentinel retries",
-      "description": "v0.3 兼容存根：原意桥接为单条件封顶枪数。当前实装下 server 无条件写入 wake_cap=3 遮蔽该桥接分支，改此键无实际效果；封顶枪数请用 CLI --wake-cap（修复跟踪 V6-24）。默认 3。/ v0.3 compatibility stub: originally bridged as the per-condition shot cap. The current build unconditionally writes wake_cap=3, shadowing this bridge key, so it has no effect; use CLI --wake-cap instead (fix tracked as V6-24). Default 3.",
+      "description": "桥接键（V7-05 起桥接可达）：未显式传 --wake-cap 时，经 sentinel.cfg.json 桥接为单条件封顶枪数；解析层序 CLI --wake-cap > cfg wake_cap > 本桥接键 > 哨兵内建默认 3。显式设置才写入 cfg，未设置则键省略。默认 3。/ Bridge key (reachable since V7-05): when --wake-cap is not passed explicitly, bridges via sentinel.cfg.json to the per-condition shot cap; precedence CLI --wake-cap > cfg wake_cap > this bridge key > sentinel built-in default 3. Written to cfg only when explicitly set. Default 3.",
       "default": "3",
       "required": false
     },
