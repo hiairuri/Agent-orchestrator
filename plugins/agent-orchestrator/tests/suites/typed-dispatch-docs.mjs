@@ -3,10 +3,12 @@
  * suites/typed-dispatch-docs.mjs —— v0.6 簇 C 断言套（V6-63 文档在位防回退 + V6-64 到期回收机制载体）
  *
  * 如实声明：纯 Node 断言测不了宿主 typed 派发行为；本 suite 只测文档/配置在位，防回退。
- * 覆盖 20 组断言（W-C §2 表 + v0.8 W4 增例）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
+ * 覆盖 21 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
  *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §22 在案+标记对逐字串，
- *   权威 (internal design docs, not published) §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）。
+ *   权威 (internal design docs, not published) §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
+ *   A-V090-HOST-01（C6 findings 文件存在+§0 判定串+§1 锚点串在册口径；权威 (internal design docs, not published)
+ *   §3/§5-2 移交语义 + v0.9-DESIGN §16 HOST-01 行；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）。
  * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-4 导出常量（宿主修复事件触发的人工维护清单）；
  *   默认模式断言各 anchor 在位（防缺陷期被误删）；env ORCH_HOST_FIXED=1 反向断言各 anchor 已回收，
  *   并断言 R-2 永久条款（「report 全名保留不删」）仍在位——该条款为永久不变量，不在回收范围。
@@ -39,11 +41,13 @@ const FILES = {
   agentGleaner: path.join(PLUGIN_DIR, "agents", "orch-gleaner.md"),
   pluginJson: path.join(PLUGIN_DIR, ".zcode-plugin", "plugin.json"),
   agentsMd: path.join(REPO_ROOT, "AGENTS.md"),
+  c6Findings: path.join(REPO_ROOT, "designs", "agent-orchestrator-v0.9-C6-findings.md"),
 };
 const REPORT = "mcp__plugin_agent-orchestrator_orch__report";
 const SNAPSHOT_ERR = "Required MCP tool is not available in the parent startup snapshot";
 const POINTER = "(internal design docs, not published)";
 const V08_POINTER = "(internal design docs, not published)";
+const C6_POINTER = "(internal design docs, not published)";
 
 /**
  * RECYCLE_LIST（V6-64 到期回收对象；W-C §3）——宿主修复事件判定后按 recycleAction 逐条回收。
@@ -263,6 +267,29 @@ function main() {
     const miss = firstMissing(skill22, markers);
     ck.ok("A-V080-DOC-02 @ SKILL.md §22 存在 + 标记对逐字串在案", skill22.length > 0 && !miss,
       `A-V080-DOC-02 缺失: ${skill22.length === 0 ? "SKILL.md 无「## 22.」节" : `标记对子串 ${JSON.stringify(miss)}`} —— 回写指针: 见 ${V08_POINTER} §10.2/§14 DOC-02`);
+  }
+
+  // ---- v0.9 P2-① 增例（静态在位断言，权威 (internal design docs, not published) §3/§5-2 移交语义 +
+  //      v0.9-DESIGN §16 HOST-01 行；不随 ORCH_HOST_FIXED 双模翻转）----
+  { // A-V090-HOST-01：C6 findings 在册口径——文件存在 + §0 判定串 + §1 锚点串（轻量 grep，DESIGN §16「文档断言」）
+    const bad = [];
+    if (!fs.existsSync(FILES.c6Findings)) {
+      bad.push("C6 findings 文件不存在");
+    } else {
+      const c6 = readFile(FILES.c6Findings);
+      const need = [
+        "## 0. 结论总表", // §0 判定节在册
+        "YES（面存在，默认开、全文非摘要、每源 100KB 截断）", // §0 判定：用户级注入面 YES
+        "缺省翻 false（已施工，HOST-01b）", // §0 判定：pack_global_section 缺省翻 false
+        "index.ts:237", // §1 锚点：用户级解析面（~/.zcode/AGENTS.md 硬编码）
+        "subagent.ts:121-124", // §1 锚点：子代理组装链默认注入
+        "injectAgentsMd !== false", // §1 锚点：默认注入谓词
+      ];
+      const miss = firstMissing(c6, need);
+      if (miss) bad.push(`缺失子串 ${JSON.stringify(miss)}`);
+    }
+    ck.ok("A-V090-HOST-01 @ C6-findings 在册+§0 判定串+§1 锚点串", bad.length === 0,
+      bad.length ? `A-V090-HOST-01 失败: ${bad.join("; ")} —— 回写指针: 见 ${C6_POINTER} §3/§5-2（HOST-01 移交语义）` : "");
   }
 
   // ---- 回收提醒面（非 fail，不挡发版门；run-all 注册后即出现在其尾行）----
