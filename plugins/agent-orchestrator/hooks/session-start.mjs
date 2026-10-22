@@ -29,8 +29,8 @@ const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 const BRIEF_TOP_K = 3;
 const BRIEF_MAX_CHARS = 300;
 
-/* --- lessons digest (twin of server.mjs topLessonsBrief；v0.6 V6-57 起本副本
-     多做代理对回退，server 侧维持原样刻意分叉) --- */
+/* --- lessons digest（v0.8 起唯一副本：server.mjs 同名死码 topLessonsBrief 已删，
+     v0.8-DESIGN §3.6；v0.6 V6-57 起本副本多做代理对回退） --- */
 
 function truncateStr(value, max) {
   const s = String(value ?? "");
