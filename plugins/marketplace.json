@@ -4,7 +4,7 @@
     {
       "name": "agent-orchestrator",
       "source": "./agent-orchestrator",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
       "displayName": "Agent Orchestrator",
       "displayName_i18n": {

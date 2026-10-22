@@ -12,6 +12,9 @@
  *   W-RLY  RELAY V2（auth 闸 matched/KICKED 静默互踢第一禁令/关断码映射全表/噪声 data 计数
  *          不解析/awaitData 匹配）
  *   W-BRG  BRIDGE（crc32 IEEE 向量/rpc-frame roundtrip/checksum/分片/限值/L2 编排+空列表）
+ *   W-REG  REG 级形状钉（v0.9-L2：L2 语义装 data.payload 内层/requestId 字段名/
+ *          workspaceKey 派生消费=workspaceIdentity.trim||workspacePath+activeWorkspaceKey 兜底/
+ *          出站 type 白名单/scheme 闸）
  *   W-INJ  INJECT（模板壳定案/隐私纪律/单行/200 字夹紧/sendPrompt ack）
  *   W-VRD  VERDICT（三证合一矩阵/busy=noop/③复活观测窗）
  *   W-DGR  DEGRADE（降级树全表 D1-D3/kicked/signals 落盘+滚动+脱敏）
@@ -113,28 +116,33 @@ class MockRelay {
       if (this.opts.mode === "close4011") t.serverClose(4011, "SessionExpired");
       if (this.opts.mode === "close4004") t.serverClose(4004, "SessionNotFound");
     }
-    if (msg.type === "data" && msg.zcode_type === "workspace-list-request") {
-      if (this.opts.noiseBeforeBridge) t.serverSend({ type: "data", zcode_type: "desktop-state-push", payload: "noise-not-to-be-parsed" });
+    if (msg.type === "data" && msg.payload && msg.payload.zcode_type === "workspace-list-request") {
+      // L2 应答走 payload 内层 + requestId 字段名（v0.9-L2 契约）；工作区项无 workspaceKey 字段
+      // （WorkspaceTarget=workspacePath/label/kind/workspaceIdentity，键由 resolve 派生）
+      if (this.opts.noiseBeforeBridge) t.serverSend({ type: "data", payload: { zcode_type: "desktop-state-push", note: "noise-not-to-be-parsed" } });
+      const rid = msg.payload.requestId;
+      const items = this.opts.workspaces || [{ workspacePath: "ws-1", label: "proj", kind: "local" }];
       t.serverSend(this.opts.emptyWorkspace
-        ? { type: "data", zcode_type: "workspace-list-response", workspaces: [] }
-        : { type: "data", zcode_type: "workspace-list-response", workspaces: [{ workspaceKey: "ws-1", name: "proj" }] });
+        ? { type: "data", payload: { zcode_type: "workspace-list-response", requestId: rid, success: true, result: { workspaces: [] } } }
+        : { type: "data", payload: { zcode_type: "workspace-list-response", requestId: rid, success: true, result: { workspaces: items, activeWorkspaceKey: this.opts.activeWorkspaceKey ?? null } } });
     }
-    if (msg.type === "data" && msg.zcode_type === "workspace-bridge-open") {
-      t.serverSend({ type: "data", zcode_type: "workspace-bridge-ready", bridgeSessionId: "bridge-1", initialTaskId: "task-1" });
+    if (msg.type === "data" && msg.payload && msg.payload.zcode_type === "workspace-bridge-open") {
+      const rid = msg.payload.requestId;
+      t.serverSend({ type: "data", payload: { zcode_type: "workspace-bridge-ready", requestId: rid, bridgeSessionId: "bridge-1", initialTaskId: "task-1" } });
     }
     if (msg.type === "rpc-frame") {
       this.captured.push(decodeRpcFrames([msg]));
       if (this.opts.mode === "busy") {
         t.serverSend({ type: "rpc-frame-ack", ackMessageSeq: msg.seq });
-        t.serverSend({ type: "data", zcode_type: "session-send-response", error: { code: -32010, message: "A prompt is already running" } });
+        t.serverSend({ type: "data", payload: { zcode_type: "session-send-response", error: { code: -32010, message: "A prompt is already running" } } });
       } else if (this.opts.mode === "accept-reject") {
         t.serverSend({ type: "rpc-frame-ack", ackMessageSeq: msg.seq });
-        t.serverSend({ type: "data", zcode_type: "session-send-response", error: { code: -32002, message: "rejected" } });
+        t.serverSend({ type: "data", payload: { zcode_type: "session-send-response", error: { code: -32002, message: "rejected" } } });
       } else if (this.opts.mode === "noack") {
         /* 不回 ack：触发持有帽强制断 */
       } else {
         t.serverSend({ type: "rpc-frame-ack", ackMessageSeq: msg.seq });
-        t.serverSend({ type: "data", zcode_type: "session-send-response", result: { ok: true } });
+        t.serverSend({ type: "data", payload: { zcode_type: "session-send-response", result: { ok: true } } });
       }
     }
   }
@@ -362,7 +370,7 @@ try {
     ck.ok("W-RLY-02 带内 error 五枚举映射", mapErrorFrame({ code: "KICKED" }).cls === "kicked" && mapErrorFrame({ code: "AUTH_FAILED" }).cls === "D1" && mapErrorFrame({ code: "DEVICE_OFFLINE" }).cls === "D2" && mapErrorFrame({ code: "WRONG_PARAM" }).cls === "D3" && mapErrorFrame({ code: "INTERNAL" }).cls === "D2");
     const relay = new MockRelay();
     const s1 = await connectRelay({ url: "ws://mock/ws2", deviceSid: "sid", transportFactory: relay.transportFactory, authAckTimeoutMs: 200 });
-    ck.ok("W-RLY-03 auth 握手 matched 即桥接可进", s1 && !s1.kicked && relay.received.some((m) => m.type === "auth_init" && m.role === "terminal" && m.client_ts > 1000000000));
+    ck.ok("W-RLY-03 auth 握手 matched 即桥接可进（auth_init 严格面：无 role 越界字段，L2-findings §4 ④）", s1 && !s1.kicked && relay.received.some((m) => m.type === "auth_init" && m.role === undefined && m.device_sid === "sid" && m.client_ts > 1000000000));
     const waiting = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: new MockRelay({ pairStatus: "waiting" }).transportFactory, authAckTimeoutMs: 200 }).catch((e) => e);
     ck.ok("W-RLY-04 pair_status waiting→auth-not-matched（15s 闸内放弃语义）", waiting.code === "auth-not-matched");
     const timeout = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: new MockRelay({ pairStatus: false }).transportFactory, authAckTimeoutMs: 30 }).catch((e) => e);
@@ -376,12 +384,13 @@ try {
     const t = s2.transport;
     t.serverSend({ type: "data", zcode_type: "unknown-push", payloadLen: 580 }); // 非请求推送（EXP-3 F4）
     t.serverSend({ type: "data", zcode_type: "desktop-heartbeat" });
-    ck.ok("W-RLY-07 噪声 data 帧=计数不解析不当错误", s2.metrics.noiseData === 2 && s2.metrics.parseErrors === 0 && isSignalType("auth_ack") && !isSignalType("data"));
+    t.serverSend({ type: "data", payload: { zcode_type: "desktop-heartbeat", seq: 1 } }); // 新形噪声：payload 内层 type 不匹配挂起请求
+    ck.ok("W-RLY-07 噪声 data 帧=计数不解析不当错误（顶层裸帧与新形 payload 均按噪声计）", s2.metrics.noiseData === 3 && s2.metrics.parseErrors === 0 && isSignalType("auth_ack") && !isSignalType("data"));
     const respP = s2.awaitData("session-send-response", { timeoutMs: 200, reqId: "r1" });
     t.serverSend({ type: "data", zcode_type: "other-frame" });
-    t.serverSend({ type: "data", zcode_type: "session-send-response", result: { ok: true } });
+    t.serverSend({ type: "data", payload: { zcode_type: "session-send-response", result: { ok: true } } });
     const gotResp = await respP;
-    ck.ok("W-RLY-08 awaitData 先挂后发形态：噪声不吞匹配帧", gotResp && gotResp.result && gotResp.result.ok === true);
+    ck.ok("W-RLY-08 awaitData 先挂后发形态：噪声不吞匹配帧且 resolve 上抛 payload 内层", gotResp && gotResp.result && gotResp.result.ok === true && gotResp.type === undefined && gotResp.payload === undefined);
     const ackP = s2.awaitAck(42, 200);
     t.serverSend({ type: "rpc-frame-ack", ackMessageSeq: 41 }); // 不匹配忽略
     t.serverSend({ type: "rpc-frame-ack", ackMessageSeq: 42 });
@@ -391,6 +400,9 @@ try {
     const errGot = await errP.catch((e) => e);
     ck.ok("W-RLY-10 error 帧拒挂起请求并携带面分类", errGot.code === "relay-error" && errGot.cls === "D2");
     ck.ok("W-RLY-11 ws2 URL 组装：token 只进 query（日志面恒 urlSafeLabel）", buildWs2Url({ origin: "https://zcode.z.ai/", token: "SECRET", mid: "m1" }).includes("token=SECRET&mid=m1") && "ws2?token=REDACTED" === new RelaySession().urlSafeLabel);
+    ck.ok("W-RLY-12 scheme 闸单测钉死（https→wss/http→ws；此前仅 mock 注入绕行未断言，L2-findings §5.3 同类核）",
+      buildWs2Url({ origin: "https://zcode.z.ai/", token: "S", mid: "m" }).startsWith("wss://zcode.z.ai/api/v1/remote/ws2?") &&
+      buildWs2Url({ origin: "http://x.example", token: "S", mid: "m" }).startsWith("ws://x.example/api/v1/remote/ws2?"));
   }
 
   /* ======== W-BRG BRIDGE ======== */
@@ -412,10 +424,51 @@ try {
     const relay = new MockRelay();
     const s = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: relay.transportFactory, authAckTimeoutMs: 200 });
     const bridge = await openBridge({ session: s });
-    ck.ok("W-BRG-09 L2 编排：list→key→open→ready（bridgeSessionId/initialTaskId）", bridge.workspaceKey === "ws-1" && bridge.bridgeSessionId === "bridge-1" && bridge.initialTaskId === "task-1");
+    ck.ok("W-BRG-09 L2 编排：list→派生键→open→ready（bridgeSessionId/initialTaskId；项无 workspaceKey 字段，键由 workspacePath 派生）", bridge.workspaceKey === "ws-1" && bridge.bridgeSessionId === "bridge-1" && bridge.initialTaskId === "task-1");
     const sEmpty = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: new MockRelay({ emptyWorkspace: true }).transportFactory, authAckTimeoutMs: 200 });
     const emptyErr = await openBridge({ session: sEmpty }).catch((e) => e);
     ck.ok("W-BRG-10 workspace-list 空 → bridge-list-empty（D3 面）", emptyErr.code === "bridge-list-empty");
+
+    /* ---- W-REG REG 级形状钉（v0.9-L2：payload 内层/requestId 字段名/派生消费；workspace-list 过校验面） ---- */
+    {
+      // REG-01/02/03 出站构帧形状 + 应答内层消费 + L1 出站白名单
+      const relayR = new MockRelay();
+      const sR = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: relayR.transportFactory, authAckTimeoutMs: 200 });
+      const got = await sR.request({ type: "data", payload: { zcode_type: "workspace-list-request", requestId: "ow-reg" } }, { timeoutMs: 200 });
+      const sentData = relayR.received.find((m) => m.type === "data");
+      ck.ok("W-REG-01 出站帧 L2 语义装 payload 内层且 requestId 新字段名（顶层无 zcode_type/req_id 漂移残留）",
+        sentData && sentData.type === "data" && sentData.payload && sentData.payload.zcode_type === "workspace-list-request" &&
+        sentData.payload.requestId === "ow-reg" && sentData.zcode_type === undefined && sentData.req_id === undefined &&
+        sentData.workspace_key === undefined, sentData);
+      ck.ok("W-REG-02 应答消费 payload 内层（resolve 上抛内层非外层信封；result.workspaces 可达）",
+        got && got.requestId === "ow-reg" && got.type === undefined && got.payload === undefined && got.result && Array.isArray(got.result.workspaces), got);
+      ck.ok("W-REG-03 本连接出站 type 全落 L1 白名单 [auth_init,pair_status_query,data]（contract.ts:41）",
+        relayR.received.length > 0 && relayR.received.every((m) => ["auth_init", "pair_status_query", "data"].includes(m.type)), relayR.received.map((m) => m.type));
+      // REG-04 requestId 关联匹配：错配帧计噪声不吞请求，同号帧方达
+      const sM = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: new MockRelay().transportFactory, authAckTimeoutMs: 200 });
+      const pM = sM.awaitData("workspace-list-response", { timeoutMs: 200, reqId: "ow-a" });
+      sM.transport.serverSend({ type: "data", payload: { zcode_type: "workspace-list-response", requestId: "ow-other" } });
+      sM.transport.serverSend({ type: "data", payload: { zcode_type: "workspace-list-response", requestId: "ow-a" } });
+      const gotM = await pM;
+      ck.ok("W-REG-04 requestId 关联匹配：错配帧归噪声不吞请求，同号帧方达", gotM.requestId === "ow-a" && sM.metrics.noiseData === 1, { got: gotM.requestId, noise: sM.metrics.noiseData });
+      // REG-05 派生消费：hint 按派生键匹配 + workspaceIdentity.trim 优先于 workspacePath
+      const relayI = new MockRelay({ workspaces: [
+        { workspacePath: "D:/a", label: "A", kind: "local", workspaceIdentity: "  ident-a  " },
+        { workspacePath: "D:/b", label: "B", kind: "local" },
+      ] });
+      const sI = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: relayI.transportFactory, authAckTimeoutMs: 200 });
+      const bHint = await openBridge({ session: sI, workspaceKeyHint: "ident-a" });
+      ck.ok("W-REG-05 hint 按派生键匹配且 workspaceIdentity.trim 优先（web-remote-control.ts:744-748 语义）",
+        bHint.workspaceKey === "ident-a" && bHint.bridgeSessionId === "bridge-1", bHint);
+      const sI2 = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: new MockRelay().transportFactory, authAckTimeoutMs: 200 });
+      const bNo = await openBridge({ session: sI2 });
+      ck.ok("W-REG-06 无 hint 取首个并派生（键=workspacePath，不读项上不存在的 workspaceKey）", bNo.workspaceKey === "ws-1", bNo);
+      // REG-07 picked 派生为 null 时回退 result.activeWorkspaceKey（findings §4 ③ fallback）
+      const relayF = new MockRelay({ workspaces: [{ label: "only", kind: "local" }], activeWorkspaceKey: "act-key" });
+      const sF = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: relayF.transportFactory, authAckTimeoutMs: 200 });
+      const bF = await openBridge({ session: sF });
+      ck.ok("W-REG-07 picked 派生为空回退 activeWorkspaceKey", bF.workspaceKey === "act-key", bF);
+    }
   }
 
   /* ======== W-INJ INJECT ======== */
@@ -495,8 +548,8 @@ try {
       const frameDec = relay.captured[0];
       const shell = frameDec && frameDec.ok ? frameDec.dataObj.params.content : "";
       ck.ok("W-E2E-03 注入壳=id+状态+spool 指针（正文留 spool 隐私最小化）", frameDec.ok && frameDec.dataObj.method === "session/send" && String(shell).startsWith("[orch-watch] mission=m-ok state=done") && String(shell).includes("spool/m-ok/unread/latest.json（路径指针，非正文）"), shell);
-      ck.ok("W-E2E-04 桥接前噪声推送帧被计数吞掉（EXP-3 F4 全链复现：噪声在位且事务照常 success）",
-        (relay.serverSent || []).some((m) => m.zcode_type === "desktop-state-push") && r1.outcome === "success", { noise: (relay.serverSent || []).some((m) => m.zcode_type === "desktop-state-push"), outcome: r1.outcome });
+      ck.ok("W-E2E-04 桥接前噪声推送帧被计数吞掉（EXP-3 F4 全链复现：新形 payload 噪声在位且事务照常 success）",
+        (relay.serverSent || []).some((m) => m.payload && m.payload.zcode_type === "desktop-state-push") && r1.outcome === "success", { noise: (relay.serverSent || []).some((m) => m.payload && m.payload.zcode_type === "desktop-state-push"), outcome: r1.outcome });
       ck.ok("W-E2E-05 心跳自证文件在位（哨兵反向监控面，60s mtime 即心跳）", fs.existsSync(path.join(root, "sentinel", "watcher-heartbeat")));
       ck.ok("W-E2E-06 ws2 URL 带 mock mid 且成功触发建连", (relay.urls || [""])[0].includes("mid=mid-mock"));
     }

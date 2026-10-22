@@ -31,7 +31,7 @@ disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_o
 
 ## 抢锁协议（任务包第一步，成败即分叉）
 
-1. 对 `<全端目录>/glean-lock.json` 做 `wx` 原子写 active 态（{v:1, state:"active", pid, host, root_id, started_at, finished_at:null, watermarks}）。EEXIST → 读之判活性：state=active 且 PID 活且未过期 → **占用，立即 `report(kind=done, summary="锁占用，跳过")` 收工**；PID 死或龄期超 1.5h → 回收重写接管。
+1. 对锁文件（位置=任务包 brief 的 `lock_path` 字段，权威指针勿手写；basename=glean-lock.json，与 brief 同目录）做 `wx` 原子写 active 态（{v:1, state:"active", pid, host, root_id, started_at, finished_at:null, watermarks}）。EEXIST → 读之判活性：state=active 且 PID 活且未过期 → **占用，立即 `report(kind=done, summary="锁占用，跳过")` 收工**；PID 死或龄期超 1.5h → 回收重写接管。
 2. 完成收尾把锁改写 `state:"done"` + `finished_at` + `watermarks`（全端行数+各扫描项目行数基线），**保留文件不删**——mtime/finished_at 即「上次归敛时间」、watermarks 即事件基线，是下次门槛判定的读数。
 3. 失败退出保持 active 态留现场（下轮回收），并在 report 里写明卡在哪一步。
 

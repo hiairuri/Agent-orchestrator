@@ -502,6 +502,9 @@ function startStrictServer(extraArgs, { root, env = {} }) {
 // 旧实现四桥接键恒写默认值 → 哨兵 numArgBridge 桥接分支永不被咨询）。每例独立临时根 +
 // 独立 argv 起 server，轮询 cfg 落盘（原子写，读到即全文）后即收进程；哨兵侧解析行为用
 // numArgBridge 同款语义的表驱动复刻器锁定（CLI 层探针不给哨兵旗标 → 恒落空）。
+// v0.9 (C8) full-sparse 转正后口径：CFG-01b/CFG-04 随全 sparse 语义更新（原「其余 v2 键
+// 恒写不回归」锁已废——恒写默认正是二次 shadow 面，v0.9-DESIGN §5；主控仲裁 A 扩写集
+// 批准改写，限本场景两断言，登记见 v0.9.x.md A-v090-CLN-05 行）。
 {
   const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
   const sentSrc = fs.readFileSync(path.join(path.dirname(DEFAULT_SERVER), "..", "hooks", "bg-sentinel.mjs"), "utf8");
@@ -556,11 +559,13 @@ function startStrictServer(extraArgs, { root, env = {} }) {
       hit.length === 0,
       { hit, head: JSON.stringify(cfg).slice(0, 100) },
     );
-    const drift = Object.entries(V2_DEFAULTS).filter(([k, v]) => cfg[k] !== v).map(([k]) => k);
+    // v0.9 (C8) full-sparse 口径：其余 v2 十键同省略（键缺失，非 null 占位）——
+    // 恒写默认正是二次 shadow 面，全量写锁随转正废止
+    const absent = Object.keys(V2_DEFAULTS).filter((k) => k in cfg);
     ck.ok(
-      "CFG-01b 其余 v2 键在位且=现行默认（恒写不回归）+ signals 块在位",
-      drift.length === 0 && cfg.signals && typeof cfg.signals === "object" && typeof cfg.signals.rollout_dir === "string",
-      { drift, hasSignals: !!cfg.signals },
+      "CFG-01b 无 argv 启动 → 其余 v2 十键全 sparse 省略（v0.9 C8：键缺失非 null 占位，恒写锁已废）+ signals 块在位",
+      absent.length === 0 && cfg.signals && typeof cfg.signals === "object" && typeof cfg.signals.rollout_dir === "string",
+      { absent, hasSignals: !!cfg.signals },
     );
   }
   // ---- CFG-02：--wake-timeout-min 30 → 直写 30、refire 键省略；桥接复刻解析 refire=30 ----
@@ -604,10 +609,11 @@ function startStrictServer(extraArgs, { root, env = {} }) {
     const cfg = waitCfg(R);
     killChild(child);
     const hit = BRIDGE_KEYS.filter((k) => k in cfg);
+    const stained = Object.keys(V2_DEFAULTS).filter((k) => k in cfg);
     ck.ok(
-      "CFG-04 ${…}/空串/非法值/尾随垃圾 → 四键全省略（numArgOpt 判空面完备）；其余 v2 键不受染",
-      hit.length === 0 && cfg.wake_poll_sec === 60 && cfg.max_lifetime_min === 1440,
-      { hit, poll: cfg.wake_poll_sec },
+      "CFG-04 ${…}/空串/非法值/尾随垃圾 → 四键全省略（numArgOpt 判空面完备）；其余 v2 十键同省略（v0.9 C8 full-sparse，垃圾值不落盘）+ signals 在位",
+      hit.length === 0 && stained.length === 0 && cfg.signals && typeof cfg.signals === "object",
+      { hit, stained, hasSignals: !!cfg.signals },
     );
   }
   // ---- CFG-05（默认值漂移锁）：四键缺省时哨兵解析结果=bg-sentinel 内建默认（5/3）；

@@ -2,7 +2,9 @@
  * suites/crv8-memory.mjs —— v0.8 记忆子系统 suite（W1 bootstrap：P0 分发端补门 INJ 族；
  *   W2 增例：两级库与捎带面 SYNC/GLEAN/INJ-06b 族；W3 增例：ORCHTEMP 与锁 GLEAN-03/05 族）
  *
- * 覆盖断言组（断言主句权威 = tests/assertions/v0.8.x.md；设计权威 = v0.8-DESIGN §3/§4/§5/§6/§7/§14）：
+ * 覆盖断言组（断言主句权威 = tests/assertions/v0.8.x.md；v0.9 增例权威 =
+ *   tests/assertions/v0.9.x.md；设计权威 = v0.8-DESIGN §3/§4/§5/§6/§7/§14 +
+ *   v0.9-DESIGN §10 C5/§15 W1）：
  *   A-v080-INJ-01（§3.1 type 加权不滤除：error-fix 单类命中入选 + 同 overlap 等分时
  *     error-fix 以 LESSON_TYPE_WEIGHT 排在 pitfall 前，任何 type 不被滤除）
  *   A-v080-INJ-02（§3.2 INJECT_MIN_SCORE=0.40 阈值门：原始衰减持 score<0.40 不入选
@@ -63,6 +65,28 @@
  *     项目源条被全端新条遮蔽（源 id 不渲染、晋升 id 恰渲染一次）+ 晋升后注入可见
  *     （pack LESSONS 渲染全端新条）+ 读端零写（两库字节零变化））
  *
+ *   A-v090-THR-01（v0.9 W1，C5 阈值落值：INJECT_MIN_SCORE 0.40→0.39——新值行为生效
+ *     对照〔判别行 score≈0.395∈[0.39,0.40) 入选，0.40 口径下必被排除〕+ 落门/入选
+ *     对照更新（OLD≈0.158<0.39 落门、FRESH 0.60 入选）+ 推导注记 v0.9 复算版在案
+ *     （P25=0.4583 ×0.85 圆整 0.39、界 [0.30,0.50]）；断言主句权威 = v0.9.x.md。
+ *     INJ-02 常量锁登记面随之改钉 v0.9.x.md（0.39 口径；v0.8.x.md 为 0.8 期历史
+ *     记录，不在本波写集））
+ *   A-v090-REG-01（v0.9 W3，C7 registry library_path + sibling 扫描两腿：登记行含
+ *     library_path=本实例实际解析项目库绝对路径/自定义 --root sibling 自登记可见且
+ *     经 library_path 优先腿端到端命中 cross-project count=2（默认布局映射下不可见）/
+ *     无 library_path 存量行回退默认布局命中（回退腿，兼容守卫）；断言主句权威 =
+ *     v0.9.x.md；设计权威 = v0.9-DESIGN §9 C7）
+ *   A-v090-HOST-01b（v0.9 W3 条件腿，C6 双注入证实触发：宿主用户级注入面源码复核
+ *     结论=存在〔~/.zcode/AGENTS.md，scope="user"，(internal design docs, not published)
+ *     findings.md〕→ readGleanCfg 缺省 pack_global_section false（cfg 键翻转锁：源码
+ *     字面量 grep + 无 cfg 缺省关行为腿）；全端节 SEC72-a 改显式 opt-in（cfg true），
+ *     GLEAN-03g junk 回落值随缺省翻转为 false；设计权威 = v0.9-DESIGN §8/§16）
+ *   A-v090-W3FIX（v0.9 W3fix，m-20261022-180233-3051：saveGlobalLessons base 修复
+ *     回归——显式 --memory-root 指向项目根外（生产缺省 ~/.zcode/orchestrator-memory
+ *     同位）时 promote target=global 端到端成功〔原炸点「path escapes base directory」
+ *     转绿：新建/合并两写腿〕+ 源条原地不动红线在根外场景同守；断言主句权威 =
+ *     v0.9.x.md〔登记归主控补，不在本波写集〕；设计权威 = v0.8-DESIGN §6.7）
+ *
  * W2 落位注记：全端库缺省 ~/.zcode/orchestrator-memory；suite 临时根（os.tmpdir() 下）
  *   的缺省重定向=<临时根>/orchestrator-memory（root.txt「test root must not stick」同族
  *   刻出，防套件污染真实家目录）——SYNC/GLEAN-01/02/04/INJ-06b 场景即用该缺省落点布景，
@@ -82,7 +106,9 @@ import { exportFileFromGit, repoRoot } from "../harness/git-fixture.mjs";
 const ck = new Checker("crv8-memory");
 const BASE = makeTempRoot({ prefix: "orch-crv8-", root: parseRootArg() || undefined });
 const HOOKS_SRC = path.join(PLUGIN_DIR, "hooks", "session-start.mjs");
-const ASSERT_DOC = path.join(TESTS_DIR, "assertions", "v0.8.x.md");
+// v0.9 W1（C5 落值 0.40→0.39）起，INJ-02 常量锁「防漂移第二文件」改钉 v0.9.x.md
+// （v0.8.x.md 保留 0.8 期历史记录，不在本波写集；现行值锁面=INJECT_MIN_SCORE=0.39）。
+const ASSERT_DOC = path.join(TESTS_DIR, "assertions", "v0.9.x.md");
 
 const resultText = (r) => r.json ?? { _raw: r.text };
 const subRoot = (name) => {
@@ -314,7 +340,8 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     note: null,
   };
   // 同 trigger 同 overlap 同 type：唯一差异 = updated_at（score 衰减）。
-  // FRESH score=0.6 ≥0.40 入选；OLD score=0.6×exp(-40/30)≈0.158 <0.40 落门。
+  // FRESH score=0.6 ≥0.39 入选；OLD score=0.6×exp(-40/30)≈0.158 <0.39 落门
+  // （v0.9 C5 落值 0.40→0.39 口径；判别行对照见 THR-01 场景）。
   const rows2 = [
     { ...baseRow, id: "l-20260101-aaa001", updated_at: nowIso },
     { ...baseRow, id: "l-20260101-aaa002", updated_at: oldIso },
@@ -326,7 +353,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     await s2.call("context_pack", { mission_id: "m-gate", title: "阈值门包", task: "INJ2TOKEN 阈值门回归验证" });
     const packGate = readPack(R2, "m-gate");
     ck.ok(
-      "INJ-02 score<0.40 不入选（OLD≈0.158 落门）而达标行（0.60）入选；同 overlap 排除面只归阈值",
+      "INJ-02 score<0.39 不入选（OLD≈0.158 落门）而达标行（0.60）入选；同 overlap 排除面只归阈值",
       Boolean(packGate) && packGate.includes("l-20260101-aaa001") && !packGate.includes("l-20260101-aaa002") && packGate.includes("## LESSONS"),
       packGate && packGate.split("\n").filter((l) => l.startsWith("- [")),
     );
@@ -334,14 +361,74 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     // 常量默认值锁定（双文件子串，沿 CFG-05 先例）：server.mjs 常量 + 断言登记文件
     const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
     const docSrc = fs.existsSync(ASSERT_DOC) ? fs.readFileSync(ASSERT_DOC, "utf8") : "";
-    ck.ok("INJ-02 常量锁 server.mjs：INJECT_MIN_SCORE = 0.40 在位", /const INJECT_MIN_SCORE = 0\.40;/.test(srvSrc));
+    ck.ok("INJ-02 常量锁 server.mjs：INJECT_MIN_SCORE = 0.39 在位（v0.9 C5 落值）", /const INJECT_MIN_SCORE = 0\.39;/.test(srvSrc));
     ck.ok(
       "INJ-02 常量锁 server.mjs：LESSON_TYPE_WEIGHT 四值在位（error-fix 1.0 / pitfall 0.9 / env-fact 0.8 / preference 0.7）",
       srvSrc.includes('const LESSON_TYPE_WEIGHT = { "error-fix": 1.0, "pitfall": 0.9, "env-fact": 0.8, "preference": 0.7 };'),
     );
-    ck.ok("INJ-02 常量锁登记面：v0.8.x.md 登记 INJECT_MIN_SCORE=0.40（防漂移第二文件）", docSrc.includes("INJECT_MIN_SCORE=0.40"), ASSERT_DOC);
+    ck.ok("INJ-02 常量锁登记面：v0.9.x.md 登记 INJECT_MIN_SCORE=0.39（防漂移第二文件，v0.9 W1 起改钉）", docSrc.includes("INJECT_MIN_SCORE=0.39"), ASSERT_DOC);
   } finally {
     s2.close();
+  }
+}
+
+/* ============ 场景 2b：THR-01（v0.9 W1，root r-thr01，C5 阈值落值 0.40→0.39 三行对照） ============ */
+{
+  const R2b = subRoot("r-thr01");
+  const nowIso2b = new Date().toISOString();
+  // MID 判别行：score≈0.395 ∈ [0.39, 0.40) —— 0.39 口径下入选，0.40 口径下必被排除
+  //（新值生效的行为判别行）。score=0.6×exp(-days/30)=0.395 → days=30×ln(0.6/0.395)≈12.56。
+  const midDays2b = 30 * Math.log(0.6 / 0.395);
+  const midIso2b = new Date(Date.now() - midDays2b * 86400000).toISOString();
+  const oldIso2b = new Date(Date.now() - 40 * 86400000).toISOString();
+  const baseRow2b = {
+    v: 1,
+    ts: nowIso2b,
+    mission_id: null,
+    worker: "t",
+    type: "pitfall",
+    trigger: "",
+    lesson: "",
+    fix: "",
+    confidence: 0.6,
+    hits: 1,
+    status: "active",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+  };
+  // 三行 normKey 互异（trigger/fix 各带专属 token）：排除面只归阈值，与 normKey 去重正交。
+  const rows2b = [
+    { ...baseRow2b, id: "l-20260101-thr001", trigger: "THRFRESH 阈值新鲜行", fix: "THRFRESH 新鲜修正", updated_at: nowIso2b },
+    { ...baseRow2b, id: "l-20260101-thr002", trigger: "THRMID 阈值判别行", fix: "THRMID 判别修正", updated_at: midIso2b },
+    { ...baseRow2b, id: "l-20260101-thr003", trigger: "THROLD 阈值衰老行", fix: "THROLD 衰老修正", updated_at: oldIso2b },
+  ];
+  fs.mkdirSync(path.join(R2b, "memory"), { recursive: true });
+  fs.writeFileSync(path.join(R2b, "memory", "lessons.jsonl"), rows2b.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const s2b = startServer({ root: R2b });
+  try {
+    await s2b.call("context_pack", { mission_id: "m-thr01", title: "C5 落值包", task: "THRFRESH THRMID THROLD 阈值落值对照验证" });
+    const packThr = readPack(R2b, "m-thr01");
+    ck.ok(
+      "THR-01a 新值生效判别行：score≈0.395∈[0.39,0.40) 的 MID 行入选（0.40 口径下必被排除——A-v090-THR-01 行为对照）",
+      Boolean(packThr) && packThr.includes("## LESSONS") && packThr.includes("l-20260101-thr002"),
+      packThr && packThr.split("\n").filter((l) => l.startsWith("- [")),
+    );
+    ck.ok(
+      "THR-01b 落门/入选对照更新（0.39 口径）：FRESH 0.60 入选、OLD≈0.158<0.39 落门不渲染",
+      Boolean(packThr) && packThr.includes("l-20260101-thr001") && !packThr.includes("l-20260101-thr003"),
+      packThr && packThr.split("\n").filter((l) => l.startsWith("- [")),
+    );
+    // 推导注记 v0.9 复算版在案（server.mjs 常量区注释：P25=0.4583 → ×0.85 ≈0.3895 → 圆整 0.39，界 [0.30,0.50]）
+    const srvSrc2b = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    ck.ok(
+      "THR-01c 推导注记 v0.9 复算版在案：P25=0.4583 + ×0.85 + 圆整 0.39 + 界 [0.30, 0.50] + v0.9 recheck 锚",
+      srvSrc2b.includes("P25=0.4583") && srvSrc2b.includes("× 0.85") && srvSrc2b.includes("round 0.39") && srvSrc2b.includes("[0.30, 0.50]") && /v0\.9 recheck/i.test(srvSrc2b),
+      null,
+    );
+  } finally {
+    s2b.close();
   }
 }
 
@@ -952,7 +1039,9 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       { gStart11, gEnd11 },
     );
 
-    // ---- GLEAN-03g：cfg junk 逐键兜底（W3 任务③ 默认值兜底，经 brief.cfg 端到端观察）
+    // ---- GLEAN-03g：cfg junk 逐键兜底（W3 任务③ 默认值兜底，经 brief.cfg 端到端观察；
+    //      pack_global_section 缺省自 v0.9 W3 C6/HOST-01b 起为 false——用户级注入面复核
+    //      结论=存在，全端节改显式 opt-in，junk 回落值随缺省翻转）
     fs.writeFileSync(
       cfg11,
       JSON.stringify({ idle_hours: "abc", new_events: -5, lock_stale_hours: 0, pack_global_section: "nope" }),
@@ -961,8 +1050,8 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     const gg3 = gleanOf(r);
     const briefG3 = fs.existsSync(brief11) ? JSON.parse(fs.readFileSync(brief11, "utf8")) : null;
     ck.ok(
-      "GLEAN-03g cfg junk 逐键兜底：idle_hours/new_events/lock_stale_hours/pack_global_section 全回落内建默认（48/10/1.5/true）",
-      Boolean(gg3) && gg3.due === true && Boolean(briefG3) && briefG3.cfg.idle_hours === 48 && briefG3.cfg.new_events === 10 && briefG3.cfg.lock_stale_hours === 1.5 && briefG3.cfg.pack_global_section === true,
+      "GLEAN-03g cfg junk 逐键兜底：idle_hours/new_events/lock_stale_hours/pack_global_section 全回落内建默认（48/10/1.5/false〔v0.9 C6 翻转〕）",
+      Boolean(gg3) && gg3.due === true && Boolean(briefG3) && briefG3.cfg.idle_hours === 48 && briefG3.cfg.new_events === 10 && briefG3.cfg.lock_stale_hours === 1.5 && briefG3.cfg.pack_global_section === false,
       briefG3 && briefG3.cfg,
     );
   } finally {
@@ -1186,16 +1275,35 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     );
     ck.ok("INJ-06b-5 contradicts 不跨库：全端库字节零变化（读端/写端均不触他库）", fs.readFileSync(gLib10, "utf8") === gLibBefore);
 
-    // ---- §7.2 全端节：注入 + 节序 + 开关
-    ck.ok(
-      "SEC72-a 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行）",
-      Boolean(pack10) && pack10.includes("## GLOBAL MEMORY（全端子代理记忆") && pack10.includes("GLOBALSEC 全端稳定事实行"),
-      pack10 && pack10.split("\n").filter((l) => l.startsWith("## ")),
-    );
-    const iL10 = pack10.indexOf("## LESSONS");
-    const iG10 = pack10.indexOf("## GLOBAL MEMORY");
-    const iR10 = pack10.indexOf("## RETURN");
-    ck.ok("SEC72-b 节序：LESSONS < GLOBAL MEMORY < RETURN", iL10 >= 0 && iL10 < iG10 && iG10 > 0 && iG10 < iR10, { iL10, iG10, iR10 });
+  // ---- HOST-01b（v0.9 W3 C6 条件腿）：宿主用户级注入面源码复核结论=存在
+  //      （(internal design docs, not published)：~/.zcode/AGENTS.md 默认进
+  //      子代理上下文组装链，scope="user"）→ pack_global_section 缺省翻 false（v0.9
+  //      DESIGN §8 决策规则），全端节改显式 opt-in。m-6b 包即「无 cfg」环境（AGENTS.md
+  //      已在位、glean.cfg.json 尚未写出）。
+  const srvSrc10 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  ck.ok(
+    "HOST-01b-a 源码锁：readGleanCfg 缺省字面量 pack_global_section:false（cfg 键翻转锁；C6 复核结论=宿主用户级注入面存在，防双通道注入）",
+    srvSrc10.includes("lock_stale_hours: 1.5, pack_global_section: false }"),
+    null,
+  );
+  ck.ok(
+    "HOST-01b-b 缺省关行为腿：无 glean.cfg.json（缺省=false）+ 全端 AGENTS.md 在位 → GLOBAL MEMORY 节整体不出现（LESSONS 命中不受累，CR-04）",
+    Boolean(pack10) && !pack10.includes("## GLOBAL MEMORY") && pack10.includes("## LESSONS"),
+    pack10 && pack10.split("\n").filter((l) => l.startsWith("## ")),
+  );
+  // ---- §7.2 全端节：显式 opt-in 注入 + 节序 + 开关
+  fs.writeFileSync(path.join(MEM10, "glean.cfg.json"), JSON.stringify({ pack_global_section: true }));
+  await s10.call("context_pack", { mission_id: "m-6bon", title: "开关开启包", task: "PROBE6B 缓存损坏重建" });
+  const pack10on = readPack(R10, "m-6bon");
+  ck.ok(
+    "SEC72-a pack_global_section:true 显式开 → 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行）",
+    Boolean(pack10on) && pack10on.includes("## GLOBAL MEMORY（全端子代理记忆") && pack10on.includes("GLOBALSEC 全端稳定事实行"),
+    pack10on && pack10on.split("\n").filter((l) => l.startsWith("## ")),
+  );
+  const iL10 = pack10on.indexOf("## LESSONS");
+  const iG10 = pack10on.indexOf("## GLOBAL MEMORY");
+  const iR10 = pack10on.indexOf("## RETURN");
+  ck.ok("SEC72-b 节序：LESSONS < GLOBAL MEMORY < RETURN", iL10 >= 0 && iL10 < iG10 && iG10 > 0 && iG10 < iR10, { iL10, iG10, iR10 });
     fs.writeFileSync(path.join(MEM10, "glean.cfg.json"), JSON.stringify({ pack_global_section: false }));
     await s10.call("context_pack", { mission_id: "m-6bswitch", title: "开关关闭包", task: "PROBE6B 缓存损坏重建" });
     const packSwitch = readPack(R10, "m-6bswitch");
@@ -1367,6 +1475,184 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     );
   } finally {
     s13.close();
+  }
+}
+
+/* ============ 场景 14：REG-01（v0.9 W3 §9 C7 registry library_path + sibling 扫描
+ *               两腿，roots r-reglib〔默认布局〕/ r-reglib-c〔自定义 --root sibling〕/
+ *               r-reglib-legacy〔无 library_path 存量行 fixture〕） ============ */
+{
+  const R14 = subRoot("r-reglib");
+  // 共享名册/全端库落 R14 内（=临时根缺省重定向同位，显式钉死使两 server 确定性同根）。
+  // 注：自定义 --memory-root 置项目根外（生产缺省 ~/.zcode/orchestrator-memory 同位）时
+  // promote target=global 会被 atomicWriteFileSync 缺省 base=root 的越界门拒——W5 既有
+  // 缺陷候选（saveGlobalLessons 未显式传 base=memoryRoot，名册 upsert 已传），不在本波
+  // 断言面，已上报主控仲裁；本场景按 C7 限制原文取自定义 --root（存储根）腿。
+  const M14 = path.join(R14, "orchestrator-memory");
+  fs.mkdirSync(M14, { recursive: true });
+  const reg14 = path.join(M14, "projects.jsonl");
+  // 自定义 --root sibling：存储根刻意不在默认布局 <project>/.zcode/orchestrator 下
+  // ——旧映射（registry 只有 project_path）对此类 sibling 不可见，正是 C7 要消的限制
+  const C14 = subRoot("r-reglib-c");
+  const libC14 = path.join(C14, "memory", "lessons.jsonl");
+  const now14 = new Date().toISOString();
+  const seedRow14 = (over) => ({
+    v: 1,
+    ts: "2026-01-01T00:00:00.000Z",
+    mission_id: null,
+    worker: "t",
+    lesson: "",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+    ...over,
+  });
+  // 自定义 root sibling 见证库：与腿 3 源条同 normKey 的 candidate（只读见证，永不直写）
+  writeJsonl(libC14, [
+    seedRow14({ id: "l-20260101-r1cb01", updated_at: now14, type: "pitfall", trigger: "R1CROSS 自定义根复现触发", fix: "R1CROSS 自定义根复现修正", confidence: 0, hits: 0, status: "candidate", scope: "project" }),
+  ]);
+
+  // ---- REG-01a 登记面（C7-a）：默认布局项目启动 → 登记行含 library_path 且=实际解析项目库绝对路径
+  const s14a = startServerX({ root: R14, args: ["--memory-root", M14] });
+  try {
+    await s14a.call("lessons", { action: "list" }); // 等启动副作用（名册 upsert）落地
+    const rows14 = readJsonl(reg14);
+    const rid14 = fs.readFileSync(path.join(R14, "root-id"), "utf8").trim();
+    ck.ok(
+      "REG-01a 登记行含 library_path：值=本实例实际解析项目库 <root>/memory/lessons.jsonl（绝对路径、原地更新语义仍一行）",
+      rows14.length === 1 && rows14[0].root_id === rid14 && typeof rows14[0].library_path === "string" && path.isAbsolute(rows14[0].library_path) && normPath(rows14[0].library_path) === normPath(path.join(R14, "memory", "lessons.jsonl")),
+      rows14,
+    );
+  } finally {
+    s14a.close();
+  }
+
+  // ---- REG-01b 自定义 --root sibling 自登记（C7-a 端到端）：library_path 指向自定义根
+  //      项目库而非默认布局映射（旧映射下该路径不存在=不可见的实症面）
+  const s14b = startServerX({ root: C14, args: ["--memory-root", M14] });
+  try {
+    await s14b.call("lessons", { action: "list" });
+    const rows14b = readJsonl(reg14);
+    const rowC14 = rows14b.find((r) => normPath(r.project_path) === normPath(C14));
+    ck.ok(
+      "REG-01b 自定义 --root sibling 自登记：library_path=<自定义根>/memory/lessons.jsonl 且默认布局路径不存在（旧映射必脱靶）",
+      Boolean(rowC14) && normPath(rowC14.library_path) === normPath(libC14) && !fs.existsSync(path.join(C14, ".zcode", "orchestrator", "memory", "lessons.jsonl")),
+      rowC14,
+    );
+  } finally {
+    s14b.close();
+  }
+
+  // ---- REG-01c 优先腿端到端（C7-b 腿一）：R14 项目库同 normKey candidate → promote
+  //      target=global → sibling 扫描经 library_path 命中自定义 root sibling（count=2）
+  writeJsonl(path.join(R14, "memory", "lessons.jsonl"), [
+    seedRow14({ id: "l-20260101-r1c002", updated_at: now14, type: "pitfall", trigger: "R1CROSS 自定义根复现触发", fix: "R1CROSS 自定义根复现修正", confidence: 0, hits: 0, status: "candidate" }),
+  ]);
+  const s14c = startServerX({ root: R14, args: ["--memory-root", M14] });
+  try {
+    await s14c.call("lessons", { action: "list" });
+    const pc14 = resultText(await s14c.call("lessons", { action: "promote", id: "l-20260101-r1c002", target: "global" }));
+    ck.ok(
+      "REG-01c 优先腿：自定义 --root sibling 经 library_path 命中（branch=cross-project、count=2、others 指向其 project_path）",
+      pc14.ok === true && pc14.standard.branch === "cross-project" && pc14.standard.cross_project.count === 2 && pc14.standard.cross_project.pass === true && Array.isArray(pc14.standard.cross_project.others) && pc14.standard.cross_project.others.length === 1 && normPath(pc14.standard.cross_project.others[0]) === normPath(C14),
+      pc14.standard,
+    );
+  } finally {
+    s14c.close();
+  }
+
+  // ---- REG-01d 回退腿（C7-b 腿二）：无 library_path 的 0.8.0 存量行仍按默认布局命中
+  const R14L = subRoot("r-reglib-legacy");
+  const libL14 = path.join(R14L, ".zcode", "orchestrator", "memory", "lessons.jsonl");
+  writeJsonl(libL14, [
+    seedRow14({ id: "l-20260101-r1lb03", updated_at: now14, type: "error-fix", trigger: "R1LEG 存量行回退触发", fix: "R1LEG 存量行回退修正", confidence: 0, hits: 0, status: "candidate", scope: "project" }),
+  ]);
+  writeJsonl(path.join(R14, "memory", "lessons.jsonl"), [
+    seedRow14({ id: "l-20260101-r1l004", updated_at: now14, type: "error-fix", trigger: "R1LEG 存量行回退触发", fix: "R1LEG 存量行回退修正", confidence: 0, hits: 0, status: "candidate" }),
+  ]);
+  fs.appendFileSync(
+    reg14,
+    JSON.stringify({ root_id: "f0f0f0f0f0f0f0f2", project_path: R14L, first_seen: now14, last_seen: now14, server_version: "0.8.0" }) + "\n",
+  );
+  const s14d = startServerX({ root: R14, args: ["--memory-root", M14] });
+  try {
+    await s14d.call("lessons", { action: "list" });
+    const rows14d = readJsonl(reg14);
+    const pl14 = resultText(await s14d.call("lessons", { action: "promote", id: "l-20260101-r1l004", target: "global" }));
+    ck.ok(
+      "REG-01d 回退腿（存量行兼容）：无 library_path 的 legacy 行按默认布局命中（count=2、others 指向 legacy 项目路径；自定义根 sibling 因 normKey 不同不计入）",
+      rows14d.length === 3 && pl14.ok === true && pl14.standard.cross_project.count === 2 && Array.isArray(pl14.standard.cross_project.others) && pl14.standard.cross_project.others.length === 1 && normPath(pl14.standard.cross_project.others[0]) === normPath(R14L),
+      { rows: rows14d.map((r) => [r.root_id, r.library_path || null]), standard: pl14.standard },
+    );
+  } finally {
+    s14d.close();
+  }
+}
+
+/* ============ 场景 15：W3FIX（saveGlobalLessons base 修复回归——显式 --memory-root
+ *               指向项目根外时 promote target=global 端到端成功〔原炸点转绿〕，
+ *               roots r-memroot-out〔项目根〕/ mem-outside〔根外全端根，兄弟目录〕） ============ */
+{
+  const R15 = subRoot("r-memroot-out");
+  // 根外全端根：置于 BASE.root 下与 R15 平级（resolve 后不在项目根 R15 内）——
+  // 生产缺省 ~/.zcode/orchestrator-memory 同位。修复前 saveGlobalLessons 未传 base
+  // （缺省=存储根 root）→ assertInside 越界门拒写「path escapes base directory」
+  // （场景 14 注记所指 W5 缺陷候选，主控仲裁批准本波修复）。
+  const MEM15 = path.join(BASE.root, "mem-outside");
+  fs.mkdirSync(MEM15, { recursive: true });
+  const gLib15 = path.join(MEM15, "memory", "lessons.jsonl");
+  const lib15 = path.join(R15, "memory", "lessons.jsonl");
+  const now15 = new Date().toISOString();
+  const old15 = new Date(Date.now() - 10 * 86400000).toISOString();
+  const seedRow15 = (over) => ({
+    v: 1,
+    ts: "2026-01-01T00:00:00.000Z",
+    mission_id: null,
+    worker: "t",
+    lesson: "",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+    ...over,
+  });
+  // 项目库两源条：SN（强条 active：conf 0.9/hits 3/龄 10d → 强条分支过）/
+  // SC（同 merge key candidate——合并腿复用 saveGlobalLessons 第二调用点）
+  writeJsonl(lib15, [
+    seedRow15({ id: "l-20260101-w3f001", updated_at: old15, type: "pitfall", trigger: "W3FIX 根外全端根触发", fix: "W3FIX 根外全端根修正", confidence: 0.9, hits: 3, status: "active" }),
+    seedRow15({ id: "l-20260101-w3f002", updated_at: now15, type: "pitfall", trigger: "W3FIX 根外全端根触发", fix: "W3FIX 根外全端根修正", confidence: 0, hits: 0, status: "candidate" }),
+  ]);
+  const s15 = startServerX({ root: R15, args: ["--memory-root", MEM15] });
+  try {
+    await s15.call("lessons", { action: "list" }); // 等启动副作用（名册 upsert）落地
+    const rootId15 = fs.readFileSync(path.join(R15, "root-id"), "utf8").trim();
+    const rowById15 = (file, lid) => readJsonl(file).find((l) => l.id === lid);
+    const rawLineById15 = (file, lid) => fs.readFileSync(file, "utf8").split("\n").find((l) => l.includes(`"${lid}"`));
+
+    // ---- W3FIX-a：新建腿端到端（原炸点）：promote target=global 成功且全端新行落根外库
+    const snBefore = rawLineById15(lib15, "l-20260101-w3f001");
+    const pw15 = resultText(await s15.call("lessons", { action: "promote", id: "l-20260101-w3f001", target: "global" }));
+    ck.ok(
+      "W3FIX-a 显式 --memory-root 根外时 promote target=global 端到端成功：ok/merged=false/target=global + 全端新行落 <根外>/memory/lessons.jsonl（scope=global/source=promote/refs 回链三元组）",
+      pw15.ok === true && pw15.merged === false && pw15.target === "global" && pw15.source_id === "l-20260101-w3f001" && fs.existsSync(gLib15) && (() => { const g = rowById15(gLib15, pw15.id); return Boolean(g) && g.scope === "global" && g.source === "promote" && Array.isArray(g.refs) && g.refs.length === 3 && g.refs[0] === "l-20260101-w3f001" && normPath(g.refs[1]) === normPath(R15) && g.refs[2] === rootId15; })(),
+      pw15,
+    );
+    ck.ok(
+      "W3FIX-b 源条原地不动：项目库 SN 行逐字节不变（§6.7 红线在根外场景同守）",
+      rawLineById15(lib15, "l-20260101-w3f001") === snBefore,
+      null,
+    );
+
+    // ---- W3FIX-c：合并腿（saveGlobalLessons 第二调用点）：同 merge key candidate → merged/hits+1，落点仍根外
+    const pc15 = resultText(await s15.call("lessons", { action: "promote", id: "l-20260101-w3f002", target: "global" }));
+    ck.ok(
+      "W3FIX-c 合并腿在根外全端根同绿：merged=true + 命中 W3FIX-a 新条（hits 1→2、conf 0.7→0.8）且全端库字节落点仍根外",
+      pc15.ok === true && pc15.merged === true && pc15.id === pw15.id && pc15.hits === 2 && approx2(pc15.confidence) === 0.8 && fs.existsSync(gLib15) && rowById15(gLib15, pw15.id).hits === 2,
+      pc15,
+    );
+  } finally {
+    s15.close();
   }
 }
 

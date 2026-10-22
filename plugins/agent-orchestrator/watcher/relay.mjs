@@ -17,8 +17,10 @@
  * 关断码面（W-W §3 / Xds@1045338）：4004 SessionNotFound / 4009 Conflict / 4010
  * DesktopDisconnected / 4011 SessionExpired / 4012 WorkspaceClosed / 4013
  * InvalidMobileConnection → mapClose() 归入降级树四类（degrade.mjs 消费）。
- * 帧形状按 W-W §3 表实现（type 信封 + data.zcode_type L2）；活体集成阶段若与实测有出入，
- * 以实弹修订 SHAPES 注释为准（W-W §11.5 同纪律）。
+ * 帧形状按 relay V2 契约（出站白名单 [auth_init,pair_status_query,data]）：L2 语义整体装
+ * data.payload 内层，关联字段名 requestId（v0.9-L2 findings §4 修订；旧顶层 zcode_type/req_id
+ * 形已废——payload 缺失帧过 L1 白名单但被桌面静默丢=12s 零应答根因）。活体集成阶段若与实测
+ * 有出入，以实弹修订 SHAPES 注释为准（W-W §11.5 同纪律）。
  * 零 npm 依赖；node >= 20。
  */
 import { connectWs } from "./ws.mjs";
@@ -82,8 +84,9 @@ export async function connectRelay({
   session.wireTransport(session.transport); // 先接线再发 auth_init（ack 可在发送后任意时刻到达）
   session.openedAtMs = Date.now();
   const opened = session.beginAuthGate(authAckTimeoutMs);
-  // 步骤 2：auth_init（client_ts 秒制，schema 上限 253402300799；W-W §3）
-  session.send({ type: "auth_init", role: "terminal", device_sid: deviceSid, meta, client_ts: clientTsSec });
+  // 步骤 2：auth_init（client_ts 秒制，schema 上限 253402300799）；strictObject 无 role 字段
+  // （L2-findings §4 修复 4：role 在 token 签发时绑定，越界字段去之防契约严格化）
+  session.send({ type: "auth_init", device_sid: deviceSid, meta, client_ts: clientTsSec });
   const ack = await opened;
   if (!ack || ack.pair_status !== "matched") {
     try { session.close(1000, "auth-not-matched"); } catch { /* 已断 */ }
@@ -105,7 +108,7 @@ export class RelaySession {
   metrics = { noiseData: 0, parseErrors: 0, bytesIn: 0, framesIn: 0, errors: [] };
   #subs = new Set();
   #pendingAuth = null;
-  #pendingReq = null;    // {reqId, zcodeType, resolve, reject, timer}
+  #pendingReq = null;    // {reqId, wantType, resolve, reject, timer}
   #pendingAck = null;    // {seq, resolve, reject, timer}
 
   /** 订阅消息（bypass 噪声过滤的原始分发；bridge/inject 用）。返回退订函数。 */
@@ -126,11 +129,13 @@ export class RelaySession {
     this.transport.send(JSON.stringify(obj));
   }
 
-  /** 带关联请求：默认等下一个匹配 type/zcode_type 的 data 帧或 error 帧。 */
+  /** 带关联请求：默认等下一个匹配 payload.zcode_type/requestId 的 data 帧或 error 帧（L2 findings §4 ①）。 */
   request(obj, { timeoutMs = 10000 } = {}) {
-    const reqId = obj && obj.req_id != null ? obj.req_id : null;
+    const inner = obj && obj.type === "data" && obj.payload && typeof obj.payload === "object" ? obj.payload : null;
+    const reqId = inner && inner.requestId != null ? inner.requestId : (obj && obj.req_id != null ? obj.req_id : null);
+    const zt = inner ? inner.zcode_type : obj && obj.zcode_type;
     const L2R = { "workspace-list-request": "workspace-list-response", "workspace-bridge-open": "workspace-bridge-ready" };
-    const wantType = obj && obj.type === "data" ? (L2R[obj.zcode_type] || obj.zcode_type + "-response") : obj && obj.type;
+    const wantType = inner ? (L2R[zt] || zt + "-response") : (obj && obj.type);
     const p = this.#awaitMatch(wantType, reqId, timeoutMs);
     this.send(obj);
     return p;
@@ -200,12 +205,14 @@ export class RelaySession {
       return;
     }
     if (type === "data") {
-      // 非请求推送=噪声（EXP-3 F4）：计入 metrics；有挂起 L2 请求且 zcode_type 匹配则分发
-      const zt = msg && msg.zcode_type;
+      // 非请求推送=噪声（EXP-3 F4）：计入 metrics；挂起 L2 请求按 payload 内层 zcode_type+requestId
+      // 匹配（L2-findings §4 修复 2：L2 语义在 data.payload 内，contract.ts:36-40）
+      const inner = msg && msg.payload && typeof msg.payload === "object" ? msg.payload : null;
+      const zt = inner && inner.zcode_type;
       const pend = this.#pendingReq;
-      if (pend && pend.wantType === zt && (pend.reqId == null || msg.req_id == null || msg.req_id === pend.reqId)) {
+      if (pend && pend.wantType === zt && inner && (pend.reqId == null || inner.requestId == null || inner.requestId === pend.reqId)) {
         this.#pendingReq = null;
-        pend.resolve(msg);
+        pend.resolve(inner); // 上抛 L2 payload 内层（bridge 消费面直接拿 requestId/result）
         return;
       }
       this.metrics.noiseData++;
@@ -242,6 +249,6 @@ export class RelaySession {
 
 /** ws2 URL 组装（token 只进 query/TLS，禁入任何日志——调用方持 url 的生存期=单事务）。 */
 export function buildWs2Url({ origin, token, mid }) {
-  const o = String(origin || "https://zcode.z.ai").replace(/\/+$/, "");
+  const o = String(origin || "https://zcode.z.ai").replace(/\/+$/, "").replace(/^http/, "ws"); // scheme 转换 https:→wss:/http:→ws:（connectWs 只收 ws/wss；EXP-2b W4r 活体检出 ws-bad-scheme 后主控授权一行修）
   return `${o}/api/v1/remote/ws2?token=${encodeURIComponent(token)}&mid=${encodeURIComponent(mid)}`;
 }

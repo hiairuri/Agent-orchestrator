@@ -30,6 +30,10 @@
  *      恢复；WAKE-02 信号缺失 → 兜底路径不回归（既有唤醒失败告警保持）；WAKE-03
  *      stall 死寂检测无条件保留（fresh D2 覆盖在位下 inflight_stall 照旧开枪——watcher
  *      事件中继看不见无事件死寂，C2 面不随降级关闭，2026-10-22 用户裁决）
+ *   T11 CLN-05（v0.9 C8）：writeSentinelCfg 全 sparse cfg 形状——无 argv 启动 cfg 仅含
+ *      signals 块（v2 十键+桥四键全缺省）、显式单键仅该键+signals（黑盒 spawn server
+ *      两腿）+零漂移对拍锁（server 十键 numArgOpt 无 numArg 遗留 ∧ 哨兵内建默认字面量
+ *      表逐条在位 ∧ 对拍表登记 v0.9.x.md）
  *
  * live 行为无法自动化的部分（手动验收步骤）：
  *   - 平台通知面：全清后主控 0 唤醒（旧版实测三实例三连唤）——需宿主后台任务真跑 3 实例
@@ -44,6 +48,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PLUGIN_DIR, Checker, startServer } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot } from "../harness/temp-root.mjs";
@@ -911,6 +916,93 @@ try {
     } catch {
       /* best effort */
     }
+  }
+
+  /* ---- T11 CLN-05（v0.9 C8）：writeSentinelCfg 全 sparse cfg 形状 ----
+     server 模块加载副作用写 <root>/sentinel.cfg.json；全 sparse 转正后 cfg 仅含
+     显式传入键 + signals block 恒在（v0.9-DESIGN §5 / §16 CLN-05）。独立临时根
+     裸 spawn server（本套件首次直起 server——黑盒哨兵套件不经 MCP 面，裸进程即
+     模块加载；crv5-auth 场景 D spawnForCfg 同款）。零漂移对拍=双文件常量锁
+     （server 十键全 numArgOpt 条件写且 numArg 零遗留 ∧ 哨兵内建默认字面量表逐条
+     在位=转正前 server 默认）+登记面锁（零漂移对拍表在 v0.9.x.md）。 */
+  {
+    const SERVER = path.join(PLUGIN_DIR, "mcp", "server.mjs");
+    const srvSrc = readText(SERVER);
+    const sentSrc = readText(SENTINEL);
+    const v09x = readText(path.join(PLUGIN_DIR, "tests", "assertions", "v0.9.x.md"));
+    const spawnForCfg = (extraArgs, rootDir) => {
+      fs.mkdirSync(rootDir, { recursive: true });
+      const child = spawn(process.execPath, [SERVER, "--root", rootDir, ...extraArgs], {
+        cwd: rootDir,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      kids.push(child);
+      return child;
+    };
+    const waitCfg = async (rootDir) => {
+      const p = path.join(rootDir, "sentinel.cfg.json");
+      const ok = await waitFor(() => fs.existsSync(p), 15000, 50);
+      if (!ok) throw new Error("sentinel.cfg.json not written: " + p);
+      return readJson(p);
+    };
+    const V2_KEYS = [
+      "wake_poll_sec", "wake_grace_min", "answer_grace_min", "stall_grace_min", "crash_grace_min",
+      "coord_idle_min", "cap_window_min", "family_size", "stagger_sec", "max_lifetime_min",
+    ];
+    const ALL_CFG_KEYS = [...V2_KEYS, "wake_timeout_min", "wake_retries", "refire_gap_min", "wake_cap"];
+    const SPARSE_FLAGS = [
+      ["--poll-sec", 1, 3600], ["--sentinel-grace-min", 0.01, 1440], ["--answer-grace-min", 0.01, 1440],
+      ["--stall-grace-min", 0.01, 1440], ["--crash-grace-min", 0.01, 1440], ["--coord-idle-min", 0.01, 1440],
+      ["--cap-window-min", 1, 10080], ["--sentinel-family", 1, 5], ["--stagger-sec", 0, 600],
+      ["--max-lifetime-min", 0.01, 43200],
+    ];
+
+    // CLN-05a：无 argv 启动 → cfg 恰含 signals 块（十键+桥四键全缺省）
+    {
+      const R = path.join(BASE.root, "cln5-a");
+      spawnForCfg([], R);
+      const cfg = await waitCfg(R);
+      const present = ALL_CFG_KEYS.filter((k) => k in cfg);
+      ck.ok(
+        "CLN-05a 全 sparse：无 argv 启动 → cfg 仅含 signals 块（v2 十键+桥四键全缺省，键缺失非占位）",
+        present.length === 0 && cfg.signals && typeof cfg.signals === "object" && cfg.signals.toast_on_abandon === true,
+        { present, keys: Object.keys(cfg) },
+      );
+    }
+    // CLN-05b：显式单键 → 仅该键+signals（仅显式传入键出现）
+    {
+      const R = path.join(BASE.root, "cln5-b");
+      spawnForCfg(["--stall-grace-min", "7"], R);
+      const cfg = await waitCfg(R);
+      const others = ALL_CFG_KEYS.filter((k) => k in cfg && k !== "stall_grace_min");
+      ck.ok(
+        "CLN-05b 全 sparse：显式 --stall-grace-min 7 → cfg 恰为 {stall_grace_min:7}+signals（仅显式传入键出现）",
+        cfg.stall_grace_min === 7 && others.length === 0 && cfg.signals && typeof cfg.signals === "object",
+        { stall: cfg.stall_grace_min, others },
+      );
+    }
+    // CLN-05c：零漂移对拍锁（双文件常量锁+登记面锁）
+    const srvSparse = SPARSE_FLAGS.map(([f]) => ({
+      f,
+      opt: srvSrc.includes(`numArgOpt(argv, "${f}", `),
+      noLegacy: !srvSrc.includes(`numArg(argv, "${f}"`),
+    }));
+    const srvSparseAll = srvSparse.every((x) => x.opt && x.noLegacy);
+    // 哨兵侧内建默认字面量表（逐键=转正前 server 默认，bg-sentinel 源码行转录）
+    const sentDefaults = [
+      '"wake_poll_sec", 60, 1, 3600', '"max_lifetime_min", 1440, 0.01, 43200',
+      '"wake_grace_min", null, 5, 0.01, 1440', '"answer_grace_min", null, 3, 0.01, 1440',
+      '"stall_grace_min", null, 30, 0.01, 1440', '"crash_grace_min", null, 10, 0.01, 1440',
+      '"coord_idle_min", null, 3, 0.01, 1440', '"cap_window_min", null, 120, 1, 10080',
+      '"family_size", null, 3, 1, 5', '"stagger_sec", null, 20, 0, 600',
+    ].map((s) => ({ s, hit: sentSrc.includes(s) }));
+    const sentDefaultsAll = sentDefaults.every((x) => x.hit);
+    const registered = v09x.includes("A-v090-CLN-05") && v09x.includes("零漂移对拍表");
+    ck.ok(
+      "CLN-05c 零漂移对拍锁：server 十键全 numArgOpt 条件写（numArg 零遗留）∧ 哨兵内建默认字面量表逐条在位（=转正前 server 默认，二次 shadow 消除）∧ 零漂移对拍表登记在 v0.9.x.md",
+      srvSparseAll && sentDefaultsAll && registered,
+      { srvSparse: srvSparse.filter((x) => !(x.opt && x.noLegacy)), sentDefaults: sentDefaults.filter((x) => !x.hit).map((x) => x.s), registered },
+    );
   }
 } finally {
   for (const k of kids) {
