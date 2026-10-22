@@ -1,0 +1,1375 @@
+/*!
+ * suites/crv8-memory.mjs —— v0.8 记忆子系统 suite（W1 bootstrap：P0 分发端补门 INJ 族；
+ *   W2 增例：两级库与捎带面 SYNC/GLEAN/INJ-06b 族；W3 增例：ORCHTEMP 与锁 GLEAN-03/05 族）
+ *
+ * 覆盖断言组（断言主句权威 = tests/assertions/v0.8.x.md；设计权威 = v0.8-DESIGN §3/§4/§5/§6/§7/§14）：
+ *   A-v080-INJ-01（§3.1 type 加权不滤除：error-fix 单类命中入选 + 同 overlap 等分时
+ *     error-fix 以 LESSON_TYPE_WEIGHT 排在 pitfall 前，任何 type 不被滤除）
+ *   A-v080-INJ-02（§3.2 INJECT_MIN_SCORE=0.40 阈值门：原始衰减持 score<0.40 不入选
+ *     〔同 overlap 对照 fixture，排除面只归阈值〕；常量默认值锁定——server.mjs 子串 +
+ *     断言登记文件双文件 grep 防漂移，沿 CFG-05 先例）
+ *   A-v080-INJ-03（§3.3 id 渲染：lessonLine 含 [type·id] 段且每行增量 ≤24B；
+ *     无命中/空库整节不出现性质回归 = CR-04「参数缺省时节整体不出现」）
+ *   A-v080-INJ-04（§3.4 lesson_refs 降权闭环：report(blocked, lesson_refs) →
+ *     confidence −0.1 下限 0.1 + counter_refs 记 mission（去重）+ 未知 id 跳过带注；
+ *     触底（confidence=0.1）且 ≥2 个 mission 回引 → housekeep 置 retired
+ *     note="auto: lesson misses"）
+ *   A-v080-INJ-05（§3.4 兼容守卫：无 lesson_refs / 非数组 / 无意义 kind（done）携带 →
+ *     整体忽略，库零变化，旧 worker 零变化）
+ *   A-v080-INJ-06a（§3.5 scope+source 字段：add 写 scope="project"/source="add"、
+ *     report 候选写 source="report"；读端容忍——缺 scope 存量行照常入选（缺省 project
+ *     语义）、未知字段不炸）
+ *   A-v080-INJ-06b（W2，§3.5 双库读端：双库合并选材 + normKey 去重全端优先（同
+ *     merge key 的项目孪生被全端条目遮蔽、恰渲染一次）+ contradicts 不跨库（全端 id
+ *     项目库寻址失败、全端库字节零变化）；场景内附 §7.2 全端节三腿（注入/节序/
+ *     pack_global_section 开关，无独立 §14 ID，随本场景施工））
+ *   A-v080-INJ-07（§3.6 死码清理：server.mjs grep topLessonsBrief/BRIEF_TOP_K/
+ *     BRIEF_MAX_CHARS 零命中；session-start lessons digest 注释无悬空「twin of
+ *     server.mjs」字样且本地副本实现仍在）
+ *   A-v080-INJ-08（CR-04 性质锁：无全端库+无 ORCH.md 临时根下 context_pack 输出与
+ *     0.7.1 基线（git f0142a8）逐字节一致；含 LESSONS 命中场景时唯一预期增量=id 段
+ *     （归一化后逐字节）。W2 起 0.8 侧随 --memory-root 注入空全端目录环境重跑）
+ *   A-v080-SYNC-01..05（W2，§4 ver 同步捎带族：首读 initial 全文（文件不存在时不附
+ *     基线=absent）/外部改写 changed+ver 递增/stat 未变零开销无键/超 120 行截断
+ *     truncated:true+提示行/删除 removed 恰一次后安静）
+ *   A-v080-GLEAN-01（W2，§6.1 门槛纯函数：双门槛真值表（时间门必要+事件门必要）
+ *     +成本排序（源码序断言：时间比较先于事件计数、事件计数先于锁仲裁））
+ *   A-v080-GLEAN-02（W2，§6.1/§9.2 到期信号：双门过 → due:true+reason+brief_path+
+ *     lock_state=idle；锁 active 活 PID → 只附 lock_state=busy 无 due 键且不物化 brief）
+ *   A-v080-GLEAN-04（W2，§9.2 glean-brief.json 物化字段齐全：v/generated_at/root_id/
+ *     project_path/gate（含 measured）/watermarks/orchtemp_pending/counts/projects/
+ *     orch_md/cfg）
+ *   A-v080-GLEAN-06（W2，§6.6 项目名册：启动 upsert 恰一行（五字段齐全）/复见原地
+ *     更新 last_seen 不重复行且 first_seen 保留/异 root 追加/带锁（源码序 + 活 PID
+ *     占锁时 best-effort 零变化行为腿）/--memory-root 注入生效（不落缺省重定向））
+ *   A-v080-GLEAN-03（W3，§6.4/§9.3 归敛锁状态机全腿：wx 抢锁原子（EEXIST 互斥）/
+ *     活 PID 占用拒接管（busy 即退零阻塞）/死 PID 回收/绝对过期 1.5h 回收 +
+ *     cfg.lock_stale_hours 覆盖接线/done 态保留且 finished_at 优先、mtime 兜底
+ *     （mtime 双用）/两锁不互嵌源码面（server 对归敛锁只读判锁）/cfg junk 逐键兜底）
+ *   A-v080-GLEAN-05（W3，§5 stage 写入形状与 ORCHTEMP 候选流转：source=
+ *     orchestrator/candidate/conf=0/hits=0 + note 摆放提示 + escape 先于截断 +
+ *     type 缺省 pitfall/坏 type 空 trigger 严格报错/不做 findMergeTarget 合并/
+ *     candidate 不参与注入（纯 stage 库 LESSONS 整节不出现）/brief.orchtemp_pending
+ *     恰含 stage 条（report 候选不入）/retire 消费置状态内容逐字节不变/§9.4 schema
+ *     描述行逐字在案）
+ *   A-v080-GLEAN-07（W5，§6.7 promote target=global：晋升标准两分支证据随响应
+ *     （跨项目复现≥2〔名册 sibling 库同 normKey 含 candidate〕/单库强条
+ *     score≥0.7∧hits≥3∧龄≥7d）+ 全端 findMergeTarget 合并/新建两腿（scope=global/
+ *     source=promote/conf 0.7/hits 1）+ refs 回链三元组〔源条 id, 源项目路径,
+ *     root_id〕+ 项目库源条逐字节原地不动 + 缺省 target=project 现行为零变化 +
+ *     坏 target 严格报错 + schema 枚举在案；标准证据非 server 门——判定权在归敛
+ *     〔§6.7「归敛自行判定并在报告列证据」，偏差声明见断言文件 §0 W5 条〕）
+ *   A-v080-GLEAN-08（W5，§3.5/§6.7 双库去重终验（晋升场景）：promote 后同 normKey
+ *     项目源条被全端新条遮蔽（源 id 不渲染、晋升 id 恰渲染一次）+ 晋升后注入可见
+ *     （pack LESSONS 渲染全端新条）+ 读端零写（两库字节零变化））
+ *
+ * W2 落位注记：全端库缺省 ~/.zcode/orchestrator-memory；suite 临时根（os.tmpdir() 下）
+ *   的缺省重定向=<临时根>/orchestrator-memory（root.txt「test root must not stick」同族
+ *   刻出，防套件污染真实家目录）——SYNC/GLEAN-01/02/04/INJ-06b 场景即用该缺省落点布景，
+ *   GLEAN-06 场景经 --memory-root 显式注入另测。
+ *
+ * 运行方式：node tests/suites/crv8-memory.mjs [--root <临时根父目录>]
+ * 前置：node >= 20；PATH 上有 git（INJ-08 基线导出）；无网。suite 注册行归主控
+ *   G 胶水波收口（run-all REGISTRY，§13.2）——本套未注册前 run-all 不含其断言属预期。
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { startServer, Checker, DEFAULT_SERVER, PLUGIN_DIR, TESTS_DIR, PRE } from "../harness/jsonrpc-client.mjs";
+import { makeTempRoot, parseRootArg, blankMission, writeBoardSeed } from "../harness/temp-root.mjs";
+import { exportFileFromGit, repoRoot } from "../harness/git-fixture.mjs";
+
+const ck = new Checker("crv8-memory");
+const BASE = makeTempRoot({ prefix: "orch-crv8-", root: parseRootArg() || undefined });
+const HOOKS_SRC = path.join(PLUGIN_DIR, "hooks", "session-start.mjs");
+const ASSERT_DOC = path.join(TESTS_DIR, "assertions", "v0.8.x.md");
+
+const resultText = (r) => r.json ?? { _raw: r.text };
+const subRoot = (name) => {
+  const dir = path.join(BASE.root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
+const readPack = (rootDir, mid, file = "pack.md") => {
+  const p = path.join(rootDir, "packs", mid, file);
+  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+};
+const readLessons = (rootDir) =>
+  fs
+    .readFileSync(path.join(rootDir, "memory", "lessons.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+const approx2 = (x) => Number(Number(x).toFixed(2));
+const writeJsonl = (file, rows) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+};
+const readJsonl = (file) =>
+  fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+const normPath = (p) => path.resolve(String(p)).toLowerCase();
+
+/**
+ * W2 rig：harness startServer 的扩展参数孪生（--memory-root 注入用）。jsonrpc-client.mjs
+ * 不在本波写集内，故本套自带 spawn——按行 JSON-RPC 协议与 harness 逐字同款。
+ */
+function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs = 20000 } = {}) {
+  const child = spawn(process.execPath, [serverPath, "--root", root, ...args], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let buf = "";
+  const pending = new Map();
+  child.stdout.on("data", (d) => {
+    buf += d.toString();
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (msg && msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve, timer } = pending.get(msg.id);
+        clearTimeout(timer);
+        pending.delete(msg.id);
+        resolve(msg);
+      }
+    }
+  });
+  let nextId = 1;
+  const request = (method, params) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++;
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error("timeout " + method));
+      }, timeoutMs);
+      pending.set(id, { resolve, timer });
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }) + "\n");
+    });
+  const call = async (name, args2) => {
+    const r = await request("tools/call", { name: PRE + name, arguments: args2 });
+    const result = r.result || {};
+    const text = (result.content ?? []).map((c) => c.text).join("\n");
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      /* 非 JSON 文本（错误文案） */
+    }
+    return { isError: result.isError === true, text, json };
+  };
+  const close = () => {
+    try {
+      child.stdin.end();
+    } catch {}
+    try {
+      child.kill();
+    } catch {}
+  };
+  return { request, call, close };
+}
+
+/* ============ 场景 1：INJ-01 / INJ-03 / INJ-06a（root r-inj01） ============ */
+{
+  const R1 = subRoot("r-inj01");
+  const s1 = startServer({ root: R1 });
+  try {
+    // ---- INJ-03c（CR-04 性质）：空库 → LESSONS 节整体不出现
+    await s1.call("context_pack", { mission_id: "m-empty", title: "空库包", task: "空库回归任务" });
+    const packEmpty = readPack(R1, "m-empty");
+    ck.ok("INJ-03c 空库 pack 无 LESSONS 节（CR-04 节整体不出现）", Boolean(packEmpty) && !packEmpty.includes("## LESSONS"), packEmpty && packEmpty.split("\n").filter((l) => l.startsWith("## ")));
+
+    // 无命中填充条目在库 → 无 token 交集同样整节不出现
+    await s1.call("lessons", { action: "add", type: "env-fact", trigger: "无关触发词XYZQQ", fix: "无关修正" });
+    await s1.call("context_pack", { mission_id: "m-nomatch", title: "无命中包", task: "完全不相关任务码" });
+    const packNoMatch = readPack(R1, "m-nomatch");
+    ck.ok("INJ-03c 无 token 交集 pack 无 LESSONS 节（性质回归）", Boolean(packNoMatch) && !packNoMatch.includes("## LESSONS"), packNoMatch && packNoMatch.split("\n").filter((l) => l.startsWith("## ")));
+
+    // ---- INJ-01a：error-fix 单类命中 → 入选不滤除
+    const addEf = await s1.call("lessons", {
+      action: "add",
+      type: "error-fix",
+      trigger: "AP1PROBE 构建失败排查",
+      fix: "清理缓存后重跑构建",
+    });
+    const efId = resultText(addEf).id;
+    ck.ok("INJ-01a 前置 lessons add ok（error-fix）", addEf.isError !== true && Boolean(efId), addEf.text.slice(0, 80));
+    const taskEf = "AP1PROBE 构建失败排查任务";
+    await s1.call("context_pack", { mission_id: "m-ef", title: "单类命中包", task: taskEf });
+    const packEf = readPack(R1, "m-ef");
+    const efLine = (packEf || "").split("\n").find((l) => l.startsWith("- [error-fix·"));
+    ck.ok("INJ-01a 仅 error-fix 命中 → 入选不被滤除", Boolean(efLine), packEf && packEf.split("\n").filter((l) => l.startsWith("## LESSONS") || l.startsWith("- [")));
+
+    // ---- INJ-03a/b：id 段渲染 + 每行增量 ≤24B
+    ck.ok(
+      "INJ-03a lessonLine 含 [type·id] 段（l-YYYYMMDD-6hex）",
+      Boolean(efLine) && /^- \[error-fix·l-\d{8}-[0-9a-f]{6}\] 触发：.+\n  修正：/.test(packEf.slice(packEf.indexOf(efLine))),
+      efLine,
+    );
+    const efBase = efLine.replace(/·l-\d{8}-[0-9a-f]{6}/, "");
+    const incBytes = efLine.length - efBase.length;
+    ck.ok("INJ-03b id 段每行增量 ≤24B（实测 " + incBytes + "B）", incBytes >= 1 && incBytes <= 24, { incBytes, efLine });
+    ck.ok("INJ-03b id 与库内条目一致（回引锚可达）", Boolean(efLine) && efLine.includes(`·${efId}]`), { efId, efLine });
+
+    // ---- INJ-01b：同 overlap 等分 → 权重排序 error-fix 在 pitfall 前；两 type 均在（不滤除）
+    await s1.call("lessons", { action: "add", type: "pitfall", trigger: "AP1PROBE 构建失败排查", fix: "清理缓存后重跑构建" });
+    await s1.call("context_pack", { mission_id: "m-both", title: "双类命中包", task: taskEf });
+    const packBoth = readPack(R1, "m-both");
+    const iEf = (packBoth || "").indexOf("- [error-fix·");
+    const iPf = (packBoth || "").indexOf("- [pitfall·");
+    ck.ok("INJ-01b 两 type 均入选（加权不滤除）", iEf >= 0 && iPf >= 0, packBoth && packBoth.split("\n").filter((l) => l.startsWith("- [")));
+    ck.ok("INJ-01b 等 overlap 等分时 error-fix（权重 1.0）排在 pitfall（0.9）前", iEf >= 0 && iPf >= 0 && iEf < iPf, { iEf, iPf });
+
+    // ---- INJ-06a：scope/source 写入形状
+    const rows1 = readLessons(R1);
+    const toolRows = rows1.filter((l) => l.id === efId || l.type === "pitfall");
+    ck.ok(
+      "INJ-06a add 写 scope=project + source=add",
+      toolRows.length >= 2 && toolRows.every((l) => l.scope === "project" && l.source === "add"),
+      toolRows.map((l) => ({ id: l.id, scope: l.scope, source: l.source })),
+    );
+    // report(done, lessons) 候选行 → source=report（board upsert mission 无派发
+    // token，避开 V6-09 fail-closed token 门；context_pack 铸发的 m-* 带 token）
+    await s1.call("board", { action: "upsert", mission: { id: "m-cand", title: "候选上报 mission" } });
+    const repDone = await s1.call("report", {
+      mission_id: "m-cand",
+      worker: "w-cand",
+      kind: "done",
+      summary: "候选教训上报",
+      lessons: [{ type: "error-fix", trigger: "CANDPROBE 候选教训触发", fix: "候选教训修正" }],
+    });
+    const candRow = readLessons(R1).find((l) => String(l.trigger || "").includes("CANDPROBE"));
+    ck.ok(
+      "INJ-06a report 候选写 source=report + scope=project（status=candidate）",
+      repDone.isError !== true && Boolean(candRow) && candRow.source === "report" && candRow.scope === "project" && candRow.status === "candidate",
+      candRow && { source: candRow.source, scope: candRow.scope, status: candRow.status },
+    );
+
+    // ---- INJ-06a：读端容忍——存量行缺 scope/source 照常入选（缺省 project）+ 未知字段不炸
+    const tolRow = {
+      v: 1,
+      id: "l-20260101-ffffff",
+      ts: "2026-01-01T00:00:00.000Z",
+      updated_at: new Date().toISOString(),
+      mission_id: null,
+      worker: "legacy",
+      type: "env-fact",
+      trigger: "TOLPROBE 未知字段容忍",
+      lesson: "",
+      fix: "容忍未知字段",
+      confidence: 0.9,
+      hits: 9,
+      status: "active",
+      refs: [],
+      superseded_by: null,
+      counter_refs: [],
+      note: null,
+      future_field: { unknown: true },
+    };
+    fs.appendFileSync(path.join(R1, "memory", "lessons.jsonl"), JSON.stringify(tolRow) + "\n");
+    const listTol = resultText(await s1.call("lessons", { action: "list", status: "all", q: "TOLPROBE" }));
+    ck.ok("INJ-06a 缺 scope 存量行 + 未知字段 → lessons list 不炸", (listTol.lessons || []).length === 1, listTol.lessons);
+    await s1.call("context_pack", { mission_id: "m-tol", title: "容忍包", task: "TOLPROBE 未知字段容忍" });
+    const packTol = readPack(R1, "m-tol");
+    ck.ok(
+      "INJ-06a 缺 scope 行照常入选（缺省 project 语义）",
+      Boolean(packTol) && packTol.includes("- [env-fact·l-20260101-ffffff]"),
+      packTol && packTol.split("\n").filter((l) => l.startsWith("- [")),
+    );
+  } finally {
+    s1.close();
+  }
+}
+
+/* ============ 场景 2：INJ-02（root r-inj02，手写库对照 fixture + 常量锁） ============ */
+{
+  const R2 = subRoot("r-inj02");
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 40 * 86400000).toISOString();
+  const baseRow = {
+    v: 1,
+    ts: nowIso,
+    mission_id: null,
+    worker: "t",
+    type: "pitfall",
+    trigger: "INJ2TOKEN 构建缓存损坏检测",
+    lesson: "",
+    fix: "INJ2TOKEN 重建缓存目录",
+    confidence: 0.6,
+    hits: 1,
+    status: "active",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+  };
+  // 同 trigger 同 overlap 同 type：唯一差异 = updated_at（score 衰减）。
+  // FRESH score=0.6 ≥0.40 入选；OLD score=0.6×exp(-40/30)≈0.158 <0.40 落门。
+  const rows2 = [
+    { ...baseRow, id: "l-20260101-aaa001", updated_at: nowIso },
+    { ...baseRow, id: "l-20260101-aaa002", updated_at: oldIso },
+  ];
+  fs.mkdirSync(path.join(R2, "memory"), { recursive: true });
+  fs.writeFileSync(path.join(R2, "memory", "lessons.jsonl"), rows2.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const s2 = startServer({ root: R2 });
+  try {
+    await s2.call("context_pack", { mission_id: "m-gate", title: "阈值门包", task: "INJ2TOKEN 阈值门回归验证" });
+    const packGate = readPack(R2, "m-gate");
+    ck.ok(
+      "INJ-02 score<0.40 不入选（OLD≈0.158 落门）而达标行（0.60）入选；同 overlap 排除面只归阈值",
+      Boolean(packGate) && packGate.includes("l-20260101-aaa001") && !packGate.includes("l-20260101-aaa002") && packGate.includes("## LESSONS"),
+      packGate && packGate.split("\n").filter((l) => l.startsWith("- [")),
+    );
+
+    // 常量默认值锁定（双文件子串，沿 CFG-05 先例）：server.mjs 常量 + 断言登记文件
+    const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    const docSrc = fs.existsSync(ASSERT_DOC) ? fs.readFileSync(ASSERT_DOC, "utf8") : "";
+    ck.ok("INJ-02 常量锁 server.mjs：INJECT_MIN_SCORE = 0.40 在位", /const INJECT_MIN_SCORE = 0\.40;/.test(srvSrc));
+    ck.ok(
+      "INJ-02 常量锁 server.mjs：LESSON_TYPE_WEIGHT 四值在位（error-fix 1.0 / pitfall 0.9 / env-fact 0.8 / preference 0.7）",
+      srvSrc.includes('const LESSON_TYPE_WEIGHT = { "error-fix": 1.0, "pitfall": 0.9, "env-fact": 0.8, "preference": 0.7 };'),
+    );
+    ck.ok("INJ-02 常量锁登记面：v0.8.x.md 登记 INJECT_MIN_SCORE=0.40（防漂移第二文件）", docSrc.includes("INJECT_MIN_SCORE=0.40"), ASSERT_DOC);
+  } finally {
+    s2.close();
+  }
+}
+
+/* ============ 场景 3：INJ-04 / INJ-05（root r-inj04，board 预种 mission） ============ */
+{
+  const R3 = subRoot("r-inj04");
+  const mids = ["m-d1", "m-d2", "m-d3", "m-d4", "m-d5", "m-d6", "m-n1", "m-n2", "m-n3"];
+  writeBoardSeed(R3, mids.map((id) => blankMission({ id, title: "INJ04 " + id })));
+  const s3 = startServer({ root: R3 });
+  try {
+    const addX = await s3.call("lessons", { action: "add", type: "pitfall", trigger: "MISSPROBE 误导教训", fix: "不要照做" });
+    const xid = resultText(addX).id;
+    const rowOf = () => readLessons(R3).find((l) => l.id === xid);
+
+    // ---- INJ-05：守卫兼容（无 lesson_refs / 非数组 / 无意义 kind）→ 整体忽略零变化；
+    //      响应面按 CR-04 条件键纪律——零降权时 lessons_demoted 等键整体不出现
+    const rNone = resultText(await s3.call("report", { mission_id: "m-n1", worker: "w5", kind: "blocked", question: "q?", summary: "无 refs" }));
+    let row = rowOf();
+    ck.ok(
+      "INJ-05a 无 lesson_refs 的 blocked report → 零降权零变化（条件键不出现）",
+      !("lessons_demoted" in rNone) && !("lessons_refs_retired" in rNone) && !("lessons_refs_note" in rNone) && approx2(row.confidence) === 0.6 && Array.isArray(row.counter_refs) && row.counter_refs.length === 0,
+      { respKeys: Object.keys(rNone), row: row && { conf: row.confidence, cr: row.counter_refs } },
+    );
+    const rBad = resultText(await s3.call("report", { mission_id: "m-n2", worker: "w5", kind: "blocked", question: "q?", summary: "非数组 refs", lesson_refs: xid }));
+    row = rowOf();
+    ck.ok(
+      "INJ-05b lesson_refs 非数组（Array.isArray 守卫）→ 整体忽略",
+      !("lessons_demoted" in rBad) && approx2(row.confidence) === 0.6 && row.counter_refs.length === 0,
+      { respKeys: Object.keys(rBad), row: row && { conf: row.confidence, cr: row.counter_refs } },
+    );
+    const rDone = resultText(await s3.call("report", { mission_id: "m-n3", worker: "w5", kind: "done", summary: "done 携带无意义", lesson_refs: [xid] }));
+    row = rowOf();
+    ck.ok(
+      "INJ-05c done 携带 lesson_refs（仅 blocked/question 有意义）→ 忽略",
+      !("lessons_demoted" in rDone) && approx2(row.confidence) === 0.6 && row.counter_refs.length === 0,
+      { respKeys: Object.keys(rDone), row: row && { conf: row.confidence, cr: row.counter_refs } },
+    );
+
+    // ---- INJ-04：blocked 回引降权闭环（5 个 mission 逐次 −0.1 至触底 → housekeep 退役）
+    const expectConf = [0.5, 0.4, 0.3, 0.2];
+    for (let i = 1; i <= 4; i++) {
+      const r = resultText(await s3.call("report", { mission_id: `m-d${i}`, worker: "w4", kind: "blocked", question: "q?", summary: `回引 ${i}`, lesson_refs: [xid] }));
+      row = rowOf();
+      ck.ok(
+        `INJ-04a 第 ${i} 次回引：confidence −0.1（=${expectConf[i - 1]}）+ counter_refs 记 mission m-d${i}`,
+        r.lessons_demoted === 1 && row.status === "active" && approx2(row.confidence) === expectConf[i - 1] && row.counter_refs.includes(`m-d${i}`) && row.counter_refs.length === i,
+        { resp: r.lessons_demoted, row: row && { conf: row.confidence, cr: row.counter_refs, st: row.status } },
+      );
+    }
+    const r5 = resultText(await s3.call("report", { mission_id: "m-d5", worker: "w4", kind: "blocked", question: "q?", summary: "回引触底", lesson_refs: [xid] }));
+    row = rowOf();
+    ck.ok(
+      "INJ-04b 触底（confidence=0.1 下限）+ ≥2 mission 回引 → housekeep 置 retired note=auto: lesson misses",
+      r5.lessons_demoted === 1 && r5.lessons_refs_retired === 1 && row.status === "retired" && row.note === "auto: lesson misses" && approx2(row.confidence) === 0.1 && row.counter_refs.length === 5,
+      { resp: { d: r5.lessons_demoted, ret: r5.lessons_retired }, row: row && { conf: row.confidence, cr: row.counter_refs, st: row.status, note: row.note } },
+    );
+
+    // ---- INJ-04 补腿：未知 id 跳过带注（不炸 blocked report）；已触底条目 floor 不再下探
+    const rUk = resultText(
+      await s3.call("report", { mission_id: "m-d6", worker: "w4", kind: "blocked", question: "q?", summary: "含未知 id", lesson_refs: [xid, "l-19700101-000000"] }),
+    );
+    row = rowOf();
+    ck.ok(
+      "INJ-04c 未知 id 跳过并回注（lessons_refs_note），其余照常降权",
+      rUk.lessons_demoted === 1 && !("lessons_refs_retired" in rUk) && typeof rUk.lessons_refs_note === "string" && rUk.lessons_refs_note.includes("l-19700101-000000"),
+      { resp: { d: rUk.lessons_demoted, note: rUk.lessons_refs_note } },
+    );
+    ck.ok(
+      "INJ-04d 触底条目再回引：confidence 停在下限 0.1（floor），counter_refs 去重记 m-d6",
+      approx2(row.confidence) === 0.1 && row.counter_refs.includes("m-d6"),
+      row && { conf: row.confidence, cr: row.counter_refs },
+    );
+  } finally {
+    s3.close();
+  }
+}
+
+/* ============ 场景 4：INJ-07（死码清理源码静态面，无 server） ============ */
+{
+  const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  const hookSrc = fs.readFileSync(HOOKS_SRC, "utf8");
+  ck.ok("INJ-07a server.mjs topLessonsBrief 零命中（死码已删）", !srvSrc.includes("topLessonsBrief"));
+  ck.ok("INJ-07b server.mjs BRIEF_TOP_K/BRIEF_MAX_CHARS 零命中（随死码删）", !srvSrc.includes("BRIEF_TOP_K") && !srvSrc.includes("BRIEF_MAX_CHARS"));
+  const digestLine = hookSrc.split("\n").find((l) => l.includes("lessons digest"));
+  ck.ok("INJ-07c session-start lessons digest 注释无悬空「twin of server.mjs」", Boolean(digestLine) && !digestLine.includes("twin of server.mjs"), digestLine);
+  ck.ok("INJ-07d session-start 本地 topLessonsBrief 唯一副本实现仍在（top-3 初始装载不变）", hookSrc.includes("function topLessonsBrief") && hookSrc.includes("const BRIEF_TOP_K = 3"));
+}
+
+/* ============ 场景 5：INJ-08（CR-04 性质锁：与 0.7.1 基线逐字节对拍） ============ */
+{
+  const SCRATCH = subRoot("scratch-baseline");
+  let baseline = null;
+  try {
+    baseline = exportFileFromGit("f0142a8", repoRoot(), "plugins/agent-orchestrator/mcp/server.mjs", SCRATCH);
+    ck.ok("INJ-08a 0.7.1 基线导出（git f0142a8）", Boolean(baseline), baseline);
+  } catch (e) {
+    ck.ok("INJ-08a 0.7.1 基线导出（git f0142a8）", false, String(e));
+  }
+  if (baseline) {
+    // 前置（W2 重跑口径）：0.8 侧随 --memory-root 注入空全端目录环境（无全端库、
+    // 无 ORCH.md 临时根）；0.7.1 基线不识别该旗标（parseArgValue 只寻 --root，忽略）。
+    const T71 = subRoot("t71");
+    const T80 = subRoot("t80");
+    const MEM80 = subRoot("mem80-empty");
+    // 归一化：token（两代 server 各自随机）+ lessonLine id 段（v0.8 唯一预期增量，
+    // 替换为空串后与 0.7.1 的 `[type]` 形状逐字节对齐——增量本体由 INJ-08c 钉死）
+    const norm = (s) =>
+      String(s)
+        .replace(/\[token\] [0-9a-f]{4,32}/g, "[token] X")
+        .replace(/·l-\d{8}-[0-9a-f]{6}/g, "");
+    const s71 = startServer({ serverPath: baseline, root: T71 });
+    const s80 = startServerX({ root: T80, args: ["--memory-root", MEM80] });
+    try {
+      // —— 子例 A：空库（无 LESSONS 节）逐字节
+      const argsA = { mission_id: "m-byte", title: "字节对拍", task: "字节对拍回归任务", read_first: ["docs/a.md"], rules: ["R1"], upstream_context: "上游对拍行" };
+      await s71.call("context_pack", argsA);
+      await s80.call("context_pack", argsA);
+      const pA71 = readPack(T71, "m-byte");
+      const pA80 = readPack(T80, "m-byte");
+      ck.ok("INJ-08b 空库 context_pack 与 0.7.1 逐字节一致（token 归一化）", Boolean(pA71) && Boolean(pA80) && norm(pA71) === norm(pA80));
+
+      // —— 子例 B：单条命中 lesson——唯一预期增量 = lessonLine id 段
+      const addB = { action: "add", type: "pitfall", trigger: "BYTEPROBE 对拍触发词", fix: "对拍修正动作" };
+      await s71.call("lessons", addB);
+      await s80.call("lessons", addB);
+      const argsB = { mission_id: "m-byte2", title: "字节对拍二", task: "BYTEPROBE 对拍任务" };
+      await s71.call("context_pack", argsB);
+      await s80.call("context_pack", argsB);
+      const pB71 = readPack(T71, "m-byte2");
+      const pB80 = readPack(T80, "m-byte2");
+      ck.ok(
+        "INJ-08c 命中场景：0.7.1 渲染无 id 段、v0.8 渲染含 id 段（预期增量恰为 id）",
+        Boolean(pB71) && Boolean(pB80) && pB71.includes("- [pitfall] 触发：") && !pB71.includes("·l-") && pB80.includes("- [pitfall·l-"),
+      );
+      ck.ok("INJ-08d 命中场景归一化 id 段后与 0.7.1 逐字节一致（CR-04 性质锁）", Boolean(pB71) && Boolean(pB80) && norm(pB71) === norm(pB80));
+    } finally {
+      s71.close();
+      s80.close();
+    }
+  }
+}
+
+/* ============ 场景 6：SYNC-01..05（§4 ver 同步捎带，root r-sync，缺省 temp 重定向） ============ */
+{
+  const R6 = subRoot("r-sync");
+  const orchMd = path.join(R6, "ORCH.md"); // §4.1：<存储根>/ORCH.md
+  const s6 = startServer({ root: R6 });
+  try {
+    // 原始 result 访问通道（orch_memory 挂在 JSON-RPC result 顶层，content 之外）
+    const rawCall = (name, args) => s6.request("tools/call", { name: PRE + name, arguments: args });
+
+    // ---- SYNC-01a：文件不存在 → 不附且基线=absent
+    let r = await rawCall("lessons", { action: "list" });
+    ck.ok(
+      "SYNC-01a 进程首次调用且 ORCH.md 不存在 → 响应无 orch_memory 键（基线=absent）",
+      r.result && !("orch_memory" in r.result),
+      r.result && Object.keys(r.result),
+    );
+
+    // ---- SYNC-01b：文件出现 → 首次调用附 initial 全文（ver 从头部解析）
+    fs.writeFileSync(
+      orchMd,
+      "<!-- orch-memory ver=1 updated=2026-10-22T08:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- SYNC1PROBE 初始装载行\n",
+    );
+    r = await rawCall("lessons", { action: "list" });
+    const om1 = r.result && r.result.orch_memory && r.result.orch_memory.orch_md;
+    ck.ok(
+      "SYNC-01b 出现后首次调用附 orch_md reason=initial + 全文 + truncated:false",
+      Boolean(om1) && om1.reason === "initial" && om1.truncated === false && typeof om1.content === "string" && om1.content.includes("SYNC1PROBE 初始装载行") && om1.bytes > 0,
+      om1 && { reason: om1.reason, trunc: om1.truncated, bytes: om1.bytes },
+    );
+    ck.ok(
+      "SYNC-01c ver/updated_at 从 orch-memory 头部解析透传（ver=1）",
+      Boolean(om1) && om1.ver === 1 && om1.updated_at === "2026-10-22T08:00:00.000Z",
+      om1 && { ver: om1.ver, updated_at: om1.updated_at },
+    );
+
+    // ---- SYNC-03：stat 未变 → 无 orch_memory 键（零开销路径）
+    r = await rawCall("lessons", { action: "list" });
+    ck.ok("SYNC-03 stat 未变 → 响应无 orch_memory 键", r.result && !("orch_memory" in r.result), r.result && Object.keys(r.result));
+
+    // ---- SYNC-02：外部改写（bytes 变化，V7-01 双因子）→ changed + ver 递增 + 新全文
+    fs.writeFileSync(
+      orchMd,
+      "<!-- orch-memory ver=2 updated=2026-10-22T09:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- SYNC2PROBE 改写后的行\n",
+    );
+    r = await rawCall("lessons", { action: "list" });
+    const om2 = r.result && r.result.orch_memory && r.result.orch_memory.orch_md;
+    ck.ok(
+      "SYNC-02 外部改写 → reason=changed + ver 递增（=2）+ 新全文替换",
+      Boolean(om2) && om2.reason === "changed" && om2.ver === 2 && om2.content.includes("SYNC2PROBE 改写后的行") && !om2.content.includes("SYNC1PROBE"),
+      om2 && { reason: om2.reason, ver: om2.ver },
+    );
+
+    // ---- SYNC-04：超 120 行 → 截断 + truncated:true + 提示行
+    const longDoc = [
+      "<!-- orch-memory ver=3 updated=2026-10-22T10:00:00.000Z -->",
+      "# ORCH.md",
+      ...Array.from({ length: 130 }, (_, i) => `- 行${i + 1} SYNC4PROBE`),
+    ].join("\n");
+    fs.writeFileSync(orchMd, longDoc + "\n");
+    r = await rawCall("lessons", { action: "list" });
+    const om4 = r.result && r.result.orch_memory && r.result.orch_memory.orch_md;
+    const om4Lines = om4 && om4.content ? om4.content.split("\n") : [];
+    ck.ok(
+      "SYNC-04 超 120 行 → truncated:true + 内容截到帽内（120 行+提示 ≤121）+ 提示行在案 + 帽外行不出现",
+      Boolean(om4) && om4.truncated === true && om4Lines.length <= 121 && om4Lines.some((l) => l.includes("超帽")) && om4.content.includes("行118 SYNC4PROBE") && !om4.content.includes("行130 SYNC4PROBE"),
+      om4 && { trunc: om4.truncated, lines: om4Lines.length },
+    );
+
+    // ---- SYNC-05：删除 → removed 恰一次，随后安静
+    fs.unlinkSync(orchMd);
+    r = await rawCall("lessons", { action: "list" });
+    const om5 = r.result && r.result.orch_memory && r.result.orch_memory.orch_md;
+    ck.ok(
+      "SYNC-05a 文件删除 → removed 捎带恰一次（无 content/ver/bytes/truncated 键）",
+      Boolean(om5) && om5.reason === "removed" && !("content" in om5) && !("ver" in om5) && !("bytes" in om5) && !("truncated" in om5),
+      om5,
+    );
+    r = await rawCall("lessons", { action: "list" });
+    ck.ok("SYNC-05b removed 后归于安静（再调用无 orch_memory）", r.result && !("orch_memory" in r.result));
+  } finally {
+    s6.close();
+  }
+}
+
+/* ============ 场景 7：GLEAN-01（§6.1 门槛真值表+成本排序，root r-glean1） ============ */
+{
+  const R7 = subRoot("r-glean1");
+  const MEM7 = path.join(R7, "orchestrator-memory"); // 临时根缺省重定向落点
+  const cfg7 = path.join(MEM7, "glean.cfg.json");
+  const lib7 = path.join(R7, "memory", "lessons.jsonl");
+  const lock7 = path.join(MEM7, "glean-lock.json");
+  const brief7 = path.join(MEM7, "glean-brief.json");
+  const g1Row = (i) => ({
+    v: 1,
+    id: `l-20260101-g1${String(i).padStart(2, "0")}`,
+    ts: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    mission_id: null,
+    worker: "t",
+    type: "pitfall",
+    trigger: `G1PROBE 触发${i}`,
+    lesson: "",
+    fix: `G1PROBE 修正${i}`,
+    confidence: 0.9,
+    hits: 5,
+    status: "active",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+  });
+  const s7 = startServer({ root: R7 });
+  try {
+    const rawCall = (name, args) => s7.request("tools/call", { name: PRE + name, arguments: args });
+    // 臂 1：时间门不过（done 锁 finished_at=now，idle_hours=9999）∧ 事件足（new_events=0）→ 不附不物化
+    fs.mkdirSync(MEM7, { recursive: true }); // spawn 竞态防御：不依赖 server 启动侧先建目录
+    writeJsonl(lib7, [g1Row(1)]);
+    fs.writeFileSync(
+      lock7,
+      JSON.stringify({ v: 1, state: "done", pid: 1, finished_at: new Date().toISOString(), watermarks: { global_lines: 0, projects: {} } }),
+    );
+    fs.writeFileSync(cfg7, JSON.stringify({ idle_hours: 9999, new_events: 0 }));
+    let r = await rawCall("lessons", { action: "list" });
+    ck.ok(
+      "GLEAN-01a 时间门不过 → 无 glean 信号且不物化 brief（事件条件已满足也不放行）",
+      r.result && !("orch_memory" in r.result) && !fs.existsSync(brief7),
+      { respKeys: r.result && Object.keys(r.result), brief: fs.existsSync(brief7) },
+    );
+    // 臂 2：时间门过（idle_hours=0）∧ 事件门不过（1 < 99）→ 不附不物化
+    fs.writeFileSync(cfg7, JSON.stringify({ idle_hours: 0, new_events: 99 }));
+    r = await rawCall("lessons", { action: "list" });
+    ck.ok(
+      "GLEAN-01b 事件门不过 → 无 glean 信号且不物化 brief",
+      r.result && !("orch_memory" in r.result) && !fs.existsSync(brief7),
+      { respKeys: r.result && Object.keys(r.result), brief: fs.existsSync(brief7) },
+    );
+    // 成本排序（决议 D4：先查时间→数事件→抢锁）——源码序机械断言
+    // （锚点取语句级：解构行含裸 lockBusy/countEvents 标识符，不能用裸名匹配）
+    const srvSrc7 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    const gateSrc = srvSrc7.slice(srvSrc7.indexOf("function evaluateGleanGate"), srvSrc7.indexOf("function materializeGleanBrief"));
+    const iTime = gateSrc.indexOf("if (!(idleH > Number(cfg.idle_hours)))");
+    const iEvents = gateSrc.indexOf("const events = countEvents()");
+    const iLock = gateSrc.indexOf('if (lockBusy) return');
+    ck.ok(
+      "GLEAN-01c 门槛纯函数成本排序（源码序）：时间比较 < 事件计数 < 锁仲裁",
+      iTime >= 0 && iEvents > iTime && iLock > iEvents,
+      { iTime, iEvents, iLock },
+    );
+  } finally {
+    s7.close();
+  }
+}
+
+/* ============ 场景 8：GLEAN-02 + GLEAN-04（due 信号与 brief 形状 + busy 臂，root r-glean2） ============ */
+{
+  const R8 = subRoot("r-glean2");
+  const MEM8 = path.join(R8, "orchestrator-memory");
+  const brief8 = path.join(MEM8, "glean-brief.json");
+  const lock8 = path.join(MEM8, "glean-lock.json");
+  fs.mkdirSync(MEM8, { recursive: true });
+  fs.writeFileSync(path.join(MEM8, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 1 }));
+  writeJsonl(path.join(R8, "memory", "lessons.jsonl"), [
+    {
+      v: 1,
+      id: "l-20260101-g2a001",
+      ts: "2026-01-01T00:00:00.000Z",
+      // updated_at 取当下：防 housekeep 衰减退役把行转 retired、扰动 brief counts 断言
+      updated_at: new Date().toISOString(),
+      mission_id: null,
+      worker: "t",
+      type: "pitfall",
+      trigger: "G2PROBE 触发行",
+      lesson: "",
+      fix: "G2PROBE 修正行",
+      confidence: 0.9,
+      hits: 5,
+      status: "active",
+      refs: [],
+      superseded_by: null,
+      counter_refs: [],
+      note: null,
+    },
+  ]);
+  const s8 = startServer({ root: R8 });
+  try {
+    const rawCall = (name, args) => s8.request("tools/call", { name: PRE + name, arguments: args });
+    // ---- GLEAN-02a：双门过 → due 信号
+    let r = await rawCall("lessons", { action: "list" });
+    const g2 = r.result && r.result.orch_memory && r.result.orch_memory.glean;
+    ck.ok(
+      "GLEAN-02a 双门过 → due:true + reason（含 threshold）+ brief_path + lock_state=idle",
+      Boolean(g2) && g2.due === true && typeof g2.reason === "string" && g2.reason.includes("threshold") && typeof g2.brief_path === "string" && g2.brief_path.endsWith("glean-brief.json") && g2.lock_state === "idle",
+      g2,
+    );
+
+    // ---- GLEAN-04：brief 物化字段齐全（§9.2 形状）
+    const briefOk = fs.existsSync(brief8);
+    ck.ok("GLEAN-04a brief 已物化于 brief_path", briefOk, brief8);
+    const brief = briefOk ? JSON.parse(fs.readFileSync(brief8, "utf8")) : null;
+    const rid8 = fs.readFileSync(path.join(R8, "root-id"), "utf8").trim();
+    ck.ok(
+      "GLEAN-04b brief 顶层 v/generated_at/root_id/project_path + gate（阈值+measured 实测）",
+      Boolean(brief) && brief.v === 1 && typeof brief.generated_at === "string" && brief.root_id === rid8 && normPath(brief.project_path) === normPath(R8) && brief.gate && brief.gate.idle_hours === 0 && brief.gate.new_events === 1 && brief.gate.measured && brief.gate.measured.new_events === 1 && brief.gate.measured.idle_h === null,
+      brief && { gate: brief.gate, root_id: brief.root_id },
+    );
+    ck.ok(
+      "GLEAN-04c brief watermarks（0/1 实测行数）+ orchtemp_pending + counts",
+      Boolean(brief) && brief.watermarks && brief.watermarks.global_lines === 0 && brief.watermarks.project_lines === 1 && Array.isArray(brief.orchtemp_pending) && brief.orchtemp_pending.length === 0 && brief.counts && brief.counts.active === 1 && brief.counts.candidate === 0,
+      brief && { wm: brief.watermarks, counts: brief.counts },
+    );
+    ck.ok(
+      "GLEAN-04d brief projects（含启动登记本行）/orch_md/cfg 字段齐全",
+      Boolean(brief) && Array.isArray(brief.projects) && brief.projects.length === 1 && brief.projects[0].root_id === rid8 && brief.orch_md && brief.orch_md.exists === false && brief.cfg && Number(brief.cfg.idle_hours) === 0,
+      brief && { projects: brief.projects, orch_md: brief.orch_md },
+    );
+
+    // ---- GLEAN-02b/c：锁 active+活 PID → 只附 lock_state=busy、无 due 键、不重写 brief
+    const briefMtime = fs.statSync(brief8).mtimeMs;
+    fs.writeFileSync(
+      lock8,
+      JSON.stringify({ v: 1, state: "active", pid: process.pid, started_at: new Date(Date.now() - 5000).toISOString(), finished_at: null, watermarks: { global_lines: 0, projects: {} } }),
+    );
+    r = await rawCall("lessons", { action: "list" });
+    const gb = r.result && r.result.orch_memory && r.result.orch_memory.glean;
+    ck.ok(
+      "GLEAN-02b 锁 active 活 PID → 只附 lock_state=busy（无 due/brief_path 键）",
+      Boolean(gb) && gb.lock_state === "busy" && !("due" in gb) && !("brief_path" in gb),
+      gb,
+    );
+    ck.ok("GLEAN-02c busy 不物化 brief（brief mtime 未被重写）", fs.statSync(brief8).mtimeMs === briefMtime);
+  } finally {
+    s8.close();
+  }
+}
+
+/* ============ 场景 9：GLEAN-06（§6.6 名册 + --memory-root 注入，roots r-reg*） ============ */
+{
+  const R9 = subRoot("r-reg");
+  const R9b = subRoot("r-reg-b");
+  const M9 = subRoot("mem-reg");
+  const reg9 = path.join(M9, "projects.jsonl");
+  let firstSeen9 = null;
+  const s9a = startServerX({ root: R9, args: ["--memory-root", M9] });
+  try {
+    await s9a.call("lessons", { action: "list" }); // 首调用确认启动侧副作用已落
+    ck.ok(
+      "GLEAN-06a --memory-root 注入生效：名册写 M、缺省重定向 <root>/orchestrator-memory 不落",
+      fs.existsSync(reg9) && !fs.existsSync(path.join(R9, "orchestrator-memory", "projects.jsonl")),
+      { reg: fs.existsSync(reg9), deflected: fs.existsSync(path.join(R9, "orchestrator-memory", "projects.jsonl")) },
+    );
+    const rows9 = readJsonl(reg9);
+    const rid9 = fs.readFileSync(path.join(R9, "root-id"), "utf8").trim();
+    ck.ok(
+      "GLEAN-06b 启动 upsert 恰一行：root_id/project_path/first_seen/last_seen/server_version 齐全",
+      rows9.length === 1 && rows9[0].root_id === rid9 && normPath(rows9[0].project_path) === normPath(R9) && typeof rows9[0].first_seen === "string" && rows9[0].last_seen === rows9[0].first_seen && typeof rows9[0].server_version === "string",
+      rows9,
+    );
+    firstSeen9 = rows9.length === 1 ? rows9[0].first_seen : null;
+  } finally {
+    s9a.close();
+  }
+  const s9b = startServerX({ root: R9, args: ["--memory-root", M9] });
+  try {
+    await s9b.call("lessons", { action: "list" });
+    const rows92 = readJsonl(reg9);
+    ck.ok(
+      "GLEAN-06c 复见原地更新：仍一行（不重复追加）、first_seen 保留、last_seen 不早于首见",
+      rows92.length === 1 && rows92[0].first_seen === firstSeen9 && String(rows92[0].last_seen) >= String(firstSeen9),
+      rows92,
+    );
+  } finally {
+    s9b.close();
+  }
+  const s9c = startServerX({ root: R9b, args: ["--memory-root", M9] });
+  try {
+    await s9c.call("lessons", { action: "list" });
+    const rows93 = readJsonl(reg9);
+    ck.ok(
+      "GLEAN-06d 异 project 新 root → 追加一行（每 root_id 恰一行，16hex 稳定键）",
+      rows93.length === 2 && rows93.every((x) => typeof x.root_id === "string" && /^[0-9a-f]{16}$/.test(x.root_id)) && rows93[0].root_id !== rows93[1].root_id,
+      rows93.map((x) => x.root_id),
+    );
+  } finally {
+    s9c.close();
+  }
+  // 带锁源码序断言 + 活 PID 占锁行为腿（best-effort 跳过，不阻塞启动）
+  const srvSrc9 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  ck.ok(
+    "GLEAN-06e 名册带锁（源码面）：withRegistryLock(upsertProjectRegistry) 启动调用 + .registry.lock + pidAlive 陈旧接管在案",
+    srvSrc9.includes("withRegistryLock(upsertProjectRegistry)") && srvSrc9.includes('.registry.lock"') && /function registryLockStale[\s\S]{0,900}?pidAlive/.test(srvSrc9),
+    null,
+  );
+  const busyDir9 = path.join(M9, ".registry.lock");
+  fs.mkdirSync(busyDir9, { recursive: true });
+  fs.writeFileSync(
+    path.join(busyDir9, "owner.json"),
+    JSON.stringify({ holder: `pid:${process.pid}`, pid: process.pid, heartbeatAt: new Date().toISOString() }) + "\n",
+  );
+  const regBefore9 = fs.readFileSync(reg9, "utf8");
+  const s9d = startServerX({ root: R9b, args: ["--memory-root", M9] });
+  try {
+    await s9d.call("lessons", { action: "list" }); // 启动不被锁阻塞，upsert 让空
+    ck.ok(
+      "GLEAN-06f 锁被活 PID 占有 → 名册零变化（best-effort 跳过）且 server 正常应答",
+      fs.readFileSync(reg9, "utf8") === regBefore9,
+      null,
+    );
+  } finally {
+    s9d.close();
+    fs.rmSync(busyDir9, { recursive: true, force: true });
+  }
+}
+
+/* ============ 场景 10：GLEAN-03（§6.4/§9.3 归敛锁状态机全腿，root r-glean3） ============ */
+{
+  const R11 = subRoot("r-glean3");
+  const MEM11 = path.join(R11, "orchestrator-memory"); // 临时根缺省重定向落点
+  const lock11 = path.join(MEM11, "glean-lock.json");
+  const cfg11 = path.join(MEM11, "glean.cfg.json");
+  const brief11 = path.join(MEM11, "glean-brief.json");
+  const lib11 = path.join(R11, "memory", "lessons.jsonl");
+  // 12 行 active（fresh updated_at 防 housekeep 扰动）：缺省 new_events=10 时事件门可过
+  const g3Row = (i) => ({
+    v: 1,
+    id: `l-20260101-g3${String(i).padStart(2, "0")}`,
+    ts: "2026-01-01T00:00:00.000Z",
+    updated_at: new Date().toISOString(),
+    mission_id: null,
+    worker: "t",
+    type: "pitfall",
+    trigger: `G3PROBE 触发${i}`,
+    lesson: "",
+    fix: `G3PROBE 修正${i}`,
+    confidence: 0.9,
+    hits: 5,
+    status: "active",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+  });
+  fs.mkdirSync(MEM11, { recursive: true }); // spawn 竞态防御：不依赖 server 启动侧先建目录
+  writeJsonl(lib11, Array.from({ length: 12 }, (_, i) => g3Row(i + 1)));
+  const activeLock11 = (pid, startedAtIso) =>
+    JSON.stringify({
+      v: 1,
+      state: "active",
+      pid,
+      host: "suite",
+      root_id: "r11",
+      started_at: startedAtIso,
+      finished_at: null,
+      watermarks: { global_lines: 0, projects: {} },
+    });
+  const s11 = startServer({ root: R11 });
+  try {
+    const rawCall = (name, args) => s11.request("tools/call", { name: PRE + name, arguments: args });
+    const gleanOf = (r) => r.result && r.result.orch_memory && r.result.orch_memory.glean;
+    fs.writeFileSync(cfg11, JSON.stringify({ idle_hours: 0, new_events: 0 }));
+
+    // ---- GLEAN-03a：wx 抢锁原子（§9.3 抢锁第一步；EEXIST=原子互斥，busy 即退的协议面）
+    const doc11 = activeLock11(process.pid, new Date().toISOString());
+    fs.writeFileSync(lock11, doc11, { flag: "wx" }); // 无锁 → wx 创建成功（gleaner 抢锁）
+    let wxThrew = null;
+    try {
+      fs.writeFileSync(lock11, doc11, { flag: "wx" });
+    } catch (e) {
+      wxThrew = e && e.code === "EEXIST" ? "EEXIST" : String(e && e.code);
+    }
+    ck.ok(
+      "GLEAN-03a wx 抢锁原子：无锁 wx 创建成功、再抢 EEXIST 拒绝且原锁内容未被破坏",
+      fs.readFileSync(lock11, "utf8") === doc11 && wxThrew === "EEXIST",
+      { wxThrew },
+    );
+
+    // ---- GLEAN-03b：活 PID 占用拒接管（busy 即退——信号抑制，绝不阻塞等待）
+    let r = await rawCall("lessons", { action: "list" });
+    const gb3 = gleanOf(r);
+    ck.ok(
+      "GLEAN-03b 活 PID 占用拒接管：锁 active+活 PID → 只附 lock_state=busy 无 due（不拉起第二归敛）",
+      Boolean(gb3) && gb3.lock_state === "busy" && !("due" in gb3) && !("brief_path" in gb3),
+      gb3,
+    );
+
+    // ---- GLEAN-03c：死 PID 回收（active+死 PID → 可接管，gate 放行 due）
+    fs.writeFileSync(lock11, activeLock11(999999901, new Date().toISOString())); // 跨平台必死 PID（WS-9 先例值）
+    r = await rawCall("lessons", { action: "list" });
+    const gc3 = gleanOf(r);
+    ck.ok(
+      "GLEAN-03c 死 PID 回收：active+死 PID → 可接管（lock_state=idle + due 放行）",
+      Boolean(gc3) && gc3.lock_state === "idle" && gc3.due === true,
+      gc3,
+    );
+
+    // ---- GLEAN-03d：绝对过期 1.5h 回收 + cfg.lock_stale_hours 接线
+    fs.writeFileSync(lock11, activeLock11(process.pid, new Date(Date.now() - 2 * 3600000).toISOString()));
+    r = await rawCall("lessons", { action: "list" });
+    const gd3 = gleanOf(r);
+    ck.ok(
+      "GLEAN-03d 绝对过期回收：活 PID ∧ 龄期 2h > 缺省 1.5h → 可接管（due 放行）",
+      Boolean(gd3) && gd3.lock_state === "idle" && gd3.due === true,
+      gd3,
+    );
+    fs.writeFileSync(cfg11, JSON.stringify({ idle_hours: 0, new_events: 0, lock_stale_hours: 9999 }));
+    r = await rawCall("lessons", { action: "list" });
+    const gd32 = gleanOf(r);
+    ck.ok(
+      "GLEAN-03d2 cfg.lock_stale_hours 接线：9999 → 同一把活 PID 锁翻回 busy（阈值可调生效）",
+      Boolean(gd32) && gd32.lock_state === "busy" && !("due" in gd32),
+      gd32,
+    );
+    fs.writeFileSync(cfg11, JSON.stringify({ idle_hours: 50, new_events: 0 }));
+
+    // ---- GLEAN-03e：done 态保留且 mtime 双用（finished_at 优先、mtime 兜底）
+    const past11 = new Date(Date.now() - 3 * 86400000);
+    fs.writeFileSync(
+      lock11,
+      JSON.stringify({
+        v: 1, state: "done", pid: process.pid, host: "suite", root_id: "r11",
+        started_at: past11.toISOString(), finished_at: new Date().toISOString(),
+        watermarks: { global_lines: 0, projects: {} },
+      }),
+    );
+    fs.utimesSync(lock11, past11, past11); // 文件 mtime 压到 3 天前（先写后压，勿被写回冲掉）
+    r = await rawCall("lessons", { action: "list" });
+    ck.ok(
+      "GLEAN-03e done 态门①读 finished_at（优先于 mtime）：mtime 3 天前但 finished_at=当下 → idle≈0 < 50h 不放行",
+      r.result && !("orch_memory" in r.result),
+      { respKeys: r.result && Object.keys(r.result) },
+    );
+    fs.writeFileSync(
+      lock11,
+      JSON.stringify({
+        v: 1, state: "done", pid: process.pid, host: "suite", root_id: "r11",
+        started_at: past11.toISOString(), finished_at: null,
+        watermarks: { global_lines: 0, projects: {} },
+      }),
+    );
+    fs.utimesSync(lock11, past11, past11);
+    r = await rawCall("lessons", { action: "list" });
+    const ge32 = gleanOf(r);
+    ck.ok(
+      "GLEAN-03e2 mtime 兜底（mtime 双用）：done 无 finished_at → mtime 即上次归敛（3 天前 > 50h → due 放行）",
+      Boolean(ge32) && ge32.due === true && ge32.lock_state === "idle",
+      ge32,
+    );
+    ck.ok(
+      "GLEAN-03e3 done 态保留：server 全程不删不改锁文件（消费=置状态，§6.3/锁红线）",
+      fs.existsSync(lock11) && JSON.parse(fs.readFileSync(lock11, "utf8")).state === "done",
+      null,
+    );
+
+    // ---- GLEAN-03f：两锁不互嵌（§6.4 W3 收口，源码面机械断言）——server 对归敛锁只读
+    // 判锁（busy 即退零阻塞）、名册锁短临界区不触归敛锁：异文件异持有者、无锁序环。
+    const srvSrc11 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    const gStart11 = srvSrc11.indexOf("function readGleanCfg");
+    const gEnd11 = srvSrc11.indexOf("function send(msg)");
+    const gleanSlice11 = srvSrc11.slice(gStart11, gEnd11);
+    const regSlice11 = srvSrc11.slice(
+      srvSrc11.indexOf("function withRegistryLock"),
+      srvSrc11.indexOf("/** One registry row per root_id"),
+    );
+    ck.ok(
+      "GLEAN-03f 两锁不互嵌（源码面）：glean 判锁段零 withRootLock/withRegistryLock 调用 + withRegistryLock 函数体零 glean-lock 触碰",
+      gStart11 >= 0 && gEnd11 > gStart11 && !gleanSlice11.includes("withRootLock(") && !gleanSlice11.includes("withRegistryLock(") && regSlice11.includes("function withRegistryLock") && !regSlice11.includes("glean-lock"),
+      { gStart11, gEnd11 },
+    );
+
+    // ---- GLEAN-03g：cfg junk 逐键兜底（W3 任务③ 默认值兜底，经 brief.cfg 端到端观察）
+    fs.writeFileSync(
+      cfg11,
+      JSON.stringify({ idle_hours: "abc", new_events: -5, lock_stale_hours: 0, pack_global_section: "nope" }),
+    );
+    r = await rawCall("lessons", { action: "list" });
+    const gg3 = gleanOf(r);
+    const briefG3 = fs.existsSync(brief11) ? JSON.parse(fs.readFileSync(brief11, "utf8")) : null;
+    ck.ok(
+      "GLEAN-03g cfg junk 逐键兜底：idle_hours/new_events/lock_stale_hours/pack_global_section 全回落内建默认（48/10/1.5/true）",
+      Boolean(gg3) && gg3.due === true && Boolean(briefG3) && briefG3.cfg.idle_hours === 48 && briefG3.cfg.new_events === 10 && briefG3.cfg.lock_stale_hours === 1.5 && briefG3.cfg.pack_global_section === true,
+      briefG3 && briefG3.cfg,
+    );
+  } finally {
+    s11.close();
+  }
+}
+
+/* ============ 场景 11：GLEAN-05（§5 stage 写入形状与 ORCHTEMP 候选流转，root r-stage1） ============ */
+{
+  const R12 = subRoot("r-stage1");
+  const MEM12 = path.join(R12, "orchestrator-memory");
+  const brief12 = path.join(MEM12, "glean-brief.json");
+  fs.mkdirSync(MEM12, { recursive: true });
+  // 门槛全开（never gleaned → idle ∞ > 0；new_events=0）→ 任意调用即 due，供 orchtemp_pending 流转观察
+  fs.writeFileSync(path.join(MEM12, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0 }));
+  const s12 = startServer({ root: R12 });
+  try {
+    const rawCall = (name, args) => s12.request("tools/call", { name: PRE + name, arguments: args });
+    // ---- GLEAN-05a/b/c：写入形状（source=orchestrator/candidate/conf=0/hits=0）
+    const st51 = await s12.call("lessons", {
+      action: "stage",
+      type: "env-fact",
+      trigger: "ST5TRIG 触发一\n第二行",
+      fix: "ST5FIX 修正一",
+      lesson: "ST5 单句教训",
+      mission_id: "m-stage5",
+      note: "pin: AGENTS.md",
+    });
+    const st51j = resultText(st51);
+    ck.ok(
+      "GLEAN-05a stage 响应：ok:true + 新 id + status=candidate + source=orchestrator",
+      st51.isError !== true && st51j.ok === true && /^l-\d{8}-[0-9a-f]{6}$/.test(String(st51j.id)) && st51j.status === "candidate" && st51j.source === "orchestrator",
+      st51j,
+    );
+    const row51 = readLessons(R12).find((l) => l.id === st51j.id);
+    ck.ok(
+      "GLEAN-05b 落库形状：source=orchestrator/status=candidate/confidence=0/hits=0/scope=project/worker=coordinator + note 摆放提示 + refs=[mission]",
+      Boolean(row51) && row51.source === "orchestrator" && row51.status === "candidate" && row51.confidence === 0 && row51.hits === 0 && row51.scope === "project" && row51.worker === "coordinator" && row51.note === "pin: AGENTS.md" && Array.isArray(row51.refs) && row51.refs[0] === "m-stage5",
+      row51,
+    );
+    ck.ok(
+      "GLEAN-05c escape 先于截断：trigger 换行写为 ␤（写侧纪律，库保持单行性质）",
+      Boolean(row51) && row51.trigger.includes("␤") && !row51.trigger.includes("\n"),
+      row51 && row51.trigger,
+    );
+
+    // ---- GLEAN-05d/e：type 缺省 pitfall（§5 签名无 type，报告候选同款）；坏 type/空 trigger 严格报错
+    const st52 = await s12.call("lessons", { action: "stage", trigger: "ST5TRIG2 缺省类型", fix: "ST5FIX2" });
+    const row52 = readLessons(R12).find((l) => String(l.trigger || "").includes("ST5TRIG2"));
+    ck.ok(
+      "GLEAN-05d type 缺省 pitfall（§5 签名无 type，沿报告候选先例）",
+      st52.isError !== true && Boolean(row52) && row52.type === "pitfall" && row52.source === "orchestrator",
+      row52 && { type: row52.type, source: row52.source },
+    );
+    const st5Bad = await s12.call("lessons", { action: "stage", type: "nope", trigger: "X5", fix: "Y5" });
+    const st5Empty = await s12.call("lessons", { action: "stage", trigger: "   ", fix: "Y5" });
+    ck.ok(
+      "GLEAN-05e 坏 type / 空 trigger → isError（add 级严格，§5「沿 add 语义」）",
+      st5Bad.isError === true && st5Empty.isError === true,
+      { bad: st5Bad.text.slice(0, 80), empty: st5Empty.text.slice(0, 80) },
+    );
+
+    // ---- GLEAN-05g：不参与注入——纯 stage 库（尚无 active）→ LESSONS 节整体不出现（CR-04 回归性确认，§5）
+    await s12.call("context_pack", { mission_id: "m-stage5-pack", title: "纯暂存包", task: "ST5TRIG ST5TRIG2 命中词齐全" });
+    const pack52 = readPack(R12, "m-stage5-pack");
+    ck.ok(
+      "GLEAN-05g candidate 不参与注入：纯 stage 库 pack 无 LESSONS 节（无需额外过滤，整节不出现）",
+      Boolean(pack52) && !pack52.includes("## LESSONS"),
+      pack52 && pack52.split("\n").filter((l) => l.startsWith("## ")),
+    );
+
+    // ---- GLEAN-05f：不做 findMergeTarget——同键 active 在库仍独立成条（归并是归敛消费时的事）
+    await s12.call("lessons", { action: "add", type: "pitfall", trigger: "ST5MERGE 合并键触发", fix: "ST5MERGE 合并键修正" });
+    const st5Before = readLessons(R12).find((l) => l.status === "active" && String(l.trigger || "").includes("ST5MERGE"));
+    const st53 = await s12.call("lessons", { action: "stage", type: "pitfall", trigger: "ST5MERGE 合并键触发", fix: "ST5MERGE 合并键修正" });
+    const st5After = readLessons(R12).find((l) => l.status === "active" && String(l.trigger || "").includes("ST5MERGE"));
+    const st53Row = readLessons(R12).find((l) => l.id === resultText(st53).id);
+    ck.ok(
+      "GLEAN-05f 不合并：active 原 hits/confidence 不动 + stage 独立成 candidate 新条（同键不归并）",
+      st53.isError !== true && st5After.hits === st5Before.hits && st5After.confidence === st5Before.confidence && Boolean(st53Row) && st53Row.status === "candidate" && st53Row.source === "orchestrator",
+      { before: st5Before && { hits: st5Before.hits, conf: st5Before.confidence }, after: st5After && { hits: st5After.hits, conf: st5After.confidence }, staged: st53Row && st53Row.status },
+    );
+    // token 命中的 staged 条目仍不渲染（active 同键渲染、candidate 兄弟条被排除）
+    await s12.call("context_pack", { mission_id: "m-stage5-pack2", title: "同键对照包", task: "ST5MERGE 合并键触发" });
+    const pack522 = readPack(R12, "m-stage5-pack2");
+    ck.ok(
+      "GLEAN-05g2 staged 条不渲染：active 同键入选（LESSONS 节在）而 staged 兄弟条 id 不出现",
+      Boolean(pack522) && pack522.includes("## LESSONS") && pack522.includes(String(st5Before.id)) && !pack522.includes(String(resultText(st53).id)) && !pack522.includes(String(st51j.id)),
+      pack522 && pack522.split("\n").filter((l) => l.startsWith("- [")),
+    );
+
+    // ---- GLEAN-05h：ORCHTEMP 候选流转——due brief orchtemp_pending 收录 stage 条、不含 report 候选
+    await s12.call("board", { action: "upsert", mission: { id: "m-stage5-rep", title: "对照上报 mission" } });
+    await s12.call("report", {
+      mission_id: "m-stage5-rep",
+      worker: "w-stage5",
+      kind: "done",
+      summary: "对照候选上报",
+      lessons: [{ type: "pitfall", trigger: "ST5REP 对照候选触发", fix: "ST5REP 修正" }],
+    });
+    const repRow52 = readLessons(R12).find((l) => String(l.trigger || "").includes("ST5REP"));
+    let r52 = await rawCall("lessons", { action: "list" });
+    const due52 = r52.result && r52.result.orch_memory && r52.result.orch_memory.glean;
+    const brief52 = fs.existsSync(brief12) ? JSON.parse(fs.readFileSync(brief12, "utf8")) : null;
+    ck.ok(
+      "GLEAN-05h ORCHTEMP 流转：due 放行且 brief.orchtemp_pending 恰含 stage 条（source=orchestrator 专属过滤，report 候选不入）",
+      Boolean(due52) && due52.due === true && Boolean(brief52) && Array.isArray(brief52.orchtemp_pending) && brief52.orchtemp_pending.includes(st51j.id) && brief52.orchtemp_pending.includes(resultText(st52).id) && Boolean(repRow52) && !brief52.orchtemp_pending.includes(repRow52.id),
+      { due: due52, pending: brief52 && brief52.orchtemp_pending, repRow: repRow52 && repRow52.id },
+    );
+
+    // ---- GLEAN-05i/j：retire 消费=置状态，内容不变（红线①），消费后退出 ORCHTEMP
+    const st51Before = readLessons(R12).find((l) => l.id === st51j.id);
+    const ret52 = await s12.call("lessons", {
+      action: "retire",
+      id: st51j.id,
+      reason: "glean: → ORCH.md §常驻 #3",
+    });
+    const st51After = readLessons(R12).find((l) => l.id === st51j.id);
+    ck.ok(
+      "GLEAN-05i retire 消费=置状态：status=retired + note=视图指针，trigger/fix/lesson/type 逐字节不变（红线①不删内容）",
+      ret52.isError !== true && st51After.status === "retired" && st51After.note === "glean: → ORCH.md §常驻 #3" && st51After.trigger === st51Before.trigger && st51After.fix === st51Before.fix && st51After.lesson === st51Before.lesson && st51After.type === st51Before.type,
+      { before: st51Before && { trigger: st51Before.trigger, fix: st51Before.fix }, after: st51After && { status: st51After.status, note: st51After.note } },
+    );
+    r52 = await rawCall("lessons", { action: "list" });
+    const brief522 = JSON.parse(fs.readFileSync(brief12, "utf8"));
+    ck.ok(
+      "GLEAN-05j 消费后流转：orchtemp_pending 退出该 id 且条目仍在库（留存非删除）",
+      Array.isArray(brief522.orchtemp_pending) && !brief522.orchtemp_pending.includes(st51j.id) && Boolean(readLessons(R12).find((l) => l.id === st51j.id)),
+      brief522.orchtemp_pending,
+    );
+
+    // ---- GLEAN-05k：§9.4 工具 schema 描述行逐字在案 + action 枚举含 stage（W3 任务①收口）
+    //（描述行内 source="orchestrator" 在 server.mjs 字面量中带 \" 转义—— grep 取无反斜杠的
+    //  首尾两个逐字片段 + 枚举行，三段同钉）
+    const srvSrc52 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    ck.ok(
+      "GLEAN-05k §9.4 逐字稿落 schema：stage 描述行首尾片段逐字在案 + action 枚举扩至 stage",
+      srvSrc52.includes("stage: 主控随手暂存（ORCHTEMP）。写 source=") &&
+        srvSrc52.includes("；不合并不注入；由归敛代理消费（置 retired+视图层落笔）。trigger/fix 必填。") &&
+        srvSrc52.includes('["list", "add", "promote", "retire", "stage"]'),
+      null,
+    );
+  } finally {
+    s12.close();
+  }
+}
+
+/* ============ 场景 12：INJ-06b（双库合并+normKey 去重全端优先+contradicts 不跨库）+ §7.2 全端节（root r-inj6b） ============ */
+{
+  const R10 = subRoot("r-inj6b");
+  const MEM10 = path.join(R10, "orchestrator-memory");
+  const gLib10 = path.join(MEM10, "memory", "lessons.jsonl");
+  const nowIso10 = new Date().toISOString();
+  const hotRow = (id, type, trigger, fix, scope) => ({
+    v: 1,
+    id,
+    ts: "2026-01-01T00:00:00.000Z",
+    updated_at: nowIso10,
+    mission_id: null,
+    worker: "t",
+    type,
+    trigger,
+    lesson: "",
+    fix,
+    confidence: 0.9,
+    hits: 5,
+    status: "active",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+    scope,
+  });
+  // 全端库：G1（与项目 P1 同 merge key）+ G2（全端独有）；项目库：P1（G1 孪生）+ P2（独有）
+  writeJsonl(gLib10, [
+    hotRow("l-20260101-gggg01", "pitfall", "PROBE6B 缓存损坏重建", "重建缓存目录", "global"),
+    hotRow("l-20260101-gggg02", "env-fact", "UNIQ6B 全端独有事实", "全端独有修正", "global"),
+  ]);
+  writeJsonl(path.join(R10, "memory", "lessons.jsonl"), [
+    hotRow("l-20260101-pppp01", "pitfall", "PROBE6B 缓存损坏重建", "重建缓存目录", "project"),
+    hotRow("l-20260101-pppp02", "pitfall", "OWN6B 项目独有触发", "项目独有修正", "project"),
+  ]);
+  fs.writeFileSync(path.join(MEM10, "AGENTS.md"), "# GLOBAL MEMORY\n- GLOBALSEC 全端稳定事实行\n");
+  const s10 = startServer({ root: R10 });
+  try {
+    await s10.call("context_pack", {
+      mission_id: "m-6b",
+      title: "双库去重包",
+      task: "PROBE6B 缓存损坏重建 与 OWN6B 项目独有触发 与 UNIQ6B 全端独有事实",
+    });
+    const pack10 = readPack(R10, "m-6b");
+    const bullets = () => (pack10 || "").split("\n").filter((l) => l.startsWith("- ["));
+    ck.ok(
+      "INJ-06b-1 双库合并选材：全端 G1/G2 与项目独有 P2 同入选",
+      Boolean(pack10) && pack10.includes("l-20260101-gggg01") && pack10.includes("l-20260101-gggg02") && pack10.includes("l-20260101-pppp02"),
+      bullets(),
+    );
+    ck.ok(
+      "INJ-06b-2 normKey 去重全端优先：同 merge key 的项目孪生 P1 被全端 G1 遮蔽",
+      Boolean(pack10) && pack10.includes("l-20260101-gggg01") && !pack10.includes("l-20260101-pppp01"),
+      bullets(),
+    );
+    // 只数 LESSONS 条目行（TASK 回显正文同样含该串，不能整包计数）
+    const g1Bullets = (pack10.match(/^- \[pitfall·l-20260101-gggg01\]/gm) || []).length;
+    ck.ok("INJ-06b-3 同 merge key 恰渲染一次（无双显，LESSONS 条目行计数）", g1Bullets === 1, { g1Bullets });
+
+    // ---- contradicts 不跨库：全端 id 在项目库寻址失败，全端库字节零变化
+    // （trigger/fix 取不匹配键——防 findMergeTarget 先合并短路、到不了 contradicts 臂）
+    const gLibBefore = fs.readFileSync(gLib10, "utf8");
+    const contra = await s10.call("lessons", {
+      action: "add",
+      type: "pitfall",
+      trigger: "CROSS6B 不匹配键",
+      fix: "CROSS6B 修正",
+      contradicts: "l-20260101-gggg01",
+    });
+    ck.ok(
+      "INJ-06b-4 contradicts 不跨库：全端 id 项目库寻址失败（target not found），协议面 isError",
+      contra.isError === true && String(contra.text).includes("not found"),
+      contra.text.slice(0, 140),
+    );
+    ck.ok("INJ-06b-5 contradicts 不跨库：全端库字节零变化（读端/写端均不触他库）", fs.readFileSync(gLib10, "utf8") === gLibBefore);
+
+    // ---- §7.2 全端节：注入 + 节序 + 开关
+    ck.ok(
+      "SEC72-a 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行）",
+      Boolean(pack10) && pack10.includes("## GLOBAL MEMORY（全端子代理记忆") && pack10.includes("GLOBALSEC 全端稳定事实行"),
+      pack10 && pack10.split("\n").filter((l) => l.startsWith("## ")),
+    );
+    const iL10 = pack10.indexOf("## LESSONS");
+    const iG10 = pack10.indexOf("## GLOBAL MEMORY");
+    const iR10 = pack10.indexOf("## RETURN");
+    ck.ok("SEC72-b 节序：LESSONS < GLOBAL MEMORY < RETURN", iL10 >= 0 && iL10 < iG10 && iG10 > 0 && iG10 < iR10, { iL10, iG10, iR10 });
+    fs.writeFileSync(path.join(MEM10, "glean.cfg.json"), JSON.stringify({ pack_global_section: false }));
+    await s10.call("context_pack", { mission_id: "m-6bswitch", title: "开关关闭包", task: "PROBE6B 缓存损坏重建" });
+    const packSwitch = readPack(R10, "m-6bswitch");
+    ck.ok(
+      "SEC72-c pack_global_section:false → GLOBAL MEMORY 节整体不出现（LESSONS 命中不受累，CR-04）",
+      Boolean(packSwitch) && !packSwitch.includes("## GLOBAL MEMORY") && packSwitch.includes("## LESSONS"),
+      packSwitch && packSwitch.split("\n").filter((l) => l.startsWith("## ")),
+    );
+  } finally {
+    s10.close();
+  }
+}
+
+/* ============ 场景 13：GLEAN-07/08（W5 §6.7 promote target=global + 双库去重终验
+ *               + 跨项目 fixture〔项目库+全端库+第二注册项目见证库并存〕，root r-promote） ============ */
+{
+  const R13 = subRoot("r-promote");
+  const MEM13 = path.join(R13, "orchestrator-memory"); // 临时根缺省重定向落点
+  const gLib13 = path.join(MEM13, "memory", "lessons.jsonl");
+  const lib13 = path.join(R13, "memory", "lessons.jsonl");
+  // 跨项目 fixture：第二注册项目 R13B——只在名册挂行 + 见证库放同 normKey candidate，
+  // 供晋升标准分支一（跨项目复现≥2）的 server 侧扫描命中（只读见证，永不直写）
+  const R13B = subRoot("r-promote-b");
+  const lib13B = path.join(R13B, ".zcode", "orchestrator", "memory", "lessons.jsonl");
+  const now13 = new Date().toISOString();
+  const old13 = new Date(Date.now() - 10 * 86400000).toISOString();
+  const seedRow = (over) => ({
+    v: 1,
+    ts: "2026-01-01T00:00:00.000Z",
+    mission_id: null,
+    worker: "t",
+    lesson: "",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+    ...over,
+  });
+  // 项目库五源条：PM（合并源·candidate，与全端 GM 同 merge key）/PN（强条源·active，
+  // conf 0.9/hits 3/龄 10d → score≈1.35 ≥0.7 过强条阈值）/PC（跨项目源·candidate，
+  // R13B 见证库有同键 candidate 孪生）/PW（两分支皆不满足对照）/PDEF（缺省晋升对照）
+  writeJsonl(lib13, [
+    seedRow({ id: "l-20260101-g5m001", updated_at: now13, type: "pitfall", trigger: "G5MERGE 全端已有键触发", fix: "G5MERGE 全端已有键修正", confidence: 0, hits: 0, status: "candidate" }),
+    seedRow({ id: "l-20260101-g5n002", updated_at: old13, type: "pitfall", trigger: "G5STRONG 单库强条触发", fix: "G5STRONG 单库强条修正", confidence: 0.9, hits: 3, status: "active" }),
+    seedRow({ id: "l-20260101-g5c003", updated_at: now13, type: "error-fix", trigger: "G5CROSS 跨项目复现触发", fix: "G5CROSS 跨项目复现修正", confidence: 0, hits: 0, status: "candidate" }),
+    seedRow({ id: "l-20260101-g5w004", updated_at: now13, type: "preference", trigger: "G5WEAK 无证据触发", fix: "G5WEAK 无证据修正", confidence: 0.3, hits: 1, status: "candidate" }),
+    seedRow({ id: "l-20260101-g5d005", updated_at: now13, type: "pitfall", trigger: "G5DEF 缺省晋升触发", fix: "G5DEF 缺省晋升修正", confidence: 0, hits: 0, status: "candidate" }),
+  ]);
+  // 全端库既有条 GM（与 PM 同 merge key——合并腿靶子，带原 mission ref 验证并集保留）
+  writeJsonl(gLib13, [
+    seedRow({ id: "l-20260101-g5gm00", updated_at: now13, type: "pitfall", trigger: "G5MERGE 全端已有键触发", fix: "G5MERGE 全端已有键修正", confidence: 0.6, hits: 2, status: "active", refs: ["m-g5orig"], scope: "global" }),
+  ]);
+  // 见证库：PC 同键 candidate（含 candidate 计入复现，§6.7 分支一）
+  writeJsonl(lib13B, [
+    seedRow({ id: "l-20260101-g5cb01", updated_at: now13, type: "error-fix", trigger: "G5CROSS 跨项目复现触发", fix: "G5CROSS 跨项目复现修正", confidence: 0, hits: 0, status: "candidate", scope: "project" }),
+  ]);
+  const s13 = startServer({ root: R13 });
+  try {
+    await s13.call("lessons", { action: "list" }); // 等启动副作用（名册 upsert 本行）落地
+    const rootId13 = fs.readFileSync(path.join(R13, "root-id"), "utf8").trim();
+    // 名册追加第二项目行（名册非事件层允许登记面操作；启动只写本行，追加行此后保留）
+    fs.appendFileSync(
+      path.join(MEM13, "projects.jsonl"),
+      JSON.stringify({ root_id: "f0f0f0f0f0f0f0f1", project_path: R13B, first_seen: now13, last_seen: now13, server_version: "0.8.0" }) + "\n",
+    );
+    const rawLineById = (file, lid) => fs.readFileSync(file, "utf8").split("\n").find((l) => l.includes(`"${lid}"`));
+    const rowById = (file, lid) => readJsonl(file).find((l) => l.id === lid);
+    const bullets13 = (pack) => (pack || "").split("\n").filter((l) => /^- \[/.test(l));
+
+    // ---- G7-a/b/c：合并腿（全端 findMergeTarget 命中 → hits+1/confidence 提升/refs 并集 + 源条不动）
+    const pmBefore = rawLineById(lib13, "l-20260101-g5m001");
+    const pm7 = resultText(await s13.call("lessons", { action: "promote", id: "l-20260101-g5m001", target: "global" }));
+    ck.ok(
+      "G7-a 合并腿响应：merged:true + target=global + source_id + 命中全端条 GM（hits 2→3、conf 0.6→0.7）",
+      pm7.ok === true && pm7.merged === true && pm7.target === "global" && pm7.source_id === "l-20260101-g5m001" && pm7.id === "l-20260101-g5gm00" && pm7.hits === 3 && approx2(pm7.confidence) === 0.7,
+      pm7,
+    );
+    const gmAfter = rowById(gLib13, "l-20260101-g5gm00");
+    ck.ok(
+      "G7-b 合并腿回链并集：GM.refs 保留原 mission 且并入三元组（源条 id/源项目路径/root_id）各恰一次",
+      Array.isArray(gmAfter.refs) && gmAfter.refs.includes("m-g5orig") && gmAfter.refs.includes("l-20260101-g5m001") && gmAfter.refs.some((x) => normPath(x) === normPath(R13)) && gmAfter.refs.filter((x) => x === rootId13).length === 1 && gmAfter.refs.filter((x) => x === "l-20260101-g5m001").length === 1,
+      gmAfter && gmAfter.refs,
+    );
+    ck.ok(
+      "G7-c 源条原地不动（合并腿）：PM 行逐字节不变且仍 candidate 于项目库",
+      rawLineById(lib13, "l-20260101-g5m001") === pmBefore && rowById(lib13, "l-20260101-g5m001").status === "candidate",
+      null,
+    );
+
+    // ---- G7-d/e/f：强条腿（单库强条证据分支 + 新建 scope=global + 回链三元组）
+    const pnBefore = rawLineById(lib13, "l-20260101-g5n002");
+    const pn7 = resultText(await s13.call("lessons", { action: "promote", id: "l-20260101-g5n002", target: "global" }));
+    ck.ok(
+      "G7-d 强条腿证据：branch=strong + eligible + strong.pass（score≥0.7/hits=3/龄≥7d）+ cross_project 不成立（count=1）",
+      pn7.ok === true && Boolean(pn7.standard) && pn7.standard.branch === "strong" && pn7.standard.eligible === true && pn7.standard.strong.pass === true && pn7.standard.strong.hits === 3 && pn7.standard.strong.age_days >= 7 && Number(pn7.standard.strong.score) >= 0.7 && pn7.standard.cross_project.count === 1 && pn7.standard.cross_project.pass === false,
+      pn7.standard,
+    );
+    const gn13 = rowById(gLib13, pn7.id);
+    ck.ok(
+      "G7-e 新建腿形状：scope=global/source=promote/status=active/conf=0.7/hits=1/worker=gleaner + refs 恰为回链三元组",
+      Boolean(gn13) && gn13.scope === "global" && gn13.source === "promote" && gn13.status === "active" && gn13.confidence === 0.7 && gn13.hits === 1 && gn13.worker === "gleaner" && Array.isArray(gn13.refs) && gn13.refs.length === 3 && gn13.refs[0] === "l-20260101-g5n002" && normPath(gn13.refs[1]) === normPath(R13) && gn13.refs[2] === rootId13,
+      gn13,
+    );
+    ck.ok(
+      "G7-f 源条原地不动（新建腿）：PN 行逐字节不变且仍 active 于项目库",
+      rawLineById(lib13, "l-20260101-g5n002") === pnBefore && rowById(lib13, "l-20260101-g5n002").status === "active",
+      null,
+    );
+
+    // ---- G7-g：跨项目复现分支（名册第二项目库同 normKey candidate 命中 → count=2）
+    const pc7 = resultText(await s13.call("lessons", { action: "promote", id: "l-20260101-g5c003", target: "global" }));
+    ck.ok(
+      "G7-g 跨项目复现分支证据：branch=cross-project + count=2（本库+见证库）+ others 指向 R13B（candidate 行计入）",
+      pc7.ok === true && pc7.standard.branch === "cross-project" && pc7.standard.cross_project.count === 2 && pc7.standard.cross_project.pass === true && Array.isArray(pc7.standard.cross_project.others) && pc7.standard.cross_project.others.length === 1 && normPath(pc7.standard.cross_project.others[0]) === normPath(R13B),
+      pc7.standard,
+    );
+
+    // ---- G7-h：两分支皆不满足 → 证据为否而工具面仍放行（§6.7 判定权在归敛，非 server 门）
+    const pw7 = resultText(await s13.call("lessons", { action: "promote", id: "l-20260101-g5w004", target: "global" }));
+    ck.ok(
+      "G7-h 弱条对照：standard.eligible=false + branch=null（两分支皆不满足）且晋升照常完成（证据非门）",
+      pw7.ok === true && Boolean(pw7.standard) && pw7.standard.eligible === false && pw7.standard.branch === null && pw7.standard.cross_project.pass === false && pw7.standard.strong.pass === false,
+      pw7.standard,
+    );
+
+    // ---- G7-i/j：坏 target 报错 + 缺省 target 行为零变化（§8 兼容行「缺省 project=现行为逐字节一致」）
+    const pBad13 = await s13.call("lessons", { action: "promote", id: "l-20260101-g5d005", target: "moon" });
+    ck.ok(
+      "G7-i 坏 target 严格报错（isError，allowed: project, global）",
+      pBad13.isError === true && String(pBad13.text).includes("invalid target"),
+      pBad13.text.slice(0, 100),
+    );
+    const gLibBefore13 = fs.readFileSync(gLib13, "utf8");
+    const pd7 = resultText(await s13.call("lessons", { action: "promote", id: "l-20260101-g5d005" }));
+    const pdRow13 = rowById(lib13, "l-20260101-g5d005");
+    ck.ok(
+      "G7-j 缺省 target 现行为零变化：本库 candidate→active、响应无 target/standard 键、全端库字节零变化",
+      pd7.ok === true && pd7.status === "active" && pd7.merged === false && !("target" in pd7) && !("standard" in pd7) && pdRow13.status === "active" && fs.readFileSync(gLib13, "utf8") === gLibBefore13,
+      pd7,
+    );
+
+    // ---- G7-k：schema 面（target 枚举 + promote 描述行跨项目晋升句在案）
+    const srvSrc13 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    ck.ok(
+      "G7-k schema：lessons target 枚举 [project, global] + promote 描述行含跨项目晋升与回链句",
+      srvSrc13.includes('enum: ["project", "global"]') && srvSrc13.includes('target=\\"global\\" 跨项目晋升全端库') && srvSrc13.includes("refs=[源条 id, 源项目路径, root_id]"),
+      null,
+    );
+
+    // ---- G8-a/b/c：双库去重终验（晋升场景）+ 晋升后注入全端条可见 + 读端零写
+    const libBeforePack13 = fs.readFileSync(lib13, "utf8");
+    const gLibBeforePack13 = fs.readFileSync(gLib13, "utf8");
+    await s13.call("context_pack", { mission_id: "m-g5pack", title: "晋升去重包", task: "G5STRONG 单库强条触发任务" });
+    const pack13 = readPack(R13, "m-g5pack");
+    ck.ok(
+      "G8-a 晋升后注入可见：pack LESSONS 渲染全端新条（promoted id 在案——scope=global 行经双库合并入选）",
+      Boolean(pack13) && pack13.includes("## LESSONS") && pack13.includes(`·${pn7.id}]`),
+      bullets13(pack13),
+    );
+    ck.ok(
+      "G8-b 双库去重全端优先（晋升场景终验）：同 normKey 项目源条 PN 被全端新条遮蔽（源 id 不渲染、晋升 id 恰渲染一次）",
+      Boolean(pack13) && !pack13.includes("l-20260101-g5n002") && (pack13.match(new RegExp(`^- \\[pitfall·${pn7.id}\\]`, "gm")) || []).length === 1,
+      bullets13(pack13),
+    );
+    ck.ok(
+      "G8-c 读端零写：context_pack 后项目库与全端库字节零变化",
+      fs.readFileSync(lib13, "utf8") === libBeforePack13 && fs.readFileSync(gLib13, "utf8") === gLibBeforePack13,
+      null,
+    );
+  } finally {
+    s13.close();
+  }
+}
+
+BASE.cleanup();
+const { fail } = ck.summary();
+process.exit(fail ? 1 : 0);

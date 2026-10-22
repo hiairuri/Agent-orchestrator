@@ -46,6 +46,15 @@
  *     firedEligible 首检 false——三实例并发恰一条告警，超窗自动恢复开枪能力。
  *     恢复：异常消失（板可读）→ unlink 标记回 active/standby；quarantined 与
  *     standby 互斥，复活/解除共享 mtime 门与 standby_poll 节流（同一低频门）。
+ *   - watcher-signals 消费（v0.8 W6，§15 裁决：watcher 优先唤醒 + 哨兵降级兜底）：
+ *     板面出现 C1 未签收终态条件时才读 <sentinel>/watcher-signals.jsonl（watcher/
+ *     degrade.mjs 落盘，{at,cls,mission,reason} 逐行滚动 256 行）——最新有效信号
+ *     cls=D2（瞬时重试中 = watcher 在岗）且新鲜（age < watcher_signal_ttl_min，默认
+ *     10min）→ 本 tick C1 两族（unclaimed_terminal/unclaimed_answer）静默让位；
+ *     cls ∈ {D1,D3,kicked}（watcher standby 终态）、信号缺失、过期、读失败一律按无
+ *     信号 → 既有兜底告警不回归。stall 死寂检测（C2）与 crash（C3）系 watcher 事件
+ *     中继盲区（无事件不可见），无条件保留、永不静默；纯同步读零阻塞，不改待命制/
+ *     家族轮换（standby 判定仍纯由板面决定）。
  *   - 寿命 ≥ max_lifetime_min（默认 24h）→ 家族轮换单赢家选举（v2.1，替代旧
  *     "各自安静退出"三连唤）：认领 sentinel/family-teardown.json（wx 原子创建；
  *     陈旧/损坏标记可夺位；新鲜窗 = 读者自身 lifetimeMs）——赢家 exit 0 退出
@@ -442,6 +451,55 @@ function coordBusy(rootDir, signals, boardMtimeMs, idleMs) {
   }
   // 降级：全不可用 → 按空闲（门常开）
   return false;
+}
+
+/* --- watcher-signals 消费（v0.8 W6）：watcher 优先唤醒通道的在岗判定面 ---
+   格式实证=watcher/degrade.mjs #writeSignal：{at,cls,mission,reason} 逐行 JSONL，
+   cls ∈ {D1,D2,D3,kicked}（D2=瞬时重试中仍在岗；D1/D3/kicked=终态 standby），
+   滚动 256 行封顶；watcher 成功交付不写信号（success/noop/accepted 均静默）——
+   信号语义=「watcher 在岗/失能」状态面而非逐单回执面。消费语义（§15 裁决）：
+   watcher 在岗重试中 → 哨兵对 C1（未签收终态两族）静默让位；信号缺失/过期/终态/
+   读失败 → 按无信号走既有兜底。C2 stall 死寂检测与 C3 crash 为 watcher 事件中继
+   盲区（无事件不可见），无条件保留、永不静默。 */
+
+const WATCHER_SIGNAL_TTL_DEFAULT_MIN = 10; // 信号新鲜刻度（cfg watcher_signal_ttl_min / CLI --watcher-signal-ttl-min 可覆盖）
+const WATCHER_TERMINAL_CLS = new Set(["D1", "D3", "kicked"]); // watcher 终态（standby）→ 立即兜底
+const WATCHER_COVERED_CATEGORIES = new Set(["unclaimed_terminal", "unclaimed_answer"]); // C1 族=事件中继覆盖面（stall/crash 永不静默）
+
+function watcherSignalsFile(rootDir) {
+  return path.join(rootDir, "sentinel", "watcher-signals.jsonl");
+}
+
+/**
+ * W6 消费判定：watcher 是否正在岗覆盖 C1。判据=signals 最新有效条目（按 at 取新，
+ * 坏行跳过）：cls=D2 且新鲜（age < ttlMs）→ covered（哨兵 C1 静默）；D1/D3/kicked /
+ * 过期 / 缺失 / 读失败 / 无有效条目 → 不覆盖（走既有兜底告警，绝不因信号面故障
+ * 哑火或误哑）。纯同步读、零阻塞、零写（红线：直至型进程不引入等待；失败按无
+ * 信号处理）。
+ */
+function watcherCoverage(rootDir, nowMs, ttlMs) {
+  let raw = "";
+  try {
+    raw = fs.readFileSync(watcherSignalsFile(rootDir), "utf8");
+  } catch {
+    return { covered: false, why: "no-signals" }; // 缺失/读失败 ≈ 无信号（兜底）
+  }
+  let latest = null;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      const t = Date.parse(String((e && e.at) ?? ""));
+      if (!Number.isFinite(t)) continue; // 坏 at 行跳过
+      if (!latest || t > latest.atMs) latest = { atMs: t, cls: String((e && e.cls) ?? "") };
+    } catch {
+      /* 坏行跳过（滚动截半窗口内残行不致命） */
+    }
+  }
+  if (!latest) return { covered: false, why: "no-valid-entry" };
+  if (nowMs - latest.atMs >= ttlMs) return { covered: false, why: "expired" }; // 过期 → 兜底
+  if (WATCHER_TERMINAL_CLS.has(latest.cls)) return { covered: false, why: "terminal:" + latest.cls }; // watcher standby → 兜底
+  return { covered: true, why: "active:" + latest.cls }; // D2 在岗重试中 → C1 静默让位
 }
 
 /* ================================================================== */
@@ -1168,6 +1226,7 @@ function main() {
       answerGraceMs: numArgBridge(argv, "--answer-grace-min", c, "answer_grace_min", null, 3, 0.01, 1440) * 60000,
       stallGraceMs: numArgBridge(argv, "--stall-grace-min", c, "stall_grace_min", null, 30, 0.01, 1440) * 60000,
       crashGraceMs: numArgBridge(argv, "--crash-grace-min", c, "crash_grace_min", null, 10, 0.01, 1440) * 60000,
+      watcherSignalTtlMs: numArg(argv, "--watcher-signal-ttl-min", c, "watcher_signal_ttl_min", WATCHER_SIGNAL_TTL_DEFAULT_MIN, 0.01, 1440) * 60000, // W6 信号新鲜刻度
       coordIdleMs: numArgBridge(argv, "--coord-idle-min", c, "coord_idle_min", null, 3, 0.01, 1440) * 60000,
       refireGapMs: numArgBridge(argv, "--refire-gap-min", c, "refire_gap_min", "wake_timeout_min", 5, 0.01, 1440) * 60000,
       cap: Math.round(numArgBridge(argv, "--wake-cap", c, "wake_cap", "wake_retries", 3, 1, 100)),
@@ -1361,8 +1420,18 @@ function main() {
     standby = false; // 有活干（在飞或未签收）→ 恢复 active 值守
     if (stateLabel() !== prevLabel) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
 
+    // W6 watcher-signals 消费：watcher 在岗覆盖中的 C1 类别本 tick 静默让位（不重复
+    // 开枪）；信号缺失/过期/终态/读失败 → covered=false 走既有兜底（WAKE-02 不回归）。
+    // 仅板面出现 C1 条件时才读信号文件（stall/crash 板零额外 IO，且二者永不静默）；
+    // standby/家族轮换/仲裁面判定不受影响。
+    const needWatcherGate = conds.some((c) => WATCHER_COVERED_CATEGORIES.has(c.category));
+    const watcher = needWatcherGate
+      ? watcherCoverage(root, Date.now(), cfg.watcherSignalTtlMs)
+      : { covered: false, why: "not-needed" };
     const due = conds.filter(
-      (c) => matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),
+      (c) =>
+        (!WATCHER_COVERED_CATEGORIES.has(c.category) || !watcher.covered) && // W6：覆盖中的 C1 静默（stall/crash 永不静默）
+        matured(c) && (gateOpen(root, c, signals, boardMtime, cfg) || escaped(c)) && firedEligible(root, c, cfg),
     );
     if (due.length) {
       const claims = claimShots(root, due, cfg, slot);

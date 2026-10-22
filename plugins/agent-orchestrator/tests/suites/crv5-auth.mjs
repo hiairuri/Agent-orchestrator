@@ -108,11 +108,11 @@ try {
     await s.call("board", { action: "upsert", mission: { id: "m-sc5", title: "审计同语义探针", scope_paths: ["designs"] } });
     const r = resultText(await s.call("report", {
       mission_id: "m-sc5", worker: "w#1", kind: "done", summary: "s",
-      files_touched: ["designs-evil/evil.md", "designs/ok.md"],
+      files_touched: ["designs-evil/evil.md", "(internal design docs, not published)"],
     }));
     ck.ok(
-      "SCOPE-02 scope_paths=[designs] 时 designs-evil/evil.md 记入 warn_scope、designs/ok.md 不误伤",
-      Array.isArray(r.warn_scope) && r.warn_scope.includes("designs-evil/evil.md") && !r.warn_scope.includes("designs/ok.md"),
+      "SCOPE-02 scope_paths=[designs] 时 designs-evil/evil.md 记入 warn_scope、(internal design docs, not published) 不误伤",
+      Array.isArray(r.warn_scope) && r.warn_scope.includes("designs-evil/evil.md") && !r.warn_scope.includes("(internal design docs, not published)"),
       r.warn_scope,
     );
   }
