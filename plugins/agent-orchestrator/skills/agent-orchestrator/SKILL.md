@@ -225,22 +225,28 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
 - **探针原文回显是隐形大头**：4 个会话合计 111 次 DB/二进制原文回显（单会话最高 149KB）——DB 探针禁 `SELECT *`、必须聚合 + LIMIT ≤100；二进制只回显类型/大小/哈希/首 256 字节；单次输出 ≤50 行或 ≤10KB（第 20.4 节）。
 - **已读的文件别重读**：server.mjs 曾被单会话重读 12/10/7 次、全文读码 1638 行——派发时把函数/行号锚点写进任务包；≥1000 行文件禁一次全文读入（先 grep 结构再定点读）。
-- **typed 角色派发报 "Required MCP tool is not available in the parent startup snapshot"**：确定性失败——校验面（会话 create 时点冻结的 MCP 启动快照）与执行面（继承 live 注册表）数据源分叉，重试无新信息；处置 = 立即回退 general-purpose + persona 注入（第 10 章主形态）+ 任务包附 REPORT 双通道节（第 3 章），勿重试同一 typed 角色、勿归因会话新旧（机制与证据链见 designs/dispatch-probe-20261014/）。
+- **typed 角色派发报 "Required MCP tool is not available in the parent startup snapshot"**：确定性失败——校验面（会话 create 时点冻结的 MCP 启动快照）与执行面（继承 live 注册表）数据源分叉，重试无新信息；处置 = 立即回退 general-purpose + persona 注入（第 10 章主形态）+ 任务包附 REPORT 双通道节（第 3 章），勿重试同一 typed 角色、勿归因会话新旧（机制与证据链见 (internal design docs, not published)）。
 
-## 13. 学习记忆（lessons）
+## 13. 学习记忆与记忆归敛
 
-教训库落在 `<存储根>/memory/lessons.jsonl`，一行一条，**只增不重排**（修改走全文件原子重写）。字段：`id`（l-日期-6hex）、`type`（error-fix 报错修复 / pitfall 踩坑 / preference 用户偏好 / env-fact 环境事实）、`trigger`（≤120 字，什么时候会踩）、`lesson`（≤200 字单句原子教训，可空）、`fix`（≤200 字可执行动作）、`confidence`/`hits`/`status`、`refs`/`counter_refs`/`note`。
+教训库落在 `<存储根>/memory/lessons.jsonl`，一行一条，**只增不重排**（修改走全文件原子重写）。字段：`id`（l-日期-6hex）、`type`（error-fix 报错修复 / pitfall 踩坑 / preference 用户偏好 / env-fact 环境事实）、`trigger`（≤120 字，什么时候会踩）、`lesson`（≤200 字单句原子教训，可空）、`fix`（≤200 字可执行动作）、`confidence`/`hits`/`status`、`scope`（"project"/"global"，由写入目标库隐含，非调用参数）、`source`（"report"/"add"/"stage"，按写入路径自动标注）、`refs`/`counter_refs`/`note`。
+
+**scope 双级库（v0.8）**：项目库 = `<存储根>/memory/lessons.jsonl`；全端库 = `<~/.zcode>/orchestrator-memory/memory/lessons.jsonl`（server 参数 `--memory-root` 覆盖全端根；落位图权威 (internal design docs, not published) §2.2）。检索注入已是**双库合并选材**（同 normKey 条目全端优先去重，跨项目稳定的教训自动生效）；全端库写面（跨项目晋升 `promote` target="global"）由归敛通道启用（第 22 章）。
 
 **两级写入（防污染的核心）**：
 
 1. **候选（candidate）**：子代理 `report(kind=done, lessons=[{trigger, fix}…])`，≤3 条，服务端只存不判、不参与注入。
 2. **晋升（active）**：你签收 done 时人工把关——`lessons(action="promote", id=候选id, lesson?=提炼后的单句, fix?/type?/trigger?=精修)`。合格的才晋升：**单句原子、不复述 board 状态机语义或 AGENTS.md 已固化内容**；晋升初始 confidence=0.6、hits=1。同 trigger+fix 的 active 已存在 → 自动合并（老条 hits+1、confidence+0.1 上限 0.95），候选置 retired。
 
-**检索与注入**：`lessons(action="list")` 默认 status=active 按 score 降序（score = confidence × (1+ln hits) × e^(-天/30)，30 为衰减时间常数、真半衰约 21 天）。每次 `context_pack` 按任务标题/任务/read_first 的关键词（ASCII 词 + CJK 2-gram）匹配 trigger+lesson+fix，取交集 ≥1 的前 6 条、总 ≤1200 字注入 LESSONS 节；SessionStart 简报附全局 top3 单行。无匹配 → 不出现。
+**检索与注入**：`lessons(action="list")` 默认 status=active 按 score 降序（score = confidence × (1+ln hits) × e^(-天/30)，30 为衰减时间常数、真半衰约 21 天）。每次 `context_pack` 按任务标题/任务/read_first 的关键词（ASCII 词 + CJK 2-gram）匹配 trigger+lesson+fix，取交集 ≥1 的条目：type 加权排序（error-fix 1.0 > pitfall 0.9 > env-fact 0.8 > preference 0.7——**加权只重排，error-fix 命中项永不因权重被滤除**）、score 低于注入阈值 `INJECT_MIN_SCORE=0.40` 的不健康条目才滤除；入选的前 6 条、总 ≤1200 字注入 LESSONS 节，**注入行自带 id**（形如 `- [error-fix·l-20261020-1a2b3c] 触发：…`，供 blocked 回引与归敛溯源）；SessionStart 简报附全局 top3 单行。无匹配 → 不出现。
+
+**随手记（ORCHTEMP，v0.8）**：主控对话中想到值得留、但不值得当下打断流程归类的经验 → `lessons(action="stage", trigger, fix, lesson?, mission_id?, note?)`：落 candidate（source="orchestrator"、confidence=0）、不合并不注入、不占两道帽，由归敛代理（第 22 章）定期拾走落视图层——「随手记，归敛会拾走」。note 可作摆放提示（如 "pin: AGENTS.md"）。
+
+**blocked 回引（v0.8）**：worker 在 blocked/question 报告可附 `lesson_refs=[<教训id>…]` 回引误导它的教训：对应条目 confidence −0.1（下限 0.1）并记 counter_refs（含回引 mission）；触底且被 ≥2 个 mission 回引 → housekeep 自动置 retired。不带该字段的报告行为零变化。
 
 **矛盾与退役**：新事实推翻旧条 → `lessons(action="add", …, contradicts=<旧id>)`：旧条置 superseded（记 counter_refs 反例，不删除，可审计）。退役三通道：score < 0.1 自动衰汰（任何 lessons 操作入口 housekeep）、`mailbox(gc)` 顺带把过期 candidate 置 retired、`lessons(action="retire", id, reason?)` 手工。
 
-**与镜像的关系**：镜像（第 15 章）是滚动淘汰的临时缓冲；要把对话中的用户偏好/环境事实"钉住"，升级为 lessons（见 15 章用法）。
+**与镜像的关系**：镜像（第 15 章）是滚动淘汰的临时缓冲；要把对话中的用户偏好/环境事实"钉住"，升级为 lessons（见 15 章用法）。教训库的整理维护（视图层归敛、门槛与锁、归敛报告）见第 22 章。
 
 ## 14. 唤醒哨兵家族（bg-sentinel v2）
 
@@ -497,3 +503,55 @@ manifest/inputs 速查：done 可带 `manifest_entries`（≤12 条；条目七�
 **安全清单（凭证五禁+EXP 实测六条）**：凭证文件在 orchestrator 存储根**外**独立路径；JWT 用后即弃不落盘；唯一允许落盘的凭证物=role token（短时效）。五禁：禁入 git、禁入日志（任何出口对 token 形态 REDACTED 并可 grep 自检）、禁入 spool、禁入 echo.jsonl/mission timeline、禁入上下文包（inputs 机械牵引面）；probe 白名单排除凭证路径。EXP 实测六条：①expires_in=60s 是握手门票非硬切（长连穿越 TTL 边界稳定存活）；②全链建连 ~0.26s（sign 93ms+ws_open 97ms+auth_ack 166ms）；③auth_ack `pair_status:"matched"` ~100-166ms 即插即配（slot 空时）；④terminal 侧无心跳要求，30 分钟静默存活不被切断（挂接 burst 2×data=状态同步非心跳）；⑤桌面日志 `%USERPROFILE%/.zcode/v2/logs/<date>.log` 的 `[web-remote-control] V2 device state` ±0.2s 精确镜像 watcher 挂/拆（独立观测点）；⑥事务期间桌面 device 连接全程 online、状态仅 paired↔waiting_terminal 干净迁移。
 
 **与哨兵职责互换（反向监控）**：设计分工=watcher 接管唤醒、哨兵 v2.1 降为「watcher 存活监控+回退唤醒」（心跳超龄即告警并按回退路径补枪）；watcher 进程死亡**不自动拉起**（不做守护守护进程的无限递归），交用户/主控处置。**现状如实**：watcher 侧心跳/watcher-signals 写入面已落地，bg-sentinel 对 `watcher-heartbeat` 的消费面**尚未接线**（hooks 零 watcher 引用）——反向监控告警当前靠人工巡检心跳文件 mtime，哨兵侧接线列后续卡。
+
+## 22. 记忆归敛（v0.8）
+
+**定位**：lessons 库是事件层（只增不重排），主控与子代理的记忆视图是视图层——ORCH.md（你的记忆文件）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）。**归敛（glean）**= 后台子代理定期把事件层整理进视图层：消费 ORCHTEMP、巡检晋升候选、维护超帽裁剪，产出归敛报告。设计权威 (internal design docs, not published) §6/§9。
+
+### 22.1 文件地图
+
+| 文件 | 落位 | 说明 |
+|---|---|---|
+| `<存储根>/ORCH.md` | 项目存储根 | 你的记忆视图（帽 120 行/10KB；超帽 server 截断兜底并提示；你只消费不直写） |
+| 项目根 `AGENTS.md` 标记区 | 项目根 | 子代理记忆（硬帽 60 行/4KB；归敛只动标记对内） |
+| `<全端目录>/AGENTS.md` | 全端目录 | 跨项目子代理记忆（帽 50 行/2KB；经 context_pack GLOBAL MEMORY 条件节注入，`glean.cfg.json` 的 pack_global_section 一键关） |
+| `<存储根>/memory/lessons.jsonl` | 项目库 | 事件层（项目） |
+| `<全端目录>/memory/lessons.jsonl` | 全端库 | 事件层（跨项目；检索读端双库合并，§13） |
+| `<全端目录>/glean-lock.json` | 全端目录 | 归敛互斥锁（done 态保留：mtime=上次归敛时间、watermarks=事件基线） |
+| `<全端目录>/glean.cfg.json` | 全端目录 | 门槛与帽值（缺省内建：48h/10 条/锁过期 1.5h） |
+| `<全端目录>/glean-brief.json` / `projects.jsonl` / `reports/` | 全端目录 | server 物化的归敛简报 / 注册项目名册 / 归敛报告 |
+| ORCHTEMP | lessons 库内 source="orchestrator" 的 candidate 条目 | 你的随手暂存（§13 stage），归敛消费 |
+
+（全端目录缺省 `<~/.zcode>/orchestrator-memory`，`--memory-root` 可覆盖。）
+
+### 22.2 ORCH.md ver 同步（自动捎带的消费规则，逐字）
+
+任一工具调用成功响应可能附顶层 `orch_memory.orch_md`：收到 `reason:"initial"` → 静默装载；`"changed"` → 以新全文替换旧文认知；`"removed"` → 清空认知；`truncated:true` → 视为超帽信号，考虑拉起归敛。你不写 ORCH.md（归敛写），只消费。
+
+### 22.3 归敛到期信号与处置（信号链，逐字规则）
+
+门槛在 server 每次工具调用时评估（门①距上次归敛 >48h；门②双库自水印以来新增 ≥10 条；两值与帽值集中 `glean.cfg.json` 可覆盖；成本排序=先查时间一次 stat、再数事件，才谈抢锁）。双门全过且锁闲 → server 物化 `<全端目录>/glean-brief.json`（现场快照：实测门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg 全文）并在响应附 `orch_memory.glean={due:true, reason, brief_path, lock_state}`。处置：`due:true` 且锁闲 → Read brief → **后台 GP+orch-gleaner persona 派发**（任务包骨架=DESIGN §9.5：CONTRACT 三行；CONTEXT 逐字贴 brief 全文+本项目 ORCH.md 现文+根 AGENTS.md（标注标记对位置）+全端 AGENTS.md 现文；TASK=抢锁→消费 ORCHTEMP（retire 置状态）→候选巡检 promote→视图层维护（ORCH.md 重写 ver+1/标记区外科编辑/全端 AGENTS.md 更新）→锁置 done+watermarks→写报告；RULES=红线四条+标记对外字节零触碰+标记对缺失=该项目关闭跳过；OWNERSHIP=全端目录全部+各注册项目根 AGENTS.md 仅标记对内+各注册项目 ORCH.md，lessons 只经工具）；`lock_state:"busy"` 或不感兴趣 → 忽略——**信号不消费无后果**，下次调用按门槛重新评估。组包后 grep pack.md 验证 CONTEXT 物化（缺陷候选 #52 纪律）。
+
+### 22.4 开启/关闭
+
+- **开启（一次性，主控手工，归敛永不代劳）**：在项目根 AGENTS.md 末尾（用户手写区之后）加入空标记对：
+
+```
+<!-- orch-mem:begin v1（agent-orchestrator 记忆区：对内内容由归敛代理维护，勿手编；删除本对=关闭本功能） -->
+<!-- orch-mem:end -->
+```
+
+- **关闭**：删标记对即可。**被删=功能关闭，归敛跳过该项目并在报告记录（「标记区缺失，视为关闭」），不重建、不补写、不提示重建**；重开=用户/主控手工再加空标记对。
+
+### 22.5 审阅面（事后承担，无事前 ack 门）
+
+归敛产出三重可审：①**归敛报告** `<全端目录>/reports/<YYYYMMDD-HHmmss>-glean.md`（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源——主审计面）；②ORCH.md ver 回显（22.2 自动）；③git diff（根 AGENTS.md 属 tracked 文件可用；.zcode 下视图文件不入 git，以报告为准）。发现滥晋升/写越界/红线违反 → 手工纠偏（git 回滚标记区、`lessons(action="retire"/"add", contradicts=…)` 记反例）并沉淀教训。**active 退役归敛无权限动手，只有建议权**——否决或采纳都是你的手工动作。
+
+### 22.6 快照语义与形态注记
+
+- 子代理读到的是**父解析时点快照**：会话中途归敛改 AGENTS.md，已派发在途子代理不生效、新派发生效——不为此打断在飞任务。
+- Explore 形态不注入 AGENTS.md → 项目标记区通道对它静默失效；全端级经 context_pack GLOBAL MEMORY 节覆盖此洞。
+
+### 22.7 手动拉起
+
+不待信号：任何时候可按 22.3 的任务包骨架直接组包派发 orch-gleaner（等效手动触发，无专设命令面——锁在全端目录仲裁跨项目并发，抢不到锁的实例 report done skipped 自动让位）。

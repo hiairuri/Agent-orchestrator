@@ -24,6 +24,12 @@
  *      混编（fresh standby + stale）逐实例分类正确且 summary 归在岗待命（可补员=无任何
  *      存活实例，含 stale 不误判）；全死槽=可补员；quarantined 第三态认得且归在岗
  *      （隔离值守）；板全清全 fresh standby=在岗待命（自动接管新派发）
+ *   T10 W6 WAKE 族（v0.8-DESIGN §13.1 W6 / §14 A-v080-WAKE-01..03）：bg-sentinel 消费
+ *      <sentinel>/watcher-signals.jsonl（格式实证=watcher/degrade.mjs #writeSignal）——
+ *      WAKE-01 最新有效信号 cls=D2 且新鲜 → C1 两族静默零开枪，信号过期 → 既有兜底
+ *      恢复；WAKE-02 信号缺失 → 兜底路径不回归（既有唤醒失败告警保持）；WAKE-03
+ *      stall 死寂检测无条件保留（fresh D2 覆盖在位下 inflight_stall 照旧开枪——watcher
+ *      事件中继看不见无事件死寂，C2 面不随降级关闭，2026-10-22 用户裁决）
  *
  * live 行为无法自动化的部分（手动验收步骤）：
  *   - 平台通知面：全清后主控 0 唤醒（旧版实测三实例三连唤）——需宿主后台任务真跑 3 实例
@@ -750,6 +756,160 @@ try {
         /* already closed */
       }
       cleanSlots();
+    }
+  }
+
+  // ---- T10 W6 WAKE 族（A-v080-WAKE-01..03）：哨兵消费 watcher-signals——C1 静默让位 /
+  // 缺失过期兜底不回归 / stall 职责保留。信号格式实证=watcher/degrade.mjs #writeSignal：
+  // {at,cls,mission,reason} 逐行 JSONL，cls ∈ {D1,D2,D3,kicked}（D2=瞬时重试中仍在岗）。
+  {
+    const SIG = path.join(SENT_DIR, "watcher-signals.jsonl");
+    const writeSig = (cls, ageMs) => {
+      fs.mkdirSync(SENT_DIR, { recursive: true });
+      fs.writeFileSync(
+        SIG,
+        JSON.stringify({ at: new Date(Date.now() - (ageMs || 0)).toISOString(), cls, mission: "m-wake1", reason: "connect-failed" }) + "\n",
+      );
+    };
+    const firedNames10 = (prefix) => {
+      try {
+        return fs.readdirSync(path.join(SENT_DIR, "fired")).filter((n) => n.startsWith(prefix));
+      } catch {
+        return [];
+      }
+    };
+    cleanSlots();
+
+    // WAKE-01：fresh D2（watcher 在岗重试中）→ C1 静默；信号老化出 TTL → 既有兜底恢复。
+    // 加速刻度：TTL=0.2min(12s)；C1 锚 -10min（宽限 5min 已熟 + 逃逸口 2×宽限已开——
+    // 若未被覆盖必开枪，静默只能来自信号消费）。
+    // 观察窗确定性化（v0.8 QA 去偶发）：旧版按 3.2s wall-clock 假设「已跨 ≥3 tick」，
+    // 负载下子进程启动/调度抖动使实际 tick 数不可保证 → 偶发 RED。改为按槽位心跳推进
+    // 计数实际 tick（touchSlot 每 tick 顶部无条件刷新；active 态每 tick 全量评估=每 tick
+    // 恰一次消费判定），实测跨 ≥3 tick 并落定后才下静默结论；观察期任一开枪/回声新增/
+    // 退出即 fail-fast 判负——静默结论=「≥3 个已评估 tick 内零开枪」的机械事实。
+    fs.writeFileSync(
+      path.join(ROOT, "sentinel.cfg.json"),
+      JSON.stringify({ watcher_signal_ttl_min: 0.2 }) + "\n",
+    );
+    writeBoard([
+      {
+        id: "m-wake1",
+        title: "covered-terminal",
+        status: "done",
+        dispatch: { agent_id: "agent_wake1", mode: "agent" },
+        timeline: [],
+        updated_at: new Date(Date.now() - 600000).toISOString(),
+      },
+    ]);
+    writeSig("D2", 0);
+    const echoBeforeW1 = countLines(ECHO);
+    const bgW1 = spawnSentinel({});
+    // 确定性观察窗：心跳推进=tick 事实（需 ≥3 tick）；信号 at 每 5s 顺路保鲜（龄恒 <5s
+    // < TTL 12s——观察窗被负载拉长也不破「新鲜」前提，TTL 过期竞态消除；常态 3-4s 窗内
+    // 零额外写）。循环出口后落定 300ms 再终判（tick 体同步执行，远小于此）。
+    let hbW1 = null;
+    let ticksW1 = 0;
+    let shotW1 = false;
+    let freshAtW1 = Date.now();
+    await waitFor(() => {
+      if (Date.now() - freshAtW1 >= 5000) {
+        writeSig("D2", 0); // 长尾保鲜（仅窗被拉长时触发）
+        freshAtW1 = Date.now();
+      }
+      if (firedNames10("m-wake1--").length > 0 || countLines(ECHO) !== echoBeforeW1 || bgW1.proc.exitCode !== null) {
+        shotW1 = true; // fail-fast：覆盖在位下开枪=回归，静默不成立（断言 RED）
+        return true;
+      }
+      const d = readJson(slotFile(0));
+      const h = d && d.heartbeatAt;
+      if (h && h !== hbW1) {
+        hbW1 = h;
+        ticksW1 += 1;
+      }
+      return ticksW1 >= 3;
+    }, 30000, 150);
+    await sleep(300); // 落定：第 3 tick 的同步评估体必然已完成
+    const silentW1 =
+      !shotW1 && ticksW1 >= 3 && bgW1.proc.exitCode === null && firedNames10("m-wake1--").length === 0 && countLines(ECHO) === echoBeforeW1;
+    writeSig("D2", 60000); // 信号龄 60s > TTL 12s → 过期 → 兜底
+    const exitedW1 = await waitFor(() => bgW1.proc.exitCode !== null, 30000, 100); // 事件驱动等退出（不假设 wall-clock 上限）
+    const rW1 = await Promise.race([bgW1.done, sleep(5000).then(() => null)]);
+    ck.ok(
+      "WAKE-01 watcher 信号新鲜→C1 类别静默零开枪；信号过期→既有兜底告警恢复（exit 1 + fired 落盘）",
+      silentW1 && exitedW1 && Boolean(rW1) && rW1.code === 1 && rW1.stdout.includes("唤醒失败告警") && firedNames10("m-wake1--unclaimed_terminal--").length >= 1,
+      { silentW1, ticksW1, shotW1, rW1: rW1 && { code: rW1.code, wake: rW1.stdout.includes("唤醒失败告警") }, fired: firedNames10("m-wake1--") },
+    );
+    try {
+      fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生：不污染后续
+    } catch {
+      /* best effort */
+    }
+
+    // WAKE-02：信号缺失（文件不存在）→ 既有兜底路径不回归（T2b 同款行为保持）。
+    cleanSlots();
+    try {
+      fs.rmSync(SIG, { force: true });
+    } catch {
+      /* best effort */
+    }
+    writeBoard([
+      {
+        id: "m-wake2",
+        title: "fallback-terminal",
+        status: "done",
+        dispatch: { agent_id: "agent_wake2", mode: "agent" },
+        timeline: [],
+        updated_at: new Date(Date.now() - 600000).toISOString(),
+      },
+    ]);
+    const bgW2 = spawnSentinel({});
+    const rW2 = await Promise.race([bgW2.done, sleep(10000).then(() => null)]);
+    ck.ok(
+      "WAKE-02 watcher 信号缺失→哨兵兜底路径不回归（既有唤醒失败告警 exit 1 + fired 落盘保持）",
+      Boolean(rW2) && rW2.code === 1 && rW2.stdout.includes("唤醒失败告警") && firedNames10("m-wake2--unclaimed_terminal--").length >= 1,
+      rW2 && { code: rW2.code, wake: rW2.stdout.includes("唤醒失败告警"), fired: firedNames10("m-wake2--") },
+    );
+
+    // WAKE-03：stall 死寂检测无条件保留——fresh D2 覆盖在位下 inflight_stall 照旧开枪
+    //（watcher 事件中继盲区）。加速刻度：stall=0.1min(6s)、coord-idle=0.01min；锚
+    // updated_at -8s 已熟；板 mtime 同步回拨 → coordBusy 兜底档判空闲（门开，T5b 同款）；
+    // 空 rollout fixture 防 C3 误触真实面（无心跳 → 无 crash，降级链终端落 C2）。
+    const ROLLOUT10 = path.join(BASE.root, "rollout-wake3");
+    fs.mkdirSync(ROLLOUT10, { recursive: true });
+    fs.writeFileSync(
+      path.join(ROOT, "sentinel.cfg.json"),
+      JSON.stringify({ stall_grace_min: 0.1, coord_idle_min: 0.01, signals: { rollout_dir: ROLLOUT10 } }) + "\n",
+    );
+    cleanSlots();
+    writeSig("D2", 0); // 覆盖在位（fresh D2）——stall 仍必须开枪
+    writeBoard([
+      {
+        id: "m-wake3",
+        title: "stall-kept",
+        status: "running",
+        dispatch: { agent_id: "agent_wake3", mode: "agent" },
+        updated_at: new Date(Date.now() - 8000).toISOString(),
+      },
+    ]);
+    try {
+      const bt = new Date(Date.now() - 8000);
+      fs.utimesSync(path.join(ROOT, "board.json"), bt, bt); // 板面陈旧 → 门开（T5b 同款）
+    } catch {
+      /* best effort */
+    }
+    const bgW3 = spawnSentinel({});
+    const rW3 = await Promise.race([bgW3.done, sleep(12000).then(() => null)]);
+    ck.ok(
+      "WAKE-03 stall 检测职责保留：watcher 覆盖在位（fresh D2）下 inflight_stall 照旧开枪（exit 1 + 在飞任务龄期告警，无 crash）",
+      Boolean(rW3) && rW3.code === 1 && rW3.stdout.includes("在飞任务龄期告警") && !rW3.stdout.includes("疑似崩溃告警") && firedNames10("m-wake3--inflight_stall--").length >= 1,
+      rW3 && { code: rW3.code, stall: rW3.stdout.includes("在飞任务龄期告警"), crash: rW3.stdout.includes("疑似崩溃告警"), fired: firedNames10("m-wake3--") },
+    );
+    try {
+      fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生
+      fs.rmSync(SIG, { force: true });
+    } catch {
+      /* best effort */
     }
   }
 } finally {

@@ -11,9 +11,10 @@ A ZCode plugin that turns "dispatch and hope" into accountable delegation:
 - **Context packs** — verbatim context materialization for every dispatch: read-first lists, rules, upstream excerpts, budget tiers (S/M/L), optional git-worktree sandboxing with `merge-tree` pre-check gates and scope allowlists.
 - **Sentinel watchdog** — a standby-based background family that never fully exits: stall alarms for in-flight missions, wake-failure alarms for unacked results, family teardown/rotation.
 - **Lessons library** — cross-mission learning memory: workers file candidates via reports, the coordinator promotes/merges them; score decay, counter-evidence (`contradicts`) chains, auto-retire.
+- **Memory consolidation** — candidate lessons flow through staging into curated views (`ORCH.md` for coordinators, `AGENTS.md` marker sections for subagents, a global cross-project store) maintained by a gated, lock-protected consolidation agent that runs on demand.
 - **Structured probe** — a server-enforced capped read tool (SQL/file/grep/binary inspect) with pagination and hash envelopes, so the coordinator can peek without context bloat.
 
-**11 MCP tools**, 4 hook events, a 20-chapter SKILL manual, 18 test suites (780+ assertions) via `tests/run-all.mjs`.
+**11 MCP tools**, 4 hook events, a 22-chapter SKILL manual, 19 test suites (890+ assertions) via `tests/run-all.mjs`.
 
 ## Install
 

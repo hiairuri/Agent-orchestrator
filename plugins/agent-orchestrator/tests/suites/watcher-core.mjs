@@ -1,7 +1,7 @@
 /*!
  * suites/watcher-core.mjs —— W1 watcher 守护进程核心套（mock relay + mock 凭据，零真实触达）
  *
- * 覆盖断言组（v0.7-W1；权威设计=designs/agent-orchestrator-v0.7-W-W-findings.md + W-G + EXP-3）：
+ * 覆盖断言组（v0.7-W1；权威设计=(internal design docs, not published) + W-G + EXP-3）：
  *   W-RED  REDACTED 日志闸（token 形态/Bearer 归零 + 自检；W-W §5.5 对账锚）
  *   W-POL  POLLER 分类（classify twin：未签收终态两族/优先级/宽限/签收排除/workflow 排除/
  *          B5 mtime 备链/spool 只数）
