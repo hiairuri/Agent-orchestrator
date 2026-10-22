@@ -5,8 +5,10 @@
  * 30s 组装闸、id ≤256 字符——模板壳远低于限值，单帧即达（W-W §3 步骤 5）。
  * checksum=crc32 IEEE 反射；dataBase64 承载 reassembled JSON（method=session/send）。
  *
- * L2 流程：workspace-list-request → response 取 workspaceKey → workspace-bridge-open
- * → ready 取 bridgeSessionId/initialTaskId。消息形状按 W-W §3 表实现，活体集成阶段
+ * L2 流程：workspace-list-request → response.result 取 workspaceKey（派生消费）→
+ * workspace-bridge-open → ready 取 bridgeSessionId/initialTaskId。消息形状按 relay V2 契约：
+ * L2 语义整体装 data.payload 内层、字段名 requestId/workspaceKey（v0.9-L2 findings §4 修订；
+ * bridge-open 深层形状——bridgeSessionId 终端自造等 wake 链第二步——另波施工）。活体集成阶段
  * 如与实测出入以实弹修订本文件 SHAPES 注释为准（W-W §11.5 同纪律）。
  * 零 npm 依赖；node >= 20。
  */
@@ -17,7 +19,7 @@ export const LIMITS = {
   msgMax: 16777216,        // 16MiB/消息
   maxFragments: 64,        // 64 片
   assembleTimeoutMs: 30000, // 30s 组装闸
-  maxIdChars: 256,         // identity/req_id 上限
+  maxIdChars: 256,         // identity/requestId 上限
 };
 
 /* --- crc32 IEEE 反射（标准多项式 0xEDB88320） --- */
@@ -82,15 +84,20 @@ export function decodeRpcFrames(frames, { nowMs = Date.now() } = {}) {
 export async function openBridge({ session, workspaceKeyHint = null, listTimeoutMs = 10000, openTimeoutMs = 10000, reqIdBase = "ow" } = {}) {
   if (!(session instanceof RelaySession)) throw Object.assign(new Error("bad-session"), { code: "bridge-bad-session" });
   const reqId = `${reqIdBase}-${Date.now().toString(36)}`;
-  // workspace-list → 取 workspaceKey（多工作区时 hint 优先，否则首个）
-  const list = await session.request({ type: "data", zcode_type: "workspace-list-request", req_id: reqId }, { timeoutMs: listTimeoutMs });
-  const workspaces = Array.isArray(list && list.workspaces) ? list.workspaces : [];
+  // workspace-list → 取 workspaceKey（多工作区时 hint 按派生键优先，否则首个）
+  // 构帧对齐现行契约：L2 语义装 payload 内层 + requestId 字段名（L2-findings §4 修复 3）
+  const list = await session.request({ type: "data", payload: { zcode_type: "workspace-list-request", requestId: reqId } }, { timeoutMs: listTimeoutMs });
+  const result = list && list.result;
+  const workspaces = Array.isArray(result && result.workspaces) ? result.workspaces : [];
   if (!workspaces.length) throw Object.assign(new Error("workspace-list-empty"), { code: "bridge-list-empty" });
-  const picked = (workspaceKeyHint && workspaces.find((w) => w && w.workspaceKey === workspaceKeyHint)) || workspaces[0];
-  const workspaceKey = picked && picked.workspaceKey;
+  // workspaceKey 派生消费（上游 resolveWebRemoteControlWorkspaceKey 语义，web-remote-control.ts:744-748：
+  // workspaceIdentity?.trim() || workspacePath；WorkspaceTarget 项无 workspaceKey 字段）
+  const resolveKey = (w) => (w && (typeof w.workspaceIdentity === "string" && w.workspaceIdentity.trim() ? w.workspaceIdentity.trim() : w.workspacePath)) || null;
+  const picked = (workspaceKeyHint && workspaces.find((w) => resolveKey(w) === workspaceKeyHint)) || workspaces[0];
+  const workspaceKey = resolveKey(picked) || (result && typeof result.activeWorkspaceKey === "string" ? result.activeWorkspaceKey : null);
   if (typeof workspaceKey !== "string" || !workspaceKey) throw Object.assign(new Error("workspace-key-missing"), { code: "bridge-key-missing" });
-  // bridge-open → ready（bridgeSessionId/initialTaskId；recoveryId 透传）
-  const ready = await session.request({ type: "data", zcode_type: "workspace-bridge-open", workspace_key: workspaceKey, req_id: reqId }, { timeoutMs: openTimeoutMs });
+  // bridge-open → ready（bridgeSessionId/initialTaskId；recoveryId 透传）；信封+字段名同步对齐
+  const ready = await session.request({ type: "data", payload: { zcode_type: "workspace-bridge-open", requestId: reqId, workspaceKey } }, { timeoutMs: openTimeoutMs });
   const bridgeSessionId = ready && typeof ready.bridgeSessionId === "string" ? ready.bridgeSessionId : null;
   if (!bridgeSessionId) throw Object.assign(new Error("bridge-ready-missing"), { code: "bridge-ready-missing" });
   return { workspaceKey, bridgeSessionId, initialTaskId: ready.initialTaskId ?? null, recoveryId: ready.recoveryId ?? null };

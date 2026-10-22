@@ -95,7 +95,7 @@ export function loadPlatformJwt({ credPath = CREDENTIALS_PATH(), key, provider, 
   } catch {
     return { ok: false, reason: "credentials-corrupt" };
   }
-  const active = provider || entries["oauth:active_provider"];
+  const active = provider || decryptEntry(entries["oauth:active_provider"], key) || entries["oauth:active_provider"];
   if (active != null && !["zai", "bigmodel"].includes(String(active))) return { ok: false, reason: "provider-unsupported" };
   const enc = entries["zcodejwttoken"];
   if (typeof enc !== "string" || !enc) return { ok: false, reason: "jwt-absent" };
