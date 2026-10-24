@@ -14,6 +14,14 @@
  * v0.3: the briefing ends with a one-line lessons digest (global score top-3,
  * <= 300 chars; the whole line is dropped when over budget).
  *
+ * v0.10 G5 (anchor trust root trigger): every SessionStart republishes the
+ * paired wake anchors <root>/sentinel/coord-session.txt (this session id) and
+ * coord-workspace.txt (ZCODE_PROJECT_DIR) atomically, before the board check.
+ * Rationale: resume-only dual-write left coord-workspace.txt missing after an
+ * app restart (EXP10 R4), which made the watcher fall back to workspaces[0]
+ * and let b2 self-heal hijack the session anchor. stdout/exit contract
+ * unchanged (still silent when there is nothing to resume).
+ *
  * Storage root discovery: <project>/.zcode/orchestrator/root.txt (pointer to a
  * custom root) if present, otherwise the default directory itself.
  */
@@ -247,6 +255,37 @@ function loadBoard(rootDir) {
   }
 }
 
+/* --- v0.10 G5 锚互信根触发（session-start 面） -------------------------------
+ * EXP10-findings R4：应用 12:31 重启后 coord-session.txt 在、coord-workspace.txt 缺失
+ * （G4 的双写只挂在 resume 调用上，而 SessionStart 从不写锚）→ watcher 无锚盲取
+ * workspaces[0] → b2 在错工作区建会话 → 回读刷新劫持 coord-session。
+ * 修法：SessionStart 以自身 session_id + ZCODE_PROJECT_DIR 无条件重发布**成对**锚
+ * （session+workspace 同源同刻，保持互信根一致；新启动的会话即最新唤醒目标）。
+ * 写面纪律：best-effort 永不 fatal、原子 tmp+rename、不改变 hook 事件契约（stdin/stdout
+ * 形状与退出码不变）。session_id 按 journal.mjs 同款字符集消毒（防路径/换行注入）。
+ */
+function safeSessionId(value) {
+  return String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 256);
+}
+
+function atomicWriteBestEffort(file, data) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}-${Date.now().toString(36)}`;
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, file);
+  } catch {
+    /* best effort：锚写失败不阻塞会话启动 */
+  }
+}
+
+function publishWakeAnchor(rootDir, projectDir, sessionId) {
+  const sid = safeSessionId(sessionId);
+  if (!sid) return;
+  atomicWriteBestEffort(path.join(rootDir, "sentinel", "coord-session.txt"), sid + "\n");
+  atomicWriteBestEffort(path.join(rootDir, "sentinel", "coord-workspace.txt"), path.resolve(projectDir) + "\n");
+}
+
 function countUnread(rootDir, missionId) {
   try {
     return fs
@@ -262,6 +301,9 @@ function main() {
   const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
   const sessionId = typeof input.session_id === "string" ? input.session_id : "";
   const rootDir = locateRoot(projectDir);
+  // v0.10 G5：互信根触发先于板面判定——即使无板/无可恢复任务也要发布唤醒目标对
+  // （watcher 无锚 fail-loud；锚缺失=唤醒链断点，见 publishWakeAnchor 注）。
+  publishWakeAnchor(rootDir, projectDir, sessionId);
   const board = loadBoard(rootDir);
   if (!board) return;
 

@@ -6,8 +6,8 @@
  * 覆盖 21 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
  *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §22 在案+标记对逐字串，
- *   权威 (internal design docs, not published) §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
- *   A-V090-HOST-01（C6 findings 文件存在+§0 判定串+§1 锚点串在册口径；权威 (internal design docs, not published)
+ *   权威 designs/agent-orchestrator-v0.8-DESIGN.md §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
+ *   A-V090-HOST-01（C6 findings 文件存在+§0 判定串+§1 锚点串在册口径；权威 designs/agent-orchestrator-v0.9-C6-findings.md
  *   §3/§5-2 移交语义 + v0.9-DESIGN §16 HOST-01 行；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）。
  * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-4 导出常量（宿主修复事件触发的人工维护清单）；
  *   默认模式断言各 anchor 在位（防缺陷期被误删）；env ORCH_HOST_FIXED=1 反向断言各 anchor 已回收，
@@ -17,12 +17,12 @@
  *   V6-24 实现侧（V7-05 numArgOpt 稀疏写）先行落地、桥接语义复邦；A-DOC-V4P12/A-PLUGIN-STUB
  *   同步切换为断言乙稿桥接措辞在位，方案甲存根短语改列 ban（防复发回退）。
  *
- * TODO(issue): 上游 issue 稿（宿主 startup snapshot 缺陷，证据链 (internal design docs, not published)）
+ * TODO(issue): 上游 issue 稿（宿主 startup snapshot 缺陷，证据链 designs/dispatch-probe-20261014/）
  *   待 V6-61 定稿提交后回填编号，并同步回填 RECYCLE_LIST 各条 issue 字段。
  *
  * 运行方式：node tests/suites/typed-dispatch-docs.mjs（回收核对：ORCH_HOST_FIXED=1 node …）
  * 前置：node >= 20；零依赖（node:fs + node:assert/strict）。退出码：全绿 0；任一 FAIL 非 0。
- * 失败信息规范：断言 ID + 缺失子串 + 回写指针（(internal design docs, not published) §1 E-xx），
+ * 失败信息规范：断言 ID + 缺失子串 + 回写指针（designs/agent-orchestrator-v0.6-W-C-findings.md §1 E-xx），
  *   断言红时零查证即可按指针补稿。
  */
 import fs from "node:fs";
@@ -45,9 +45,9 @@ const FILES = {
 };
 const REPORT = "mcp__plugin_agent-orchestrator_orch__report";
 const SNAPSHOT_ERR = "Required MCP tool is not available in the parent startup snapshot";
-const POINTER = "(internal design docs, not published)";
-const V08_POINTER = "(internal design docs, not published)";
-const C6_POINTER = "(internal design docs, not published)";
+const POINTER = "designs/agent-orchestrator-v0.6-W-C-findings.md";
+const V08_POINTER = "designs/agent-orchestrator-v0.8-DESIGN.md";
+const C6_POINTER = "designs/agent-orchestrator-v0.9-C6-findings.md";
 
 /**
  * RECYCLE_LIST（V6-64 到期回收对象；W-C §3）——宿主修复事件判定后按 recycleAction 逐条回收。
@@ -82,7 +82,7 @@ export const RECYCLE_LIST = [
     id: "R-4",
     file: FILES.agentsMd,
     anchor: "勿重试同一角色",
-    recycleAction: "改写为历史注记（保留 (internal design docs, not published) 链接），删「勿重试」禁令",
+    recycleAction: "改写为历史注记（保留 designs/dispatch-probe-20261014/ 链接），删「勿重试」禁令",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -242,7 +242,7 @@ function main() {
       cond ? "" : `A-RECYCLE-1 失败: ${shapeErr || modeErr} —— 回写指针: 见 ${POINTER} §3（回收清单与触发双通道）`);
   }
 
-  // ---- v0.8 W4 增例（静态在位断言，权威 (internal design docs, not published) §10.2/§10.3/§14；不随 ORCH_HOST_FIXED 双模翻转）----
+  // ---- v0.8 W4 增例（静态在位断言，权威 designs/agent-orchestrator-v0.8-DESIGN.md §10.2/§10.3/§14；不随 ORCH_HOST_FIXED 双模翻转）----
   { // A-V080-DOC-01：orch-gleaner.md 在册且 lessons 不在 disallowedTools（与三角色相反的放行面）+ tools 面断言（report/probe/lessons 全名）
     const gleaner = readFile(FILES.agentGleaner);
     const toolsLine = frontmatterLine(gleaner, "tools");
@@ -269,7 +269,7 @@ function main() {
       `A-V080-DOC-02 缺失: ${skill22.length === 0 ? "SKILL.md 无「## 22.」节" : `标记对子串 ${JSON.stringify(miss)}`} —— 回写指针: 见 ${V08_POINTER} §10.2/§14 DOC-02`);
   }
 
-  // ---- v0.9 P2-① 增例（静态在位断言，权威 (internal design docs, not published) §3/§5-2 移交语义 +
+  // ---- v0.9 P2-① 增例（静态在位断言，权威 designs/agent-orchestrator-v0.9-C6-findings.md §3/§5-2 移交语义 +
   //      v0.9-DESIGN §16 HOST-01 行；不随 ORCH_HOST_FIXED 双模翻转）----
   { // A-V090-HOST-01：C6 findings 在册口径——文件存在 + §0 判定串 + §1 锚点串（轻量 grep，DESIGN §16「文档断言」）
     const bad = [];
