@@ -463,7 +463,7 @@ function main() {
     `，邮箱 ${unreadTotal} 条未读。` +
     "疑似唤醒失败=子代理结果已落盘但主控未被唤醒接手：先 mailbox(read) 接手，" +
     '处置时 answer/close 自动签收；暂缓用 board(action="ack", mission_id=…, note="deferred by user")。' +
-    "能答的答、能关的关。详见 /orch。";
+    "处置规则详见 /orch。";
   const clipped = text.length > MAX_OUTPUT_CHARS ? truncateStr(text, MAX_OUTPUT_CHARS - 3) + "..." : text;
   process.stdout.write(
     JSON.stringify({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: clipped } }),

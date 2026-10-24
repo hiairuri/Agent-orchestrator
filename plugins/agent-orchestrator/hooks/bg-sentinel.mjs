@@ -1117,10 +1117,10 @@ function buildSummary(claims, cfg) {
   const terminalRows = [...rowsOf("unclaimed_terminal"), ...rowsOf("unclaimed_answer")];
   if (terminalRows.length) {
     summary +=
-      "[orch-sentinel] 唤醒失败告警：以下任务结果已落盘但主控迟迟未签收" +
-      "（超过分级宽限：done 5 分钟 / blocked-question 3 分钟刻度）。" +
+      "[orch-sentinel] 唤醒失败告警：以下任务结果已落盘但主控未签收" +
+      "（分级宽限已超：done 5 分钟 / blocked-question 3 分钟）。" +
       "请立即 mailbox(read) 接手并 answer/close（自动签收）；" +
-      "处置后可重新以后台任务运行 hooks/bg-sentinel.mjs --once 继续盯守：\n" +
+      "补员命令与盯守规则见 SKILL 第 11 章：\n" +
       terminalRows.join("\n");
   }
 

@@ -396,7 +396,7 @@ export async function openBridge({
   if (!(session instanceof RelaySession)) throw err("bad-session", "bridge-bad-session");
   const tap = sessionTap(session);
   const reqId = `${reqIdBase}-${Date.now().toString(36)}`;
-  // workspace-list → 取 workspaceKey（多工作区时 hint 按派生键优先，否则首个）
+  // workspace-list → 取 workspaceKey（G10/G5：有 hint 归一匹配锚定；无 hint/未命中=fail-loud，见函数头注）
   const list = await session.request({ type: "data", payload: { zcode_type: "workspace-list-request", requestId: reqId } }, { timeoutMs: listTimeoutMs });
   const result = list && list.result;
   const workspaces = Array.isArray(result && result.workspaces) ? result.workspaces : [];
