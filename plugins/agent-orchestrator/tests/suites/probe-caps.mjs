@@ -18,8 +18,9 @@
  *   CACHE-03 no_cache:true 恒全量且不写缓存（首个 no_cache 调用零残留）+ schema 增参
  *   CACHE-04 page_token 续页不读不写缓存（续页不折存根；续页误写会被首页存根 prior_hash 当场抓获）
  *   CACHE-05 LRU 帽 64：第 65 个不同文件入帽逐最老（#1 被逐全量、末位仍存根）
- *   CACHE-06 环境探针：同进程连续两次 rename 原子写 mtimeMs 必不同（env-fact 留档）+
- *           同尺寸改写仅凭 mtime 因子完成写失效（size 因子失效时的兜底实证）
+ *   CACHE-06 环境探针：rename 原子写跨 mtime 粒度（≥100ms）后 mtimeMs 必不同（env-fact
+ *           留档；同 tick 连写同值=粒度边界，v0.10 G 时序余量）+ 同尺寸改写仅凭 mtime
+ *           因子完成写失效（size 因子失效时的兜底实证）
  *
  * 运行方式：node tests/suites/probe-caps.mjs [--root <临时根>]
  * 前置：node >= 20（db 用例需 node:sqlite 内建，Node ≥22.13/23.4——缺失时 db 族降级为跳过注记）；无网。
@@ -32,6 +33,7 @@ import { startServer, Checker, DEFAULT_SERVER, PRE } from "../harness/jsonrpc-cl
 import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
 
 const ck = new Checker("probe-caps");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = makeTempRoot({ prefix: "orch-probe-", root: parseRootArg() || undefined });
 const PROJ = path.join(BASE.root, "proj");
 const T = path.join(BASE.root, "root");
@@ -413,10 +415,14 @@ try {
     atomicWrite(f06, "same-length-A\n");
     const st1 = fs.statSync(f06);
     await probe({ action: "file.head", path: "cache06.txt" }); // 入缓存
+    // 时序余量（v0.10 G 满载 flake 修复）：同 tick 内两次原子写可共享同一 mtimeMs
+    // （statSync mtime 粒度边界；满载/低分辨率盘实测 CACHE-06a/b 偶红）——跨粒度后再写，
+    // 断言面仍是「mtime 因子单独完成写失效」，不假设亚粒度可见性。
+    await sleep(100);
     atomicWrite(f06, "same-length-B\n"); // 同尺寸（14B=14B）：size 因子失效，唯 mtime 可辨
     const st2 = fs.statSync(f06);
     const p06 = J(await probe({ action: "file.head", path: "cache06.txt" }));
-    ck.ok("CACHE-06a 环境探针：同进程连续两次 rename 原子写 statSync mtimeMs 必不同（env-fact 实证）",
+    ck.ok("CACHE-06a 环境探针：rename 原子写跨 mtime 粒度（≥100ms）后 statSync mtimeMs 必不同（env-fact 实证；同 tick 连写同值=缓存 mtime 因子的已知边界）",
       st2.mtimeMs !== st1.mtimeMs, { t1: st1.mtimeMs, t2: st2.mtimeMs });
     ck.ok("CACHE-06b 同尺寸改写不回吐：mtime 因子单独完成写失效（返回 B 非 A、非存根）",
       p06.cached === undefined && p06.lines[0] === "same-length-B",

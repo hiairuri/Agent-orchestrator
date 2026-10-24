@@ -92,6 +92,13 @@
  *   刻出，防套件污染真实家目录）——SYNC/GLEAN-01/02/04/INJ-06b 场景即用该缺省落点布景，
  *   GLEAN-06 场景经 --memory-root 显式注入另测。
  *
+ * v0.10 G2 稳定化（m-20261024-032310-bf22）：GLEAN-02b/03b/03c/03d 直写 glean 锁后
+ *   加 server 侧读回屏障（glean 键对 server 可见再断言）——NTFS mtime 可略超前
+ *   Date.now()（本机实测 -10ms 量级），idle_hours=0 的严格 `idleH > 0` 时间门首读
+ *   偶落空（与 ENV-06a「直写 now 被判未来」同族）；SYNC-02 两次同尺寸改写间加 100ms
+ *   时序余量（mtime 时钟粒度 ~15.6ms，同跳则双因子判不出 changed，CACHE-06a 同族）。
+ *   两处均只改观测时序，断言主句零改动（只增屏障代码，不增删断言）。
+ *
  * 运行方式：node tests/suites/crv8-memory.mjs [--root <临时根父目录>]
  * 前置：node >= 20；PATH 上有 git（INJ-08 基线导出）；无网。suite 注册行归主控
  *   G 胶水波收口（run-all REGISTRY，§13.2）——本套未注册前 run-all 不含其断言属预期。
@@ -138,6 +145,26 @@ const readJsonl = (file) =>
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l));
 const normPath = (p) => path.resolve(String(p)).toLowerCase();
+
+/**
+ * v0.10 G2 直写→server 读回屏障（照 ENV-06c 配方，勿发明新机制）：glean 锁由测试
+ * 进程直写后，server 侧以锁文件 mtimeMs 作 lastGleanMs 与自身 Date.now() 求差。NTFS
+ * mtime 时钟粒度/时钟源偏移下 mtime 可略「未来」于 Date.now()（本机直写探针实测
+ * -10ms 量级、40/40 例），idle_hours=0 的严格 `idleH > 0` 时间门首读会落空（响应无
+ * orch_memory.glean 键）——与 ENV-06a「直写 now 被判未来」同族。轮询同一读面直到
+ * 锁状态对 server 可见（glean 键出现）再断言；语义不变：真回归时轮询窗内恒不可见，
+ * 末次响应照常判红（与 ENV-06c board get 读回屏障同构）。
+ */
+const gleanAfterWrite = async (rawCall, tries = 60, stepMs = 50) => {
+  let glean = null;
+  for (let i = 0; i < tries; i++) {
+    const r = await rawCall("lessons", { action: "list" });
+    glean = (r.result && r.result.orch_memory && r.result.orch_memory.glean) || null;
+    if (glean) return glean;
+    await new Promise((res) => setTimeout(res, stepMs));
+  }
+  return glean;
+};
 
 /**
  * W2 rig：harness startServer 的扩展参数孪生（--memory-root 注入用）。jsonrpc-client.mjs
@@ -611,6 +638,11 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     ck.ok("SYNC-03 stat 未变 → 响应无 orch_memory 键", r.result && !("orch_memory" in r.result), r.result && Object.keys(r.result));
 
     // ---- SYNC-02：外部改写（bytes 变化，V7-01 双因子）→ changed + ver 递增 + 新全文
+    // v0.10 G2 时序余量（CACHE-06a 同族，实红面）：NTFS mtime 时钟粒度本机实测 ~15.6ms，
+    // 同尺寸改写若与基线同粒度，server 侧 bytes+mtimeMs 双因子判不出 changed
+    //（orchMdAttachment「residual race accepted」注记的实际触发面；直写探针复现
+    //  9/15 漏检，加 100ms 后 0/15）。只等 mtime 时钟跨跳，断言主句零改动。
+    await new Promise((res) => setTimeout(res, 100));
     fs.writeFileSync(
       orchMd,
       "<!-- orch-memory ver=2 updated=2026-10-22T09:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- SYNC2PROBE 改写后的行\n",
@@ -793,8 +825,8 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       lock8,
       JSON.stringify({ v: 1, state: "active", pid: process.pid, started_at: new Date(Date.now() - 5000).toISOString(), finished_at: null, watermarks: { global_lines: 0, projects: {} } }),
     );
-    r = await rawCall("lessons", { action: "list" });
-    const gb = r.result && r.result.orch_memory && r.result.orch_memory.glean;
+    // v0.10 G2：直写锁后经读回屏障取观测（glean 键可见=server 侧已过 mtime/Date.now 时间门）
+    const gb = await gleanAfterWrite(rawCall);
     ck.ok(
       "GLEAN-02b 锁 active 活 PID → 只附 lock_state=busy（无 due/brief_path 键）",
       Boolean(gb) && gb.lock_state === "busy" && !("due" in gb) && !("brief_path" in gb),
@@ -947,8 +979,10 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     );
 
     // ---- GLEAN-03b：活 PID 占用拒接管（busy 即退——信号抑制，绝不阻塞等待）
-    let r = await rawCall("lessons", { action: "list" });
-    const gb3 = gleanOf(r);
+    // v0.10 G2：03b..03d2 均为直写锁后的首读，统一走读回屏障（glean 键可见再断言；
+    // ENV-06c 配方）。r 自 03e 起复用（03e/03e2/03g 的缺省/句柄面不走屏障）。
+    let r;
+    const gb3 = await gleanAfterWrite(rawCall);
     ck.ok(
       "GLEAN-03b 活 PID 占用拒接管：锁 active+活 PID → 只附 lock_state=busy 无 due（不拉起第二归敛）",
       Boolean(gb3) && gb3.lock_state === "busy" && !("due" in gb3) && !("brief_path" in gb3),
@@ -957,8 +991,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
 
     // ---- GLEAN-03c：死 PID 回收（active+死 PID → 可接管，gate 放行 due）
     fs.writeFileSync(lock11, activeLock11(999999901, new Date().toISOString())); // 跨平台必死 PID（WS-9 先例值）
-    r = await rawCall("lessons", { action: "list" });
-    const gc3 = gleanOf(r);
+    const gc3 = await gleanAfterWrite(rawCall);
     ck.ok(
       "GLEAN-03c 死 PID 回收：active+死 PID → 可接管（lock_state=idle + due 放行）",
       Boolean(gc3) && gc3.lock_state === "idle" && gc3.due === true,
@@ -967,16 +1000,14 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
 
     // ---- GLEAN-03d：绝对过期 1.5h 回收 + cfg.lock_stale_hours 接线
     fs.writeFileSync(lock11, activeLock11(process.pid, new Date(Date.now() - 2 * 3600000).toISOString()));
-    r = await rawCall("lessons", { action: "list" });
-    const gd3 = gleanOf(r);
+    const gd3 = await gleanAfterWrite(rawCall);
     ck.ok(
       "GLEAN-03d 绝对过期回收：活 PID ∧ 龄期 2h > 缺省 1.5h → 可接管（due 放行）",
       Boolean(gd3) && gd3.lock_state === "idle" && gd3.due === true,
       gd3,
     );
     fs.writeFileSync(cfg11, JSON.stringify({ idle_hours: 0, new_events: 0, lock_stale_hours: 9999 }));
-    r = await rawCall("lessons", { action: "list" });
-    const gd32 = gleanOf(r);
+    const gd32 = await gleanAfterWrite(rawCall);
     ck.ok(
       "GLEAN-03d2 cfg.lock_stale_hours 接线：9999 → 同一把活 PID 锁翻回 busy（阈值可调生效）",
       Boolean(gd32) && gd32.lock_state === "busy" && !("due" in gd32),

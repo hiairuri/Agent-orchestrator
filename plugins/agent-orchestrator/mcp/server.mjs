@@ -73,7 +73,11 @@
  *   - sentinelHealth(root): read-only view of <root>/sentinel/ attached to board
  *     list responses (instances / shots_24h / abandoned / echo_tail); resume
  *     gains a family-refill + abandoned-takeover action.
- *   - coord-session.txt refreshed from the resume tool's session_id channel.
+ *   - coord-session.txt refreshed from the resume tool's session_id channel;
+ *     v0.10 G4 also writes the workspace anchor coord-workspace.txt (same
+ *     root-derived key; read by the watcher as openBridge workspaceKeyHint).
+ *     v0.10 G5 adds a startup filler: when coord-workspace.txt is absent the
+ *     server publishes it (never overwrites; resume/SessionStart refresh).
  *   - agent_harvest: read-only subagent transcript harvester over the rollout
  *     model-io JSONL (last complete record's request.messages tail).
  *   - mergeMission whitelist: unknown top-level keys are dropped (reported in
@@ -93,7 +97,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "0.9.0";
+const SERVER_VERSION = "0.10.0";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -690,6 +694,29 @@ if (path.resolve(root) === path.resolve(defaultRoot)) {
   } catch {
     /* best effort */
   }
+}
+
+/* v0.10 G5 (anchor trust-root trigger, server-start face): publish the
+ * workspace half of the wake anchor when absent. EXP10-findings R4 showed the
+ * file missing after an app restart (resume-only dual-write never ran in the
+ * new process) which drove the watcher into the legacy workspaces[0] fallback
+ * and ultimately let b2 self-heal hijack coord-session.txt. The server knows
+ * projectDir (= cwd, .mcp.json pins it to ${ZCODE_PROJECT_DIR}) but not the
+ * caller session id, so it fills only the workspace side. Never overwrites:
+ * toolResume / SessionStart are the authoritative refresh faces; this is a
+ * startup filler for the missing-file window. Only fills inside an EXISTING
+ * sentinel/ dir — never creates that dir, so sentinel_health's "available"
+ * signal (dir presence) keeps its exact pre-G5 semantics (l0 V13). Best
+ * effort. */
+try {
+  if (fs.existsSync(path.join(root, "sentinel"))) {
+    const anchorFile = path.join(root, "sentinel", "coord-workspace.txt");
+    if (!fs.existsSync(anchorFile)) {
+      atomicWriteFileSync(anchorFile, path.resolve(projectDir) + "\n", root);
+    }
+  }
+} catch {
+  /* best effort: anchor filler must never block server startup */
 }
 
 /* ------------------------------------------------------------------ */
@@ -1440,6 +1467,82 @@ function collectScopeConflicts(board) {
     }
   }
   return conflicts.slice(0, 10);
+}
+
+/**
+ * P9 (v0.10 §6.1): duplicate-mission warning — a stale drafted corpse left on
+ * the board next to a live dispatch of the same work (流程研究 §2 环节 E).
+ * Pair trigger, all three conditions:
+ *   1. same title after normalization (trim + lowercase) OR scope_paths
+ *      intersect under the G-3 single-source pair judgment
+ *      (scopePairConflict — the scope_warnings mechanism family, including its
+ *      blockedBy occlusion exemption);
+ *   2. statuses straddle {drafted} / {dispatched, running}: exactly one side
+ *      drafted, the other dispatched or running;
+ *   3. different mission id (re-upserting a mission never self-alarms).
+ * The incoming side is the POST-MERGE view (explicit patch fields win,
+ * otherwise the stored mission's fields, else the new-mission defaults:
+ * status drafted / empty title). Empty titles never participate — same
+ * "unregistered never participates" stance as empty scope. Callers omit the
+ * response key entirely when the result is empty (zero-byte-diff default).
+ */
+function checkDuplicateMissions(board, patch) {
+  const self =
+    patch.id != null ? findMission(board, patch.id) : null;
+  const incoming = {
+    id: patch.id ?? null,
+    title: patch.title !== undefined ? patch.title : self ? self.title : "",
+    status:
+      patch.status !== undefined ? patch.status : self ? self.status : "drafted",
+    scope_paths:
+      patch.scope_paths !== undefined
+        ? patch.scope_paths
+        : self
+          ? self.scope_paths
+          : undefined,
+    blockedBy:
+      patch.blockedBy !== undefined
+        ? patch.blockedBy
+        : self
+          ? self.blockedBy
+          : undefined,
+  };
+  const isDrafted = (s) => s === "drafted";
+  const isLive = (s) => s === "dispatched" || s === "running";
+  if (!isDrafted(incoming.status) && !isLive(incoming.status)) return [];
+  const normTitle = (t) =>
+    String(t == null ? "" : t).trim().toLowerCase();
+  const incomingTitle = normTitle(incoming.title);
+  const warnings = [];
+  for (const m of Array.isArray(board.missions) ? board.missions : []) {
+    if (!m || typeof m !== "object") continue;
+    if (incoming.id != null && m.id === incoming.id) continue; // no self-alarm
+    const straddles =
+      (isDrafted(incoming.status) && isLive(m.status)) ||
+      (isLive(incoming.status) && isDrafted(m.status));
+    if (!straddles) continue;
+    const titleHit =
+      Boolean(incomingTitle) && normTitle(m.title) === incomingTitle;
+    const scopeHit = scopePairConflict(incoming, m);
+    if (!titleHit && !scopeHit) continue;
+    const reason = titleHit && scopeHit ? "title+scope" : titleHit ? "title" : "scope";
+    const what = titleHit
+      ? scopeHit
+        ? `title 归一化后相等且 scope 相交：${scopeHit.overlap.join("、")}`
+        : "title 归一化后相等（trim+小写）"
+      : `scope 相交：${scopeHit.overlap.join("、")}`;
+    const archiveHint = isDrafted(m.status)
+      ? `建议归档旧 mission ${m.id}（drafted → skipped → closed）`
+      : `建议确认本 mission 是否为在飞 ${m.id} 的重复尸体；是则归档本 mission（drafted → skipped → closed）`;
+    const entry = {
+      with_mission_id: m.id,
+      reason,
+      hint: `疑似重复 mission：与 ${m.id} ${what}。${archiveHint}；确需并存请改 title/scope。`,
+    };
+    if (scopeHit) entry.overlap = scopeHit.overlap;
+    warnings.push(entry);
+  }
+  return warnings;
 }
 
 /**
@@ -3589,7 +3692,12 @@ function toolBoard(args) {
       // v0.5 E5 (CR-05): scope conflict preflight — after the cycle gate,
       // before any board write. Default tier collects scope_warnings;
       // strict tier throws inside F3 (reject-before-write, board untouched).
-      const scopeWarnings = checkScopeConflicts(loadBoard(), patch);
+      const liveBoard = loadBoard();
+      const scopeWarnings = checkScopeConflicts(liveBoard, patch);
+      // v0.10 (§6.1 P9): duplicate-mission preflight — same mechanism family,
+      // same transaction point (after the cycle/scope gates, before write).
+      // Empty results never surface (conditional-key precedent).
+      const duplicateWarnings = checkDuplicateMissions(liveBoard, patch);
       return {
         mission: upsertMission(patch, {
           // v0.6 (V6-20/V6-11): transient gate inputs (see destructure above).
@@ -3598,6 +3706,7 @@ function toolBoard(args) {
           reopenReason: typeof _noteIn === "string" ? _noteIn : "",
         }),
         scopeWarnings,
+        duplicateWarnings,
       }; // v0.3.1 A1
     });
     const mission = result.mission;
@@ -3605,6 +3714,11 @@ function toolBoard(args) {
     // v0.5 E5 (§5.4): optional response key — omitted entirely when there is
     // no conflict; independent key, never folded into note/ignored_keys.
     if (result.scopeWarnings.length) out.scope_warnings = result.scopeWarnings;
+    // v0.10 P9 (§6.1): optional duplicate_warning key — omitted entirely when
+    // no drafted/{dispatched,running} duplicate pair exists (P9-01 后半句).
+    if (result.duplicateWarnings.length) {
+      out.duplicate_warning = result.duplicateWarnings;
+    }
     // v0.4.1 merge whitelist: unknown keys are dropped, not stored.
     const ignoredKeys = ignoredPatchKeys(patch);
     if (ignoredKeys.length) {
@@ -6488,10 +6602,20 @@ function toolResume(args) {
   // v0.4.1: publish the coordinator session id for the sentinel family (dual-
   // idle gate main signal + mailbox echo target). resume is the existing channel
   // that carries the caller's session id; best effort, never fatal.
+  // v0.10 G4 (anchor trust root): alongside coord-session.txt write the
+  // workspace anchor sentinel/coord-workspace.txt, which the watcher feeds to
+  // openBridge as workspaceKeyHint. The key is derived from the same storage
+  // root's project dir (projectDir = cwd; default root = <projectDir>/.zcode/
+  // orchestrator) using the bridge-side rule workspaceIdentity.trim()||
+  // workspacePath — the server has no identity face, so the project path is
+  // the key. This removes the "first write trusts legacy workspaces[0]" drift
+  // hazard (EXP10-findings R3-5 Txn4). Both files are atomic writes; if the
+  // anchor write fails the session pointer still stands (best effort).
   if (sessionId) {
     try {
       fs.mkdirSync(path.join(root, "sentinel"), { recursive: true });
       atomicWriteFileSync(path.join(root, "sentinel", "coord-session.txt"), sessionId + "\n");
+      atomicWriteFileSync(path.join(root, "sentinel", "coord-workspace.txt"), path.resolve(projectDir) + "\n");
     } catch {
       /* best effort */
     }
@@ -8438,7 +8562,7 @@ function orchMdAttachment() {
  * with per-key junk fallback). Junk values fall back. */
 function readGleanCfg() {
   // v0.9 (C6/HOST-01b): pack_global_section default flips true→false. The host
-  // user-level injection face is source-verified ((internal design docs, not published) / 
+  // user-level injection face is source-verified ((internal design docs, not published)
   // agent-orchestrator-v0.9-C6-findings.md — ~/.zcode/AGENTS.md enters the
   // subagent context chain by default, scope "user"), so the pack GLOBAL
   // MEMORY section becomes opt-in to avoid double-channel injection

@@ -2,10 +2,11 @@
  * suites/crv1-scope.mjs —— CRV1-01…08（冲突预检八步，验 CR-05）+ E4 形状门 + M-04
  *
  * 覆盖断言组：A-v050-CRV1-01…08、A-v050-M04（未知键 ignored_keys）、E4（scope_paths/strict_scope
- *   形状拒绝、manifest 派生键静默剥离）、M-01/M-02（upsert 准入归一化存储面）。
- *   转录自 v05-impl-04/crv1-test.mjs（场景 A/B 双临时根）。
+ *   形状拒绝、manifest 派生键静默剥离）、M-01/M-02（upsert 准入归一化存储面）、
+ *   A-v0100-P9-01（v0.10 duplicate_warning：drafted 尸体 vs 在飞派发并存）。
+ *   转录自 v05-impl-04/crv1-test.mjs（场景 A/B 双临时根；场景 C 为 v0.10 P9 增例）。
  *
- * 运行方式：node tests/suites/crv1-scope.mjs [--root <临时根>]（缺省自建 %TEMP% 双根）
+ * 运行方式：node tests/suites/crv1-scope.mjs [--root <临时根>]（缺省自建 %TEMP% 多根）
  * 前置：node >= 20；无 git 依赖。
  */
 import path from "node:path";
@@ -16,7 +17,9 @@ const ck = new Checker("crv1-scope");
 const argRoot = parseRootArg();
 const TA = makeTempRoot({ prefix: "orch-crv1-a-", root: argRoot ? path.join(argRoot, "a") : undefined });
 const TB = makeTempRoot({ prefix: "orch-crv1-b-", root: argRoot ? path.join(argRoot, "b") : undefined });
+const TC = makeTempRoot({ prefix: "orch-crv1-c-", root: argRoot ? path.join(argRoot, "c") : undefined });
 const noWarn = (r) => r.json && r.json.ok === true && !("scope_warnings" in r.json);
+const noDup = (r) => r.json && r.json.ok === true && !("duplicate_warning" in r.json);
 
 try {
   // ---------- 场景 A ----------
@@ -88,8 +91,48 @@ try {
     ck.ok("M-01 empty entries dropped, stored []", JSON.stringify(r.json?.scope_paths) === JSON.stringify([]), r.json?.scope_paths);
     s.close();
   }
+  // ---------- 场景 C：v0.10 P9-01 duplicate_warning ----------
+  {
+    const s = startServer({ root: TC.root });
+    // 基线：drafted 尸体（title 带前后空白+混合大小写，锁归一化 trim+小写比较）
+    let r = await s.call("board", { action: "upsert", mission: { id: "p9m1", title: "  P9 Dup Task ", status: "drafted", scope_paths: ["src/p9/"] } });
+    ck.ok("P9-01a first drafted upsert: no duplicate_warning key", noDup(r), r.text);
+    // drafted+drafted 同 title（归一化相等）→ 不触发：跨 {drafted}/{dispatched,running} 才触发
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m2", title: "p9 dup task", status: "drafted", scope_paths: ["docs/"] } });
+    ck.ok("P9-01b drafted+drafted same title not triggered", noDup(r), r.json);
+    // →dispatched（偏更新：title/scope 取存值）→ drafted 尸体 + dispatched 同 title 触发
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m2", status: "dispatched" } });
+    const dw = r.json?.duplicate_warning;
+    ck.ok("P9-01c drafted+dispatched same title triggers (reason=title)", Array.isArray(dw) && dw.length === 1 && dw[0]?.with_mission_id === "p9m1" && dw[0]?.reason === "title" && typeof dw[0]?.hint === "string", r.json?.duplicate_warning);
+    // scope 相交（不同 title）→ reason=scope + overlap 逐字（复用 scope_warnings 相交判定）
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m3", title: "another task", status: "dispatched", scope_paths: ["src/p9/a.js"] } });
+    const dw3 = r.json?.duplicate_warning || [];
+    ck.ok("P9-01d drafted+dispatched scope overlap triggers (reason=scope)", dw3.length === 1 && dw3[0]?.with_mission_id === "p9m1" && dw3[0]?.reason === "scope" && JSON.stringify(dw3[0]?.overlap) === JSON.stringify(["src/p9/a.js"]), r.json?.duplicate_warning);
+    // title+scope 双命中同一 drafted 尸体 → reason=title+scope
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m4", title: "P9 DUP TASK", status: "dispatched", scope_paths: ["src/p9/b.js"] } });
+    const dw4 = r.json?.duplicate_warning || [];
+    ck.ok("P9-01e title+scope both matched → reason=title+scope", dw4.length === 1 && dw4[0]?.with_mission_id === "p9m1" && dw4[0]?.reason === "title+scope", r.json?.duplicate_warning);
+    // running 侧：drafted→claim→running 后，同 title 的 dispatched 建单不触发（同属在飞侧）
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m5", title: "run-only dup", status: "drafted" } });
+    ck.ok("P9-01f running-leg fixture drafted ok (no duplicate_warning)", noDup(r), r.text);
+    await s.call("board", { action: "claim", mission_id: "p9m5", worker: "w-p9" });
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m6", title: "run-only dup", status: "dispatched" } });
+    ck.ok("P9-01g dispatched vs running (same live side) not triggered", noDup(r), r.json);
+    // 再建 drafted 同 title → running+dispatched 各出一条（跨状态组合逐对判定）
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m7", title: "run-only dup", status: "drafted" } });
+    const ids7 = (r.json?.duplicate_warning || []).map((x) => x?.with_mission_id).sort();
+    ck.ok("P9-01h drafted vs running+dispatched triggers per pair", JSON.stringify(ids7) === JSON.stringify(["p9m5", "p9m6"]), r.json?.duplicate_warning);
+    // 自指排除：重 upsert 自身同 title 不产生 with_mission_id=自身
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m1", title: "  P9 Dup Task " } });
+    const dwSelf = r.json?.duplicate_warning || [];
+    ck.ok("P9-01i self id excluded from duplicate_warning", !dwSelf.some((x) => x?.with_mission_id === "p9m1"), r.json?.duplicate_warning);
+    // 无并存零字节差：duplicate_warning 键整体缺省（P9-01 后半句）
+    r = await s.call("board", { action: "upsert", mission: { id: "p9m8", title: "totally unique task", status: "drafted", scope_paths: ["unique/"] } });
+    ck.ok("P9-01j no duplicate → key absent (zero-byte-diff default)", noDup(r) && noWarn(r), r.text);
+    s.close();
+  }
 } finally {
-  TA.cleanup(); TB.cleanup();
+  TA.cleanup(); TB.cleanup(); TC.cleanup();
 }
 const { fail } = ck.summary();
 process.exit(fail ? 1 : 0);

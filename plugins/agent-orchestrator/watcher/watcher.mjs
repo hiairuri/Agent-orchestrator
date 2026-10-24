@@ -14,24 +14,34 @@
  *   - 心跳自证：每 60s 写 <root>/sentinel/watcher-heartbeat（mtime 即心跳；哨兵反向监控，
  *     职责互换 W-W §2）
  *   - 主循环：POLLER 分类 → TXN 闸 → 短事务（CREDS→RELAY→BRIDGE→INJECT→VERDICT）→ DEGRADE
+ *   - 工作区锚钉（G10，v0.10 G3/G5）：`sentinel/coord-workspace.txt` 与 coord-session.txt 同级
+ *     （单行派生键=workspaceIdentity.trim||workspacePath）。有锚→openBridge workspaceKeyHint
+ *     （工作区列表顺序随桌面会话/草稿漂移时不选错工作区）；**无锚/锚未命中=fail-loud
+ *     （workspace-anchor-missing / workspace-anchor-mismatch → D3 配置告警），绝不盲取
+ *     workspaces[0]**（EXP10 R4：错工作区注入+b2 建会话+回读刷新劫持 coord-session 锚）。
+ *     watcher 只读锚不写锚；锚的写面=互信根三触发（server 启动补位 / toolResume / SessionStart）。
+ *   - INJECT b2 生产接线（v0.10 G4/G5）：主路径统一走 wakeCoordSession（openBridge+b1/b2 自愈+
+ *     应答回读+b2 工作区守卫+coord-session 刷新一体）；b2 刷新仅当桥/应答工作区与锚一致，
+ *     否则保持原锚并把 warning 落日志（防锚劫持重现）。
  *   - 日志闸：一切出口经 credentials.redact（token 形态/Bearer 归零；token 值零持久化）
  *
  * 启动：node watcher/watcher.mjs --root <存储根> [--origin https://zcode.z.ai]
  *   [--poll-sec 30] [--min-interval-sec 90] [--wake-cap 3] [--hold-max-sec 40]
- *   [--trigger-statuses done,failed,blocked,question] [--once]
+ *   [--trigger-statuses done,failed,blocked,question] [--transport cloud|loopback]
+ *   [--loopback-origin http://127.0.0.1:<p>] [--loopback-port N] [--rollout-dir <dir>] [--once]
  * 常驻运行须用户显式授权（W-G §5.5；停用=进程退出+凭证自然过期，一键可断）。
  * 零 npm 依赖；node >= 20。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { TxnGate, HOLD_MAX_MS, SIGN_CONNECT_MAX_MS, signAndConnect } from "./txn.mjs";
 import * as creds from "./credentials.mjs";
 import { connectRelay, buildWs2Url } from "./relay.mjs";
-import { openBridge } from "./bridge.mjs";
-import { buildTemplateShell, sendPrompt } from "./inject.mjs";
-import { classifyAccept, finalVerdict, observeRevival, VERDICT_WINDOW_MS } from "./verdict.mjs";
-import { DegradeState, classifyFailure, failureFromClose, CLASSES } from "./degrade.mjs";
+import { buildTemplateShell, wakeCoordSession } from "./inject.mjs";
+import { classifyAccept, finalVerdict, observeRevival, rolloutRevivedProbe, VERDICT_WINDOW_MS } from "./verdict.mjs";
+import { DegradeState, classifyFailure, failureFromClose, CLASSES, loopbackD2Hint } from "./degrade.mjs";
 import { classifyForWatcher, pickNext, readBoardSafe, boardMtimeMs, RESULT_STATUSES } from "./poller.mjs";
 import { redact } from "./credentials.mjs";
 
@@ -78,7 +88,26 @@ export function resolveRoot(argv, { cwd = process.cwd() } = {}) {
   return root;
 }
 
+/**
+ * G11：③ 复活探针的 rollout 目录解析（CLI --rollout-dir > cfg rollout_dir > 缺省
+ * ~/.zcode/cli/rollout，与 hooks/bg-sentinel.mjs signalsOf 缺省同源）。沿用 strArg
+ * 「argv 优先、cfg 兜底、def 缺省」三段式；空串/未展开占位符落下一链。
+ */
+export function resolveRolloutDir(argv = [], cfg = {}, { homedir = os.homedir() } = {}) {
+  return strArg(argv, "--rollout-dir", cfg, "rollout_dir", path.join(homedir, ".zcode", "cli", "rollout"));
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 挂起响应守卫（v0.10 G respP 潜伏面）：对可能无人 await 的挂起响应 promise 先挂消费
+ * catch，使 rejection 恒被处理（不再以 unhandledRejection 崩 watcher 进程）；原 promise
+ * 仍向显式 await 方透传拒绝，语义不变。导出仅供断言消费（watcher-core 体例）。
+ */
+export function guardPendingResponse(p) {
+  p.catch(() => {});
+  return p;
+}
 
 /**
  * Watcher 实例：deps 全可注入（fsImpl/now/fetchImpl/transportFactory/revivedProbe/jwtLoader/
@@ -106,6 +135,27 @@ export function createWatcher({
   const verdictWindowMs = numArg(argv, "--verdict-window-sec", cfg, "verdict_window_sec", VERDICT_WINDOW_MS / 1000, 1, 600) * 1000;
   const triggerStatuses = strArg(argv, "--trigger-statuses", cfg, "trigger_statuses", RESULT_STATUSES.join(",")).split(",").map((s) => s.trim()).filter((s) => RESULT_STATUSES.includes(s));
 
+  /* W2 transport 面（v0.10 §3.1-§3.2）：cfg/CLI 三键 transport/loopback_origin|loopbackOrigin/loopback_port|loopbackPort。
+   * 白名单 cloud|loopback（lan 不预留枚举，Q1）；非法值启动即拒（W-TRN-02）；loopbackOrigin host 非回环启动即拒
+   * （与 SHIM-03 同轴，防配置面绕过硬闸）。cloud/缺省路径零新增分支行为（CR-04 锁，W-TRN-01）。 */
+  const transportRaw = strArg(argv, "--transport", cfg, "transport", "");
+  const transport = transportRaw === "" ? "cloud" : transportRaw;
+  if (transport !== "cloud" && transport !== "loopback") {
+    throw new Error(`watcher: transport 非法值 "${transportRaw}"（白名单 cloud|loopback；lan 不预留枚举，Q1）`);
+  }
+  const loopbackPort = numArg(argv, "--loopback-port", cfg, "loopback_port", Number.isFinite(Number(cfg && cfg.loopbackPort)) ? Number(cfg.loopbackPort) : NaN, 1, 65535);
+  const loopbackOriginCfg = strArg(argv, "--loopback-origin", cfg, "loopback_origin", "") || (cfg && cfg.loopbackOrigin != null ? String(cfg.loopbackOrigin).trim() : "");
+  let loopbackOrigin = "";
+  if (transport === "loopback") {
+    const o = loopbackOriginCfg || (Number.isFinite(loopbackPort) ? `http://127.0.0.1:${loopbackPort}` : "");
+    let u = null;
+    try { u = new URL(o); } catch { u = null; }
+    if (!o || !u || u.protocol !== "http:") throw new Error(`watcher: transport=loopback 需要合法 --loopback-origin（http://127.0.0.1:<p>）或 --loopback-port，得到 "${o || "(空)"}"`);
+    if (u.hostname !== "127.0.0.1" && u.hostname !== "localhost") throw new Error(`watcher: loopbackOrigin host 非回环 "${u.hostname}"（仅 127.0.0.1/localhost，SHIM-03 同轴硬闸）`);
+    loopbackOrigin = o.replace(/\/+$/, "");
+  }
+  const effOrigin = transport === "loopback" ? loopbackOrigin : origin; // W-TRN-01：cloud/缺省=origin 原值（逐字节锁）
+
   const gate = new TxnGate({
     now,
     minIntervalMs: numArg(argv, "--min-interval-sec", cfg, "min_interval_sec", 90, 0, 3600) * 1000,
@@ -115,6 +165,7 @@ export function createWatcher({
   const degrade = new DegradeState({ rootDir, fsImpl, now, log: (line) => emit(line) });
   const heartbeatFile = path.join(rootDir, "sentinel", "watcher-heartbeat");
   const coordSessionFile = path.join(rootDir, "sentinel", "coord-session.txt");
+  const coordWorkspaceFile = path.join(rootDir, "sentinel", "coord-workspace.txt"); // G10 工作区锚（与 coord-session 同级，独立文件不破既有 reader）
 
   const emit = (line) => {
     try { process.stdout.write(redact(line) + "\n"); } catch { /* stdout 断绝不致命 */ }
@@ -124,12 +175,13 @@ export function createWatcher({
   const loadJwt = jwtLoader || (() => creds.loadPlatformJwt({ fsImpl }));
   const loadDevice = deviceLoader || (async ({ jwt }) => {
     const f = fetchImpl || globalThis.fetch;
-    const listed = await creds.fetchDevices({ fetchImpl: f, origin, jwt });
+    const listed = await creds.fetchDevices({ fetchImpl: f, origin: effOrigin, jwt }); // W2：origin 按 transport 分派（cloud=原值，CR-04 锁）
     if (listed.ok) {
       const local = creds.loadLocalDevice({ fsImpl });
       const picked = creds.pickDesktopDevice(listed.devices, local);
       if (picked.ok) return picked;
     }
+    if (transport === "loopback") return { ok: false, kind: listed.ok ? "no-device" : listed.kind }; // loopback：空表=桌面 env 未生效→D2（不落 setting.json 备链，§3.2）
     const local = creds.loadLocalDevice({ fsImpl }); // API 败/拣选败 → 本地 setting.json 备链（零网络）
     if (local && local.deviceSid && local.deviceMid) return { ok: true, ...local };
     return { ok: false, kind: listed.ok ? "no-device" : listed.kind };
@@ -154,6 +206,17 @@ export function createWatcher({
     }
   }
 
+  /** G10/G5 工作区锚读取：缺失/空=null（G5 起=生产 fail-loud——openBridge 不再盲取
+   * workspaces[0]；锚只由互信根面写：server 启动补位 / toolResume / SessionStart）。 */
+  function sessionWorkspaceKey() {
+    try {
+      const v = fsImpl.readFileSync(coordWorkspaceFile, "utf8").trim();
+      return v || null;
+    } catch {
+      return null;
+    }
+  }
+
   /** 单个短事务（连-发-断）：返回 outcome 码。全部失败面已归类，绝不抛出。 */
   async function runTransaction(cond) {
     const missionId = cond.missionId;
@@ -162,8 +225,8 @@ export function createWatcher({
     let holdTimer = null;
     const t0 = now();
     try {
-      // CREDS S0-S1：JWT（零缓存，单事务内存生存期）
-      const jwtRes = loadJwt();
+      // CREDS S0-S1：JWT（零缓存，单事务内存生存期）；transport=loopback 时跳过（shim 免 JWT，零出站不触凭据解密面，§3.2）
+      const jwtRes = transport === "loopback" ? { ok: true, jwt: null } : loadJwt();
       if (!jwtRes.ok) return applyFailure(missionId, { kind: jwtRes.reason.startsWith("jwt-shape") ? "jwt-shape" : jwtRes.reason });
       const jwt = jwtRes.jwt;
 
@@ -181,11 +244,11 @@ export function createWatcher({
         signed = await signAndConnect({
           issueToken: async () => {
             const f = fetchImpl || globalThis.fetch;
-            return creds.issueTerminalToken({ fetchImpl: f, origin, jwt });
+            return creds.issueTerminalToken({ fetchImpl: f, origin: effOrigin, jwt }); // W2：loopback→shim 端点（Authorization 头被 shim 忽略）
           },
           connect: (token, { handshakeTimeoutMs }) =>
             connectRelay({
-              url: buildWs2Url({ origin, token, mid: dev.deviceMid }),
+              url: buildWs2Url({ origin: effOrigin, token, mid: dev.deviceMid }), // W2：loopback→ws://127.0.0.1（relay.mjs 组装零改动）
               deviceSid: dev.deviceSid,
               transportFactory: transportFactory || undefined,
               handshakeTimeoutMs,
@@ -213,41 +276,63 @@ export function createWatcher({
       // RELAY 步骤 2-3：auth_init/ack 已在 connectRelay 内完成（matched 检查）
       // （connectRelay 返回即 auth_ack 已收；waiting/不匹配按 reject 归 connect 面）
 
-      // BRIDGE：L2 编排
-      let bridge;
-      try {
-        bridge = await openBridge({ session });
-      } catch (err) {
-        if (session.kicked) return applyFailure(missionId, { kind: "kicked" });
-        if (String((err && err.code) || "") === "bridge-list-empty") return applyFailure(missionId, { kind: "bridge-list-empty" });
-        if (session.closeInfo) return applyFailure(missionId, failureFromClose(session.closeInfo));
-        return applyFailure(missionId, { kind: "relay-request-timeout" });
-      }
-      void bridge;
-
-      // INJECT：模板壳（隐私最小化：id+状态+指针）；②响应先挂起再发（防丢帧竞态）
+      // BRIDGE + INJECT（v0.10 G4 b2 生产接线 + G5 锚守卫）：主路径统一走 wakeCoordSession——
+      // openBridge（G10：coord 锚旁工作区键=显式 workspaceKeyHint；**无锚 fail-loud，禁止盲取
+      // workspaces[0]**）→ sendPrompt（b1 sendText；b2 createSession+firstInput 自愈恰一次）→
+      // 应答回读（RESP_TIMEOUT_MS 冷启覆盖）→工作区守卫通过才原子刷新 coord-session.txt，
+      // 全在其内部完成（禁改内部行为）；sendPrompt 导出面保留（mock/离线断言引用）。
       seqRef.n += 1;
-      const respReqId = "ow-" + seqRef.n;
-      const respP = session.awaitData("session-send-response", { timeoutMs: 8000, reqId: respReqId });
       const shell = buildTemplateShell({ missionId, state: cond.status, summary: cond.title, eventId: "latest" });
-      let sent;
+      const workspaceKeyHint = sessionWorkspaceKey();
+      // 潜伏面修复（v0.10 G，W3s 遗留注记）+ G4 分工：V1 session-send-response legacy 面仍先
+      // 挂起再发（防丢帧竞态）并经 guardPendingResponse 挂消费 catch（失败路径无裸挂起
+      // promise）；权威 ② 面=wakeCoordSession 内频道 [201] callP 回读（wake.response），
+      // respP 仅在其为空时兜底（时序见下注）。
+      const respReqId = "ow-" + seqRef.n;
+      const respP = guardPendingResponse(session.awaitData("session-send-response", { timeoutMs: 8000, reqId: respReqId }));
+      // G5：watcher 绝不写工作区锚（R4 锚劫持的写入者正是「首个成功开桥即记锚」——b2 在新会话
+      // 建好后把错工作区固化进 coord-workspace.txt）。锚的写面只留互信根：server 启动补位 /
+      // toolResume 双写 / SessionStart 双写；watcher 只读。
+      let wake;
       try {
-        sent = await sendPrompt({ session, seq: seqRef.n, sessionId: targetSession, content: shell });
+        wake = await wakeCoordSession({
+          session,
+          coordSessionPath: coordSessionFile,
+          content: shell,
+          workspaceKeyHint,
+          fsImpl,
+        });
       } catch (err) {
         if (session.kicked) return applyFailure(missionId, { kind: "kicked" });
         if (holdBreached) return applyFailure(missionId, { kind: "hold-timeout" });
         if (session.closeInfo) return applyFailure(missionId, failureFromClose(session.closeInfo));
-        return applyFailure(missionId, { kind: err && err.code === "rpc-ack-timeout" ? "rpc-ack-timeout" : "relay-closed" });
+        const code = String((err && err.code) || "");
+        if (code === "bridge-list-empty") return applyFailure(missionId, { kind: "bridge-list-empty" });
+        if (code === "workspace-anchor-missing" || code === "bridge-anchor-missing") {
+          return applyFailure(missionId, { kind: "workspace-anchor-missing" });
+        }
+        if (code === "bridge-anchor-mismatch") return applyFailure(missionId, { kind: "workspace-anchor-mismatch" });
+        if (code === "rpc-ack-timeout") return applyFailure(missionId, { kind: "rpc-ack-timeout" });
+        if (code === "relay-closed") return applyFailure(missionId, { kind: "relay-closed" });
+        return applyFailure(missionId, { kind: "relay-request-timeout" });
       }
-      const ackOk = Boolean(sent && sent.ack);
+      // G5 工作区守卫告警入日志（b2 刷新被拦截时：新会话已在错/未验证工作区建立，锚保持原值）
+      if (wake && Array.isArray(wake.warnings) && wake.warnings.length) {
+        emit(`[watcher] mission=${missionId} warn=${wake.warnings.join(",")}`);
+      }
+      const ackOk = Boolean(wake && wake.ack);
 
-      // ②受理：session/send 响应（data/session-send-response 形状，活体集成阶段复核）
-      let response = null;
-      try {
-        response = await respP;
-      } catch {
-        if (session.kicked) return applyFailure(missionId, { kind: "kicked" });
-        response = null; // 无响应=①已达②未明：按 no-ack 面（D2）
+      // ②受理：权威面=频道 [201] 回读（wake.response）；为空时才拾取 V1 legacy 面。注意
+      // awaitData 的挂起槽会被 wakeCoordSession 内 openBridge 的 L2 请求顶替，故 legacy 面在
+      // 新路径上不再可能命中（只会按 8s 窗到期）；此时其 timer 早已到期，兜底零额外等待。
+      let response = wake ? wake.response : null;
+      if (response == null) {
+        try {
+          response = await respP;
+        } catch {
+          if (session.kicked) return applyFailure(missionId, { kind: "kicked" });
+          response = null; // 无响应=①已达②未明：按 no-ack 面（D2）
+        }
       }
 
       // 判定①②毕 → 即断（连-发-断；③免连接观测）
@@ -273,9 +358,11 @@ export function createWatcher({
       }
 
       // ③复活观测（close 后剩余窗，rollout 心跳/prompt_started 双路任一；免连接不占槽）
+      // b2 自愈后探针对象=新建的活体会话（wake.sessionId），否则维持 coord 目标。
+      const revivalSessionId = wake && wake.selfHealed && wake.sessionId ? wake.sessionId : targetSession;
       const revived = await observeRevival({
         revivedProbe: probeRevived,
-        sessionId: targetSession,
+        sessionId: revivalSessionId,
         sinceMs: t0,
         windowMs: verdictWindowMs,
         sleepFn,
@@ -300,7 +387,8 @@ export function createWatcher({
         }
         const cls = classifyFailure({ kind });
         gate.recordOutcome(missionId, cls.cls === "D2" ? "d2" : cls.cls === "kicked" ? "kicked" : "d1");
-        degrade.record({ cls: cls.cls, missionId, reason: kind });
+        const hint = cls.cls === CLASSES.D2 && transport === "loopback" ? loopbackD2Hint({ origin: loopbackOrigin }) : null; // W-DGR2-01：loopback 断连提示必含桌面双 env 名
+        degrade.record({ cls: cls.cls, missionId, reason: kind, hint });
         emit(`[watcher] mission=${missionId} ${cls.terminal ? "终态" : "瞬时"}降级 ${cls.cls}（${kind}）`);
         return { outcome: cls.cls, missionId, kind };
       }
@@ -342,9 +430,10 @@ export function createWatcher({
     runTransaction,
     gate,
     degrade,
-    cfg: { pollMs, origin, holdMaxMs, signConnectMaxMs, verdictWindowMs, triggerStatuses, heartbeatMs, minIntervalMs: gate.minIntervalMs, busySilenceMs: gate.busySilenceMs },
+    cfg: { pollMs, origin, transport, loopbackOrigin, holdMaxMs, signConnectMaxMs, verdictWindowMs, triggerStatuses, heartbeatMs, minIntervalMs: gate.minIntervalMs, busySilenceMs: gate.busySilenceMs },
     writeHeartbeat,
     sessionTarget,
+    sessionWorkspaceKey, // G10 测试/观测面：锚读取（缺省 null）
     get disabled() { return degrade.terminal ? degrade.state.cls : null; },
   };
 }
@@ -352,8 +441,12 @@ export function createWatcher({
 /** 主循环（守护形态）：tick → sleep(pollMs)；SIGINT/SIGTERM 优雅退出。 */
 export async function main(argv = process.argv.slice(2)) {
   const rootDir = resolveRoot(argv);
-  const w = createWatcher({ rootDir, argv });
-  process.stdout.write(redact(`[watcher] 启动 root=${rootDir} origin=${w.cfg.origin} poll=${w.cfg.pollMs}ms interval≥${w.cfg.minIntervalMs}ms trigger=[${w.cfg.triggerStatuses.join(",")}]\n`) + "\n");
+  // G11：③ 复活观测接线（EXP10 R4-3）——rollout 心跳探针此前只导出未注入，生产直跑
+  // 恒落空探针 → verdict 系统性失真为 accepted-not-revived。rolloutDir 缺省与
+  // bg-sentinel.mjs signalsOf 同源（~/.zcode/cli/rollout），CLI/cfg 可覆盖。
+  const rolloutDir = resolveRolloutDir(argv, loadCfg(rootDir));
+  const w = createWatcher({ rootDir, argv, revivedProbe: rolloutRevivedProbe({ rolloutDir }) });
+  process.stdout.write(redact(`[watcher] 启动 root=${rootDir} origin=${w.cfg.origin} poll=${w.cfg.pollMs}ms interval≥${w.cfg.minIntervalMs}ms trigger=[${w.cfg.triggerStatuses.join(",")}]` + (w.cfg.transport === "loopback" ? ` transport=loopback endpoint=${w.cfg.loopbackOrigin}` : "") + ` rollout=${rolloutDir}` + "\n") + "\n");
   process.on("SIGINT", () => process.exit(0));
   process.on("SIGTERM", () => process.exit(0));
   if (parseArg(argv, "--once") !== undefined) {

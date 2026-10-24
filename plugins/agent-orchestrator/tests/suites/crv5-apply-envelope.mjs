@@ -18,6 +18,9 @@
  * v0.6.1 稳定化：ENV-01/07 两慢 merge 场景套内失败重试一次（withRetryOnce——全新临时根+
  *   新 server 重跑，断言集与语义不变，重试整组替换首跑入账；QA m-20261019-042917-43c1
  *   首跑 1 条抖动收编）+ marker 轮询窗 12s→30s（纯轮询容差）。
+ * v0.10 G 稳定化：ENV-06a 新鲜 intent 时间戳取 -1min（server 侧 applyIntentFresh 要求 age>=0，
+ *   「now」在满载/时钟微调下可被判未来致假红；仍在 10min 新鲜窗内）+ ENV-06c 直写后可读回
+ *   屏障（防 phase-1 未见 applied、phase-3 才见的可见性抖动被误判并发 apply）。语义不变。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -468,9 +471,12 @@ const resultText = (r) => r.json ?? { _raw: r.text };
     const s = startServer({ root: T6, cwd: PROJ6 });
     try {
       // ---- ENV-06a：新鲜 intent → discard 拒绝（apply↔discard 互斥）
+      // 时序余量（v0.10 G 满载 flake 实锤）：server 侧 applyIntentFresh 要求 age>=0（未来
+      // 时间戳按 stale 放行）——直写「now」在满载/时钟微调下可被判未来致假红。取 -1min：
+      // 仍远在 10min 新鲜窗内，断言「新鲜 intent 必须拒」语义不变。
       await prepareSandbox(s, T6, "m-env6a", { "src/env6a.js": "export const v = 1;\n" });
       const b6a = JSON.parse(fs.readFileSync(path.join(T6, "board.json"), "utf8"));
-      b6a.missions.find((x) => x.id === "m-env6a").pack.sandbox.apply_intent_at = iso(0);
+      b6a.missions.find((x) => x.id === "m-env6a").pack.sandbox.apply_intent_at = iso(1);
       fs.writeFileSync(path.join(T6, "board.json"), JSON.stringify(b6a, null, 2) + "\n");
       const r6a = await s.call("sandbox_discard", { mission_id: "m-env6a" });
       ck.ok(
@@ -500,6 +506,13 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       sb6c.applied_at = iso(0);
       sb6c.applied_commit = gitC(PROJ6, ["rev-parse", "HEAD"]).trim();
       fs.writeFileSync(path.join(T6, "board.json"), JSON.stringify(b6c, null, 2) + "\n");
+      // 板面读回屏障（v0.10 G）：等 server 侧读到 applied_at 再 discard——phase-1 未见而
+      // phase-3 才见会被误判「并发 apply」中止（跨进程可见性抖动，满载窗放大；语义不变）。
+      for (let i = 0; i < 60; i++) {
+        const g6c = await s.call("board", { action: "get", mission_id: "m-env6c" });
+        if (String(g6c.text || "").includes("applied_at")) break;
+        await sleep(50);
+      }
       const r6c = await s.call("sandbox_discard", { mission_id: "m-env6c" });
       const j6c = resultText(r6c);
       const sb6cAfter = sbOf(T6, "m-env6c");

@@ -6,13 +6,17 @@
  *           standby + 重登录指引；绝不重试轰炸（W-G §4：与桌面同源凭证，重试无新信息）
  *   连接面：ws 建连败/15s 握手超时/auth_ack 超时/rpc 无 ack/组装超时/4010 → 指数退避 ×3
  *           → [D2 临时] 本轮弃发写 signals 回哨兵，下轮 POLLER 恢复
- *   桥接面：bridge-error/bridge-degraded 重试 1 次 → [D2]；workspace-list 空/4004/4012
- *           → [D3 终态] 配置告警（coord-session 失效或桌面未开远控）
+ *   桥接面：bridge-error/bridge-degraded 重试 1 次 → [D2]；workspace-list 空/4004/4012/
+ *           工作区锚缺失或不匹配（G5 fail-loud）→ [D3 终态] 配置告警（coord-session/锚失效或
+ *           桌面未开远控）
  *   注入面：-32010 busy → no-op 成功；WRONG_PARAM → [D3]
  *   互踢：  KICKED/4009 → [kicked 终态] 静默 standby，绝不重连（第一禁令）
  *
  * signals 面：<root>/sentinel/watcher-signals.jsonl（D1/D2/D3/kicked 逐条事件，
  * 滚动 256 行封顶——哨兵 v2.1 兜底唤醒消费面；条目只含 id/类/原因，零敏感值）。
+ * W2 transport 面（v0.10 §3.3）：record 增 hint 提示参数——transport=loopback 断连/空设备表/超时归 D2 时
+ *   提示词必含桌面双 env 名（ZCODE_WEB_REMOTE_CONTROL_RELAY_WS_URL + ZCODE_ENDPOINT_ORIGIN，W-DGR2-01）；
+ *   cloud 路径不传 hint=逐字节不变（CR-04 锁）。
  * 零 npm 依赖；node >= 20。
  */
 import fs from "node:fs";
@@ -24,6 +28,14 @@ export const TERMINAL_CLASSES = new Set(["D1", "D3", "kicked"]);
 export const SIGNALS_MAX_LINES = 256;
 
 export const D1_GUIDANCE = "[orch-watch] D1 凭证终态：请打开 ZCode 桌面端重新登录（token 已吊销或凭据不可读）；watcher 转 standby，唤醒由哨兵接管；处理完重启 watcher。";
+
+/* W2 loopback 面（v0.10 §3.3/W-DGR2-01）：桌面双 env 名（名字=桌面读取链定案，L3 §3.1：
+ * relay WS URL 覆盖 + endpoint origin 覆盖；断连提示词必含两个名字，指引检查桌面 env 生效/桌面已登录）。 */
+export const LOOPBACK_ENV_RELAY_WS_URL = "ZCODE_WEB_REMOTE_CONTROL_RELAY_WS_URL";
+export const LOOPBACK_ENV_ENDPOINT_ORIGIN = "ZCODE_ENDPOINT_ORIGIN";
+export function loopbackD2Hint({ origin = "" } = {}) {
+  return `[orch-watch] loopback D2 瞬时降级：桌面链路未通（断连/空设备表/超时）——请检查桌面端两个 env 是否生效：${LOOPBACK_ENV_RELAY_WS_URL}（relay WS URL 应指向 shim ws2）与 ${LOOPBACK_ENV_ENDPOINT_ORIGIN}（endpoint origin 覆盖，应为 ${origin || "http://127.0.0.1:<loopbackPort>"}）；并确认桌面已登录且远控在线。`;
+}
 
 /**
  * 失败分类（纯函数）：输入 degradeFailure 的 kind 码 → {cls, terminal, reason}。
@@ -56,6 +68,8 @@ export function classifyFailure(f = {}) {
     case "close-4012":
     case "wrong-param":
     case "session-target-missing":
+    case "workspace-anchor-missing": // G5：coord-workspace.txt 缺失/为空（fail-loud，禁止盲取 [0]）
+    case "workspace-anchor-mismatch": // G5：锚不在 workspace-list（锚指向的工作区已关闭/改名）
       return { cls: "D3", terminal: true, reason: kind };
     // 连接/瞬时面（D2 临时）
     case "sign-relay-unavailable":
@@ -103,7 +117,7 @@ export class DegradeState {
   get terminal() { return TERMINAL_CLASSES.has(this.state.cls); }
 
   /** 记录一次事务结果；D1/D2/D3/kicked 写 signals；返回 state 快照。 */
-  record({ cls, missionId = null, reason = "" }) {
+  record({ cls, missionId = null, reason = "", hint = null }) {
     const at = new Date(this.now()).toISOString();
     if (TERMINAL_CLASSES.has(cls)) {
       this.state = { cls, at, missionId, reason };
@@ -112,6 +126,7 @@ export class DegradeState {
     }
     if ([CLASSES.D1, CLASSES.D2, CLASSES.D3, CLASSES.KICKED].includes(cls)) this.#writeSignal({ at, cls, missionId, reason });
     if (cls === CLASSES.D1) this.log(D1_GUIDANCE);
+    if (hint) this.log(hint); // W2：transport 感知提示（loopback 双 env 名）；cloud 不传=零变化（CR-04 锁）
     return { ...this.state };
   }
 

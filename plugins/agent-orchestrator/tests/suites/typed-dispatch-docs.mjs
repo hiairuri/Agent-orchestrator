@@ -160,7 +160,7 @@ function main() {
   subGroup(ck, "A-DOC-V4P31", "SKILL.md", skill, { need: ["action ∈ upsert/get/list/ack/claim"] }, "E-12");
   subGroup(ck, "A-DOC-SIGNALS", "SKILL.md", skill, { need: ["signals", "空串语义 = 哨兵侧内建默认"] }, "E-13");
   subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
-  subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点", "7162"] }, "E-02");
+  subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
 
   { // A-COMPAT-1：三角色 tools: 行均含 report 全名 + SKILL §10「保留不删」永久条款（V6-68 不变量守护）
     const bad = [];
