@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.10.0",
+  "version": "1.0.0",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"

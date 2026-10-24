@@ -48,6 +48,19 @@
  *     活 PID 占用拒接管（busy 即退零阻塞）/死 PID 回收/绝对过期 1.5h 回收 +
  *     cfg.lock_stale_hours 覆盖接线/done 态保留且 finished_at 优先、mtime 兜底
  *     （mtime 双用）/两锁不互嵌源码面（server 对归敛锁只读判锁）/cfg junk 逐键兜底）
+ *   A-v0110-M10-01（M10 G12，board/list glean_due 信号入 result JSON 内部：due →
+ *     顶层 glean_due {idle_h,events,brief_path} 且同调用内 brief 物化可达/时间门·
+ *     事件门·busy 三无 due 腿键整体缺省（零字节差缺省，P9-01 体例）；顶层 orch_memory
+ *     附件保留不拆。设计权威 (internal design docs, not published) + G12
+ *     双实证（主控+gleaner）；断言主句权威 tests/assertions/v0.11.x.md §1）
+ *   A-v0110-GLEAN3-01（glean3 微波，m-20261025-012000-glean3：server 物化固定
+ *     glean-pack.md 主控零组装——gate due 同调用点随 brief 再生（brief 物化后组合）；
+ *     due 信号两 surfacing 均增 pack_path（orch_memory.glean + board/list glean_due）；
+ *     固定模板锚（persona 路径 agents/orch-gleaner.md/锁权威指针勿手写/四态口径/视图层
+ *     边界/日志纪律 reports/<ts>-glean.md/Return ≤3 行指针纪律）+ brief 逐字内嵌
+ *     （brief 文件字节 ⊂ pack 字节）；brief+pack 删除后 board/list 单调用双重建；
+ *     busy 不重写 pack（零写面）；无 due 不物化 pack（零字节差缺省，P9-01 体例）。
+ *     断言主句权威 tests/assertions/v0.11.x.md §1）
  *   A-v080-GLEAN-05（W3，§5 stage 写入形状与 ORCHTEMP 候选流转：source=
  *     orchestrator/candidate/conf=0/hits=0 + note 摆放提示 + escape 先于截断 +
  *     type 缺省 pitfall/坏 type 空 trigger 严格报错/不做 findMergeTarget 合并/
@@ -562,10 +575,19 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     const MEM80 = subRoot("mem80-empty");
     // 归一化：token（两代 server 各自随机）+ lessonLine id 段（v0.8 唯一预期增量，
     // 替换为空串后与 0.7.1 的 `[type]` 形状逐字节对齐——增量本体由 INJ-08c 钉死）
+    // + W4 PO 案 A 激进重建（2026-10-24，A-v0110-PO-W4，先例 v0.6 裁决 A）：缺省模板
+    //   CONTRACT 规则块/围栏节头/阻塞处置句变字——新旧两形各自归一为规范形（预期增量掩码；
+    //   理由逐条见 v0.11.x.md §0；新文案本体由 A-v0110-PO-W4-01/02 静态钉）。
     const norm = (s) =>
       String(s)
         .replace(/\[token\] [0-9a-f]{4,32}/g, "[token] X")
-        .replace(/·l-\d{8}-[0-9a-f]{6}/g, "");
+        .replace(/·l-\d{8}-[0-9a-f]{6}/g, "")
+        .replace(/进度与结果一律用 (mcp__plugin_agent-orchestrator_orch__report) 上报[；。]/g, "REPORT-CHANNEL $1")
+        .replace(/kind ∈ \{milestone, blocked, question, done\}。\nsummary ≤ 200 字。\nkind=done 必带 artifacts 路径。/g, "REPORT-KIND summary artifacts")
+        .replace(/kind ∈ \{milestone, blocked, question, done\}；summary ≤ 200 字；done 必带 artifacts 路径[^\n]*/g, "REPORT-KIND summary artifacts")
+        .replace(/受阻\/目标矛盾\/必败门禁：立即 report\(kind=blocked, question=…\)[^\n]*/g, "RULES-BLOCKED")
+        .replace(/## CONTEXT（[^）]*）/g, "## CONTEXT 节头")
+        .replace(/## LESSONS（[^）]*）/g, "## LESSONS 节头");
     const s71 = startServer({ serverPath: baseline, root: T71 });
     const s80 = startServerX({ root: T80, args: ["--memory-root", MEM80] });
     try {
@@ -695,6 +717,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
   const lib7 = path.join(R7, "memory", "lessons.jsonl");
   const lock7 = path.join(MEM7, "glean-lock.json");
   const brief7 = path.join(MEM7, "glean-brief.json");
+  const pack7 = path.join(MEM7, "glean-pack.md");
   const g1Row = (i) => ({
     v: 1,
     id: `l-20260101-g1${String(i).padStart(2, "0")}`,
@@ -731,6 +754,10 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       r.result && !("orch_memory" in r.result) && !fs.existsSync(brief7),
       { respKeys: r.result && Object.keys(r.result), brief: fs.existsSync(brief7) },
     );
+    // G12（M10，A-v0110-M10-01）：无 due → board/list 无 glean_due 键（零字节差缺省，
+    // P9-01 后半句同体例）
+    const bl17 = await s7.call("board", { action: "list" });
+    ck.ok("G12-c 时间门不过 → board/list 无 glean_due 键", bl17.json && !("glean_due" in bl17.json), bl17.json && Object.keys(bl17.json));
     // 臂 2：时间门过（idle_hours=0）∧ 事件门不过（1 < 99）→ 不附不物化
     fs.writeFileSync(cfg7, JSON.stringify({ idle_hours: 0, new_events: 99 }));
     r = await rawCall("lessons", { action: "list" });
@@ -739,6 +766,11 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       r.result && !("orch_memory" in r.result) && !fs.existsSync(brief7),
       { respKeys: r.result && Object.keys(r.result), brief: fs.existsSync(brief7) },
     );
+    const bl27 = await s7.call("board", { action: "list" });
+    ck.ok("G12-d 事件门不过 → board/list 无 glean_due 键", bl27.json && !("glean_due" in bl27.json), bl27.json && Object.keys(bl27.json));
+    // glean3（A-v0110-GLEAN3-01）：无 due（时间门/事件门两腿均未放行）→ pack 同样不物化
+    // （零字节差缺省，P9-01 体例；GLEAN-01a/01b 已证 brief 不落盘，本条补 pack 面）
+    ck.ok("G13-h 无 due（时间门/事件门两腿）→ 不物化 glean-pack.md（零字节差缺省）", !fs.existsSync(pack7), fs.existsSync(pack7));
     // 成本排序（决议 D4：先查时间→数事件→抢锁）——源码序机械断言
     // （锚点取语句级：解构行含裸 lockBusy/countEvents 标识符，不能用裸名匹配）
     const srvSrc7 = fs.readFileSync(DEFAULT_SERVER, "utf8");
@@ -761,6 +793,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
   const R8 = subRoot("r-glean2");
   const MEM8 = path.join(R8, "orchestrator-memory");
   const brief8 = path.join(MEM8, "glean-brief.json");
+  const pack8 = path.join(MEM8, "glean-pack.md");
   const lock8 = path.join(MEM8, "glean-lock.json");
   fs.mkdirSync(MEM8, { recursive: true });
   fs.writeFileSync(path.join(MEM8, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 1 }));
@@ -798,6 +831,45 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       g2,
     );
 
+    // glean3（A-v0110-GLEAN3-01）：due 信号增 pack_path + 固定包同调用点物化
+    ck.ok(
+      "G13-a due 信号增 pack_path（endsWith glean-pack.md，glean3 主控零组装面）",
+      Boolean(g2) && typeof g2.pack_path === "string" && g2.pack_path.endsWith("glean-pack.md"),
+      g2 && g2.pack_path,
+    );
+    ck.ok("G13-b due 调用后固定包已物化于 pack_path", fs.existsSync(pack8), pack8);
+
+    // G12（M10，A-v0110-M10-01）：due → 信号入 board/list 响应 JSON 内部（G12 修复：
+    // 顶层 orch_memory 附件被宿主丢弃，result-content 键可达——P9 duplicate_warning
+    // 同机制位；orch_memory 顶层附件保留不拆，GLEAN-02a 即其证明）
+    const bl28 = await s8.call("board", { action: "list" });
+    const gd2 = bl28.json && bl28.json.glean_due;
+    ck.ok(
+      "G12-a gate due → board/list 顶层 glean_due {idle_h,events,brief_path}",
+      Boolean(gd2) && (gd2.idle_h === null || typeof gd2.idle_h === "number") && Number.isFinite(gd2.events) && gd2.events >= 1 && typeof gd2.brief_path === "string" && gd2.brief_path.endsWith("glean-brief.json"),
+      gd2,
+    );
+    // glean3（A-v0110-GLEAN3-01）：board/list glean_due 同信号面增 pack_path
+    ck.ok(
+      "G13-c board/list glean_due 增 pack_path（endsWith glean-pack.md）",
+      Boolean(gd2) && typeof gd2.pack_path === "string" && gd2.pack_path.endsWith("glean-pack.md"),
+      gd2 && gd2.pack_path,
+    );
+    // 物化保证：删 brief 后仅跑 board/list——同调用的 orch_memory 附件须重新落盘
+    fs.rmSync(brief8, { force: true });
+    const bl28b = await s8.call("board", { action: "list" });
+    const gd2b = bl28b.json && bl28b.json.glean_due;
+    ck.ok("G12-b brief 删除后 board/list 重建之（同调用 orch_memory 附件落盘，brief_path 可读）", Boolean(gd2b) && fs.existsSync(brief8), gd2b && gd2b.brief_path);
+    // glean3：pack 与 brief 同命运——删除后 board/list 单调用双重建（brief 物化后组合）
+    fs.rmSync(pack8, { force: true });
+    const bl28c = await s8.call("board", { action: "list" });
+    const gd2c = bl28c.json && bl28c.json.glean_due;
+    ck.ok(
+      "G13-d pack 删除后 board/list 单调用重建（与 brief 同调用点再生，glean_due.pack_path 可读）",
+      Boolean(gd2c) && fs.existsSync(pack8) && fs.existsSync(brief8),
+      gd2c && gd2c.pack_path,
+    );
+
     // ---- GLEAN-04：brief 物化字段齐全（§9.2 形状）
     const briefOk = fs.existsSync(brief8);
     ck.ok("GLEAN-04a brief 已物化于 brief_path", briefOk, brief8);
@@ -819,8 +891,51 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       brief && { projects: brief.projects, orch_md: brief.orch_md },
     );
 
+    // ---- glean3（A-v0110-GLEAN3-01）：固定包模板锚 + brief 逐字内嵌
+    const packRaw = fs.readFileSync(pack8, "utf8");
+    const briefRaw = fs.readFileSync(brief8, "utf8");
+    const G13_PINS = [
+      "主控零组装", // 固定物化定性
+      "agents/orch-gleaner.md", // persona 路径（READ FIRST）
+      "三行契约以派发 prompt 头部为准", // CONTRACT：server 预物化、token 不入包
+      "glean-brief 逐字内嵌", // CONTEXT 节定性
+      "权威指针勿手写", // 锁纪律：lock 位置=brief.lock_path（模板事故① 根治口径）
+      "四态口径", // 候选处置：晋升/合并/退役/保留
+      "视图层边界", // ORCH.md/标记区/全端 AGENTS.md 写面
+      "日志纪律", // 报告=reports/<ts>-glean.md
+      "-glean.md", // 报告命名形
+      "≤3 行指针纪律", // Return 面定性
+      "KIND=done + 报告路径", // Return 行 1
+      "report(kind=blocked, question=需要主控决策的事项)。", // 阻塞处置（WK-8 形）
+    ];
+    const g13Misses = G13_PINS.filter((n) => !packRaw.includes(n));
+    ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 12 钉）", g13Misses.length === 0, g13Misses);
+    ck.ok(
+      "G13-f brief 逐字内嵌：brief 文件字节 ⊂ pack 字节（brief 物化后组合，read-back 保真）",
+      packRaw.includes(briefRaw),
+      { briefLen: briefRaw.length, packLen: packRaw.length },
+    );
+    const g13CtxAt = packRaw.indexOf("## CONTEXT");
+    const g13RfAt = packRaw.indexOf("## READ FIRST");
+    let g13LockStray = -1;
+    for (let scan = 0; ; ) {
+      const i = packRaw.indexOf("glean-lock.json", scan);
+      if (i < 0) break;
+      if (!(i > g13CtxAt && i < g13RfAt)) {
+        g13LockStray = i; // 模板行手写锁路径（应只经 brief.lock_path 内嵌出现）
+        break;
+      }
+      scan = i + 1;
+    }
+    ck.ok(
+      "G13-g 包内锁路径只经 CONTEXT brief 内嵌出现（模板行无手写 glean-lock.json，权威指针勿手写）",
+      g13CtxAt >= 0 && g13RfAt > g13CtxAt && g13LockStray < 0,
+      { ctxAt: g13CtxAt, rfAt: g13RfAt, strayAt: g13LockStray },
+    );
+
     // ---- GLEAN-02b/c：锁 active+活 PID → 只附 lock_state=busy、无 due 键、不重写 brief
     const briefMtime = fs.statSync(brief8).mtimeMs;
+    const packMtime = fs.statSync(pack8).mtimeMs;
     fs.writeFileSync(
       lock8,
       JSON.stringify({ v: 1, state: "active", pid: process.pid, started_at: new Date(Date.now() - 5000).toISOString(), finished_at: null, watermarks: { global_lines: 0, projects: {} } }),
@@ -833,6 +948,10 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       gb,
     );
     ck.ok("GLEAN-02c busy 不物化 brief（brief mtime 未被重写）", fs.statSync(brief8).mtimeMs === briefMtime);
+    // glean3：busy 零写面同样覆盖 pack（busy 即退，pack 不重写）
+    ck.ok("G13-i busy 锁 → pack 不重写（pack mtime 未被重写，零写面）", fs.statSync(pack8).mtimeMs === packMtime, { packMtime, now: fs.statSync(pack8).mtimeMs });
+    const bl2b = await s8.call("board", { action: "list" });
+    ck.ok("G12-e busy 锁 → board/list 无 glean_due 键（busy 即退）", bl2b.json && !("glean_due" in bl2b.json), bl2b.json && Object.keys(bl2b.json));
   } finally {
     s8.close();
   }

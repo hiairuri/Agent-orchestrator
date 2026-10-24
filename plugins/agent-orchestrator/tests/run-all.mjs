@@ -16,6 +16,8 @@
  *   套注册行归主控胶水先例）。断言主句权威见 tests/assertions/v0.7.x.md 与 watcher-core.mjs 头注。
  *   v0.10 新增一套：watcher-shim=relay shim SHIM-01..04+W-RESP（52 断言；设计权威
  *   (internal design docs, not published) §2/§9.1；断言主句权威 tests/assertions/v0.10.x.md）。
+ *   v0.11 M10 新增一套：po-static=PO 不变量静态锁（P3-2：v0.11.x.md §2.10 手工 grep 收编
+ *   +掩码补偿钉 RULES 尾段+M2 残句 ban；断言主句权威 tests/assertions/v0.11.x.md §1）。
  *   L2 邻接层（哨兵 live V 组、lessons/journal/stop-check）与 L3 手工/文档项不在本入口自动化——
  *   执行载体见 tests/assertions/v0.4.x.md §3 映射表与 §10 总表。
  *
@@ -52,6 +54,10 @@ const REGISTRY = [
   { name: "watcher-core", layer: "L1" },
   { name: "crv8-memory", layer: "L1" },
   { name: "watcher-shim", layer: "L1" },
+  // v0.11 M10 新增一套（P3-2，PO 不变量静态锁）：po-static=v0.11.x.md §2.10 手工 grep 收编
+  //   （W4-01 固定文案钉 14 条/旧措辞+M2 残句 ban/W4-04 SKILL 同步钉+M10 文案钉）。
+  //   断言主句权威 tests/assertions/v0.11.x.md §1 A-v0110-M10-03..05。
+  { name: "po-static", layer: "L1" },
 ];
 
 function argOf(flag) {

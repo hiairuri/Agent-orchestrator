@@ -5,7 +5,7 @@
  * 如实声明：纯 Node 断言测不了宿主 typed 派发行为；本 suite 只测文档/配置在位，防回退。
  * 覆盖 21 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
- *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §22 在案+标记对逐字串，
+ *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §10「记忆与现场」在案+标记对逐字串，
  *   权威 (internal design docs, not published) §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
  *   A-V090-HOST-01（C6 findings 文件存在+§0 判定串+§1 锚点串在册口径；权威 (internal design docs, not published)
  *   §3/§5-2 移交语义 + v0.9-DESIGN §16 HOST-01 行；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）。
@@ -57,7 +57,7 @@ export const RECYCLE_LIST = [
   {
     id: "R-1",
     file: FILES.skill,
-    anchor: "宿主快照缺陷期间一律走第 10 章主形态",
+    anchor: "宿主快照缺陷期间一律走第 8 章主形态",
     recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
@@ -128,8 +128,8 @@ function main() {
   const agentsMd = readFile(FILES.agentsMd);
   const skill3 = section(skill, "## 3.", "## 4.");
   const skill4 = section(skill, "## 4.", "## 5.");
-  const skill10 = section(skill, "## 10.", "## 11.");
-  const skill12 = section(skill, "## 12.", "## 13.");
+  const skill8 = section(skill, "## 8.", "## 9.");
+  const skill9 = section(skill, "## 9.", "## 10.");
   const agentFiles = [
     ["orch-worker.md", FILES.agentWorker],
     ["orch-scout.md", FILES.agentScout],
@@ -141,17 +141,19 @@ function main() {
 
   // ---- 编辑单落地断言（W-C §2 表；判据列逐条对应）----
   subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["startup snapshot 校验数据源分叉", "勿重试"], ban: ["原生角色派发需全新会话"] }, "E-01");
-  subGroup(ck, "A-SKILL-1", "SKILL.md §10", skill10, { need: [REPORT, "双通道", "KIND="] }, "E-04");
+  subGroup(ck, "A-SKILL-1", "SKILL.md §8（主派发形态）", skill8, { need: [REPORT, "双通道", "KIND="] }, "E-04");
 
   { // A-SKILL-2：「仅终态」与「哨兵联动」须同句（E-04 降级通道缺口声明）
-    const sent = skill10.split("。").find((s) => s.includes("仅终态"));
+    const sent = skill8.split("。").find((s) => s.includes("仅终态"));
     const cond = Boolean(sent && sent.includes("哨兵联动"));
-    ck.ok("A-SKILL-2 @ SKILL.md §10 同句含「仅终态」+「哨兵联动」", cond,
-      `A-SKILL-2 缺失同句声明（仅终态+哨兵联动） @ SKILL.md §10 —— 回写指针: 见 ${POINTER} §1 E-04`);
+    ck.ok("A-SKILL-2 @ SKILL.md §8 同句含「仅终态」+「哨兵联动」", cond,
+      `A-SKILL-2 缺失同句声明（仅终态+哨兵联动） @ SKILL.md §8 —— 回写指针: 见 ${POINTER} §1 E-04`);
   }
 
-  subGroup(ck, "A-SKILL-3", "SKILL.md §12", skill12, { need: [SNAPSHOT_ERR, "校验面", "执行面", "回退", "勿重试"] }, "E-05");
-  subGroup(ck, "A-SKILL-4", "SKILL.md §3", skill3, { need: ["## REPORT（双通道）"] }, "E-06");
+  subGroup(ck, "A-SKILL-3", "SKILL.md §9（坑位清单）", skill9, { need: [SNAPSHOT_ERR, "校验面", "执行面", "回退", "勿重试"] }, "E-05");
+  // A-SKILL-4 语义更新（W2 重排裁决，策划档 §4.2）：原钉 §3 模板内「## REPORT（双通道）」示例节；
+  // buildPackMarkdown 实际不产出该节（Stage A §0 实测），W2 删幻影示例并改钉「模板同构 + 无幻影节」。
+  subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, { need: ["## CONTRACT（三行契约", "prompt_template"], ban: ["## REPORT（双通道）"] }, "E-06");
   subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona"] }, "E-07");
   subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
   subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");
@@ -162,14 +164,14 @@ function main() {
   subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
   subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
 
-  { // A-COMPAT-1：三角色 tools: 行均含 report 全名 + SKILL §10「保留不删」永久条款（V6-68 不变量守护）
+  { // A-COMPAT-1：三角色 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护）
     const bad = [];
     for (const [name, text] of agentTexts) {
       const line = frontmatterLine(text, "tools");
       if (!line.includes(REPORT)) bad.push(`${name} tools 行缺 report 全名`);
     }
-    if (!skill10.includes("保留不删")) bad.push("SKILL.md §10 缺「保留不删」");
-    ck.ok("A-COMPAT-1 @ agents/*.md tools 行 + SKILL §10 保留不删", bad.length === 0,
+    if (!skill8.includes("保留不删")) bad.push("SKILL.md §8 缺「保留不删」");
+    ck.ok("A-COMPAT-1 @ agents/*.md tools 行 + SKILL §8 保留不删", bad.length === 0,
       bad.length ? `A-COMPAT-1 不变量受损: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-15` : "");
   }
 
@@ -230,7 +232,7 @@ function main() {
         const left = RECYCLE_LIST.filter((e) => readFile(e.file).includes(e.anchor));
         if (left.length) modeErr = `回收未完成: ${left.map((e) => e.id).join(", ")}`;
         const skillNow = readFile(FILES.skill);
-        const perm10 = section(skillNow, "## 10.", "## 11.");
+        const perm10 = section(skillNow, "## 8.", "## 9.");
         if (!perm10.includes("保留不删") || !perm10.includes(REPORT)) {
           modeErr += `${modeErr ? "; " : ""}R-2 永久条款受损：「report 全名保留不删」不得随回收删除`;
         }
@@ -258,15 +260,15 @@ function main() {
       bad.length ? `A-V080-DOC-01 失败: ${bad.join("; ")} —— 回写指针: 见 ${V08_POINTER} §10.3/§14 DOC-01` : "");
   }
 
-  { // A-V080-DOC-02：SKILL §22 存在且标记对逐字串在案（防文档漂移）
-    const skill22 = section(skill, "## 22.", "## 23.");
+  { // A-V080-DOC-02：SKILL §10（记忆与现场）存在且标记对逐字串在案（防文档漂移）
+    const skill10 = section(skill, "## 10.", "## 11.");
     const markers = [
       "<!-- orch-mem:begin v1（agent-orchestrator 记忆区：对内内容由归敛代理维护，勿手编；删除本对=关闭本功能） -->",
       "<!-- orch-mem:end -->",
     ];
-    const miss = firstMissing(skill22, markers);
-    ck.ok("A-V080-DOC-02 @ SKILL.md §22 存在 + 标记对逐字串在案", skill22.length > 0 && !miss,
-      `A-V080-DOC-02 缺失: ${skill22.length === 0 ? "SKILL.md 无「## 22.」节" : `标记对子串 ${JSON.stringify(miss)}`} —— 回写指针: 见 ${V08_POINTER} §10.2/§14 DOC-02`);
+    const miss = firstMissing(skill10, markers);
+    ck.ok("A-V080-DOC-02 @ SKILL.md §10 存在 + 标记对逐字串在案", skill10.length > 0 && !miss,
+      `A-V080-DOC-02 缺失: ${skill10.length === 0 ? "SKILL.md 无「## 10.」节" : `标记对子串 ${JSON.stringify(miss)}`} —— 回写指针: 见 ${V08_POINTER} §10.2/§14 DOC-02`);
   }
 
   // ---- v0.9 P2-① 增例（静态在位断言，权威 (internal design docs, not published) §3/§5-2 移交语义 +

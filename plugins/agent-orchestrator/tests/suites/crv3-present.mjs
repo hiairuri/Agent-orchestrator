@@ -103,6 +103,11 @@ try {
   const m2Rv = rv3.missions.find((r) => r.id === "m2");
   ck.ok("CRV3-03 ready 行无 wake_failure 告警", !!m2Rv && m2Rv.wake_failure === null, m2Rv && m2Rv.wake_failure);
   ck.ok("CRV3-03 ready 无主仅信息性", Array.isArray(rv3.ready_unclaimed) && rv3.ready_unclaimed.some((r) => r.id === "m2") && !rv3.actions.some((a) => a.priority < 2 && a.action.includes("m2")));
+  // P2-1（M10，A-v0110-M10-02）：ready 呈现文案的池工章号防漂——SKILL W2 重排后
+  // 池工/DAG 章=第 13 章（旧 §18）；resume 呈现面两条 action 文案逐字锁新章号。
+  const poolActs = rv3.actions.filter((a) => typeof a.action === "string" && a.action.includes("派池工"));
+  ck.ok("P2-1 ready 呈现文案池工指针=第 13 章（每条含）", poolActs.length >= 1 && poolActs.every((a) => a.action.includes("第 13 章")), poolActs.map((a) => a.action));
+  ck.ok("P2-1 resume 呈现面旧章号 第 18 章 零残留", !rv3.actions.some((a) => typeof a.action === "string" && a.action.includes("第 18 章")), rv3.actions.map((a) => a.action));
 
   // ---------- CR-V27 呈现面 ----------
   seedMission({ id: "m7", status: "running", artifacts: ["p/a.md", "p/b.md"], output_files: ["o.txt"] });

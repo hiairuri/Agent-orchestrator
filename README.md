@@ -15,7 +15,7 @@ A ZCode plugin that turns "dispatch and hope" into accountable delegation:
 - **Memory consolidation** — candidate lessons flow through staging into curated views (`ORCH.md` for coordinators, `AGENTS.md` marker sections for subagents, a global cross-project store) maintained by a gated, lock-protected consolidation agent that runs on demand.
 - **Structured probe** — a server-enforced capped read tool (SQL/file/grep/binary inspect) with pagination and hash envelopes, so the coordinator can peek without context bloat.
 
-**11 MCP tools**, 4 hook events, a 22-chapter SKILL manual, 20 test suites (1043 assertions) via `tests/run-all.mjs`.
+**11 MCP tools**, 4 hook events, a 16-chapter SKILL manual (rule-language rewritten, 172 rule IDs), 21 test suites (1101 assertions) via `tests/run-all.mjs`.
 
 ## Install
 
@@ -40,7 +40,7 @@ plugins/
   agent-orchestrator/       # the plugin
     mcp/server.mjs          # zero-dependency MCP server (11 tools)
     hooks/                  # sentinel, bg-gate, session-start, stop-check
-    skills/                 # 22-chapter operations manual
+    skills/                 # 16-chapter operations manual (v2.1 pipeline with grill gates encoded)
     watcher/                # direct-mode wake daemon + loopback relay shim (opt-in, local-only)
     commands/  agents/      # slash commands and subagent personas
     tests/                  # 20 suites, run-all / run-smoke harnesses
