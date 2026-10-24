@@ -22,6 +22,13 @@
  * and let b2 self-heal hijack the session anchor. stdout/exit contract
  * unchanged (still silent when there is nothing to resume).
  *
+ * v0.10 G14 (subagent anchor filter): on app restart the host replays
+ * SessionStart for subagent sessions too (sess_subagent_agent_<agentId>;
+ * live evidence EXP10-findings R6, 2026-10-25 03:14), so the unconditional
+ * G5 republish hijacked the wake target to a worker session. publishWakeAnchor
+ * now skips subagent-prefixed ids entirely (no anchor files touched);
+ * coordinator ids (sess_<uuid>, no subagent segment) are unaffected.
+ *
  * Storage root discovery: <project>/.zcode/orchestrator/root.txt (pointer to a
  * custom root) if present, otherwise the default directory itself.
  */
@@ -282,6 +289,14 @@ function atomicWriteBestEffort(file, data) {
 function publishWakeAnchor(rootDir, projectDir, sessionId) {
   const sid = safeSessionId(sessionId);
   if (!sid) return;
+  // v0.10 G14 锚重发布子代理过滤（活体实证 2026-10-25 03:14，EXP10-findings R6）：
+  // app 重启恢复时宿主对子代理会话（sess_subagent_agent_<agentId>，形状锚=
+  // bg-sentinel.mjs / server.mjs agent_harvest 同源）也触发 SessionStart，G5 的
+  // 无条件重发布把成对锚改指子代理会话 → 唤醒目标劫持（用户实测唤醒未达主控）。
+  // 子代理会话 id 在入口跳过：不写任何锚文件（零写/零触碰存量锚）。用前缀形而非
+  // 全形匹配，覆盖未来 sess_subagent_* 变体；主控会话 id 形状 sess_<uuid> 无
+  // subagent 段，不受影响。
+  if (sid.startsWith("sess_subagent")) return;
   atomicWriteBestEffort(path.join(rootDir, "sentinel", "coord-session.txt"), sid + "\n");
   atomicWriteBestEffort(path.join(rootDir, "sentinel", "coord-workspace.txt"), path.resolve(projectDir) + "\n");
 }
@@ -352,8 +367,8 @@ function main() {
     if (projected <= MAX_OUTPUT_CHARS) lines.push(lessonsLine);
   }
   lines.push(
-    `本会话 session_id=${sessionId || "(未知)"}（派发时请记入 board）。` +
-      "执行 /orch-resume 或调用 mcp__plugin_agent-orchestrator_orch__resume 获取接力计划。" +
+    `本会话 session_id=${sessionId || "(未知)"}（派发时请记入 board）；` +
+      "接力计划：/orch-resume 或 mcp__plugin_agent-orchestrator_orch__resume；" +
       "终态未签收的结果先 mailbox(read) 接手再处置。",
   );
 

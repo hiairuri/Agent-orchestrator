@@ -225,7 +225,7 @@ function markHint(rootDir) {
 
 function sentinelHintText() {
   const p = SENTINEL_SCRIPT.split(path.sep).join("/");
-  return `派发完成 → 仅当无存活家族时才后台拉起哨兵（board list 的 sentinel_health 可查；建议 3 实例错峰冗余，防完成通知丢失）：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次即可；家族已在岗（standby 亦在岗）勿重复连发——新派发由待命实例自动接管盯守。全部签收后哨兵转待命静默值守（常态 0 通知）；未签收会分级告警（blocked/question 3 分钟、done 5 分钟、在飞失联 30 分钟、崩溃实锤 10 分钟）。`;
+  return `派发完成 → 仅当无存活哨兵家族时后台拉起哨兵：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次（防完成通知丢失的错峰冗余）；家族已在岗（standby 亦在岗）勿连发——新派发由待命实例自动接管。全部签收后转待命静默值守（常态 0 通知）；未签收分级告警阈值与补员规则见 SKILL 第 11 章，健康查 board list 顶层 sentinel_health。`;
 }
 
 /**
@@ -440,8 +440,7 @@ function main() {
           hookEventName: "PreToolUse",
           permissionDecision: "ask",
           permissionDecisionReason:
-            `bg-gate：前台子代理派发疑似长任务（${why || "含派发契约头"}）。后台运行可避免占用主控回合、` +
-            `避免被用户消息取消整回合连带取消子代理；确认是短任务可直接放行。` +
+            `bg-gate：前台子代理派发疑似长任务（${why || "含派发契约头"}）。后台运行可避免占用主控回合并被用户消息连带取消；短任务可直接放行。` +
             contractSuffix,
           ...(sentinelSuffix ? { additionalContext: sentinelSuffix } : {}),
         },
@@ -457,8 +456,8 @@ function main() {
         permissionDecision: "allow",
         permissionDecisionReason: "bg-gate: remind",
         additionalContext:
-          "[agent-orchestrator] 该前台子代理派发疑似长任务。前台会占住主控回合，且用户一条消息会取消" +
-          "整回合、连带取消子代理——长任务建议 run_in_background=true。确认是快查可忽略本提醒。" +
+          "[agent-orchestrator] 该前台子代理派发疑似长任务。前台运行占住主控回合，且用户一条消息会取消" +
+          "整回合并连带取消子代理；长任务建议 run_in_background=true。短任务可直接放行。" +
           contractSuffix +
           sentinelSuffix,
       },

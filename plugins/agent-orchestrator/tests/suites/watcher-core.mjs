@@ -40,6 +40,8 @@
  *          G5：server 启动补位 + b2 刷新工作区守卫（错/未验证工作区不刷新、warning 落日志））
  *   G5    锚互信根触发（v0.10 G5：SessionStart 无条件成对重发布 session+workspace 锚（R4
  *          重启后 coord-workspace 缺失的根因修复）+session_id 消毒+三触发面源锁+D3 归类）
+ *   G14   锚重发布子代理过滤（v0.10 G14：子代理会话 id → publishWakeAnchor 入口跳过，
+ *          锚零写+存量锚零触碰；主控 id 成对写不误伤；EXP10-findings R6 重启恢复实锤）
  *   W-VRD  VERDICT（三证合一矩阵/busy=noop/③复活观测窗）
  *   W-DGR  DEGRADE（降级树全表 D1-D3/kicked/signals 落盘+滚动+脱敏）
  *   W-E2E  全链 e2e（mock relay+mock 凭据：success/noop-busy×2 静默/kicked 断路/D1 凭据缺失/
@@ -1151,6 +1153,71 @@ try {
       classifyFailure({ kind: "workspace-anchor-missing" }).terminal === true &&
       classifyFailure({ kind: "workspace-anchor-mismatch" }).reason === "workspace-anchor-mismatch",
       { a: classifyFailure({ kind: "workspace-anchor-missing" }), b: classifyFailure({ kind: "workspace-anchor-mismatch" }) });
+  }
+
+  /* ======== G14 锚重发布子代理过滤（EXP10-findings R6：重启恢复时宿主对子代理会话
+     也发 SessionStart → G5 无条件重发布把锚改指子代理会话=唤醒目标劫持） ======== */
+  {
+    grp("G14 subagent-anchor-filter");
+    const g14SubagentId = "sess_subagent_agent_583ee58a-4b51-46b0-9120-2177449d22a0"; // R6 实证同形状
+    const g14CoordId = "sess_0f1e2d3c-4b5a-4697-8c9d-0a1b2c3d4e5f";
+    // 01：子代理会话 id → 锚零写（新根零创建，不写任何锚文件）
+    const g14Proj = path.join(BASE.root, "g14-subagent-proj");
+    fs.mkdirSync(g14Proj, { recursive: true });
+    const g14Root = path.join(g14Proj, ".zcode", "orchestrator");
+    const g14Run = runNode(path.join(PLUGIN_DIR, "hooks", "session-start.mjs"), [], {
+      cwd: g14Proj,
+      env: { ZCODE_PROJECT_DIR: g14Proj },
+      input: { hook_event_name: "SessionStart", session_id: g14SubagentId },
+    });
+    ck.ok("G14-a 子代理会话锚零写（R6 实锤：重启恢复时宿主对子代理会话也发 SessionStart→publishWakeAnchor 照写→coord-session.txt 被改指 sess_subagent_agent_<id>=唤醒目标劫持）：session_id=sess_subagent_agent_<agentId> → sentinel/ 目录零创建、coord-session.txt/coord-workspace.txt 零写、hook exit 0 stdout 静默（stdin/stdout/exit 契约零改）",
+      g14Run.code === 0 && g14Run.stdout.trim() === "" &&
+      !fs.existsSync(path.join(g14Root, "sentinel", "coord-session.txt")) &&
+      !fs.existsSync(path.join(g14Root, "sentinel", "coord-workspace.txt")) &&
+      !fs.existsSync(path.join(g14Root, "sentinel")),
+      { code: g14Run.code, out: g14Run.stdout.slice(0, 120), sentinelDir: fs.existsSync(path.join(g14Root, "sentinel")) });
+    // 02：子代理会话 id → 存量锚零触碰（内容+mtime 均不动）
+    const g14SeedSentinel = path.join(BASE.root, "g14-seed-proj", ".zcode", "orchestrator", "sentinel");
+    fs.mkdirSync(g14SeedSentinel, { recursive: true });
+    const g14SeedSession = path.join(g14SeedSentinel, "coord-session.txt");
+    const g14SeedWs = path.join(g14SeedSentinel, "coord-workspace.txt");
+    fs.writeFileSync(g14SeedSession, g14CoordId + "\n");
+    fs.writeFileSync(g14SeedWs, path.join(BASE.root, "g14-ws") + "\n");
+    const seedSessionMtime = fs.statSync(g14SeedSession).mtimeMs;
+    const seedWsMtime = fs.statSync(g14SeedWs).mtimeMs;
+    const g14Run2 = runNode(path.join(PLUGIN_DIR, "hooks", "session-start.mjs"), [], {
+      cwd: path.join(BASE.root, "g14-seed-proj"),
+      env: { ZCODE_PROJECT_DIR: path.join(BASE.root, "g14-seed-proj") },
+      input: { hook_event_name: "SessionStart", session_id: "sess_subagent_agent_g14seed0001" },
+    });
+    ck.ok("G14-b 子代理会话存量锚零触碰：锚已在位时 sess_subagent 前缀 id 触发的 SessionStart 不改写不重命名（coord-session/coord-workspace 内容+mtime 逐字不动；回归即劫持复现）",
+      g14Run2.code === 0 &&
+      fs.readFileSync(g14SeedSession, "utf8") === g14CoordId + "\n" &&
+      fs.readFileSync(g14SeedWs, "utf8") === path.join(BASE.root, "g14-ws") + "\n" &&
+      fs.statSync(g14SeedSession).mtimeMs === seedSessionMtime &&
+      fs.statSync(g14SeedWs).mtimeMs === seedWsMtime,
+      { code: g14Run2.code, sessionMtime: fs.statSync(g14SeedSession).mtimeMs, seedSessionMtime, wsMtime: fs.statSync(g14SeedWs).mtimeMs, seedWsMtime });
+    // 03：主控会话 id（sess_<uuid>，无 subagent 段）→ 成对原子写不误伤（G5-01 正控复验）
+    const g14MainProj = path.join(BASE.root, "g14-main-proj");
+    fs.mkdirSync(g14MainProj, { recursive: true });
+    const g14MainRoot = path.join(g14MainProj, ".zcode", "orchestrator");
+    const g14Run3 = runNode(path.join(PLUGIN_DIR, "hooks", "session-start.mjs"), [], {
+      cwd: g14MainProj,
+      env: { ZCODE_PROJECT_DIR: g14MainProj },
+      input: { hook_event_name: "SessionStart", session_id: g14CoordId },
+    });
+    ck.ok("G14-c 主控会话 id 不误伤（G5-01 正控复验）：sess_<uuid>（无 subagent 段）照旧无条件成对原子写 coord-session.txt=session_id、coord-workspace.txt=path.resolve(ZCODE_PROJECT_DIR)，过滤零波及",
+      g14Run3.code === 0 &&
+      fs.readFileSync(path.join(g14MainRoot, "sentinel", "coord-session.txt"), "utf8") === g14CoordId + "\n" &&
+      fs.readFileSync(path.join(g14MainRoot, "sentinel", "coord-workspace.txt"), "utf8") === path.resolve(g14MainProj) + "\n",
+      { code: g14Run3.code });
+    // 04：源面钉——过滤守卫在 publishWakeAnchor 函数体内、先于锚写调用（防守卫被移出/后置）
+    const g14Src = fs.readFileSync(path.join(PLUGIN_DIR, "hooks", "session-start.mjs"), "utf8");
+    const g14Fn = g14Src.slice(g14Src.indexOf("function publishWakeAnchor"), g14Src.indexOf("function countUnread"));
+    ck.ok("G14-d 过滤源面钉：publishWakeAnchor 函数体内含 sess_subagent startsWith 守卫（前缀形覆盖未来 sess_subagent_* 变体）且守卫先于第一处 atomicWriteBestEffort 锚写调用（入口跳过语义，非写后回滚）",
+      g14Fn.includes("startsWith") && g14Fn.includes("sess_subagent") &&
+      g14Fn.indexOf("startsWith") > -1 && g14Fn.indexOf("startsWith") < g14Fn.indexOf("atomicWriteBestEffort"),
+      { inFn: g14Fn.includes("sess_subagent"), guardFirst: g14Fn.indexOf("startsWith") < g14Fn.indexOf("atomicWriteBestEffort") });
   }
 
   /* ======== W-VRD VERDICT ======== */

@@ -1,7 +1,7 @@
 /*!
  * suites/probe-caps.mjs —— v0.6 A6 probe 帽 suite（第 11 号工具，上下文经济第二支柱）
  *
- * 覆盖断言组：A-v060-PROBE-01..10（DESIGN §5.1 / SKILL §20.4 帽语义机制化，施工 ID 定稿）——
+ * 覆盖断言组：A-v060-PROBE-01..10（DESIGN §5.1 / SKILL §15.4 帽语义机制化，施工 ID 定稿）——
  *   PROBE-01 工具面 11 与注册形态（tools/list 含 probe、schema 四 action 枚举、双面可用不入 MCP_DISALLOWED）
  *   PROBE-02 envelope 统一形态（rows_truncated/bytes/hash/page_token/caps；bytes ≤10KB；hash=返回内容 sha256）
  *   PROBE-03 行帽 ≤50 + 分页续传（file.head 200 行 → 50 行/页 + page_token 走到 eof；行数超帽收敛）
