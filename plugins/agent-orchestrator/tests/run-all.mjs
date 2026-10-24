@@ -12,8 +12,10 @@
  *   root-contract=root-id 契约矩阵（P1..P10+S1..S5）；typed-dispatch-docs=文档在位 18 断言+RECYCLE_LIST；
  *   probe-caps=PROBE-01..10。断言主句权威见 tests/assertions/v0.6.x.md。
  *   v0.7.1 新增一套：watcher-core=W1 watcher 守护进程纯逻辑 117 断言（模板/分类/降级树/频控/脱敏自检，
- *   ws 层全 mock 零生产中继；设计权威 (internal design docs, not published) + EXP-1/2/3 findings；
+ *   ws 层全 mock 零生产中继；设计权威 designs/agent-orchestrator-v0.7-W-W-findings.md + EXP-1/2/3 findings；
  *   套注册行归主控胶水先例）。断言主句权威见 tests/assertions/v0.7.x.md 与 watcher-core.mjs 头注。
+ *   v0.10 新增一套：watcher-shim=relay shim SHIM-01..04+W-RESP（52 断言；设计权威
+ *   designs/agent-orchestrator-v0.10-DESIGN.md §2/§9.1；断言主句权威 tests/assertions/v0.10.x.md）。
  *   L2 邻接层（哨兵 live V 组、lessons/journal/stop-check）与 L3 手工/文档项不在本入口自动化——
  *   执行载体见 tests/assertions/v0.4.x.md §3 映射表与 §10 总表。
  *
@@ -49,6 +51,7 @@ const REGISTRY = [
   { name: "probe-caps", layer: "L1" },
   { name: "watcher-core", layer: "L1" },
   { name: "crv8-memory", layer: "L1" },
+  { name: "watcher-shim", layer: "L1" },
 ];
 
 function argOf(flag) {

@@ -126,6 +126,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | ACT 且 timeline 已有浓缩事件 | board/timeline | 只剩拆分/放弃，禁二次浓缩 |
 | 逼近硬阈值（步数近档位上限，或采样近 HARD 180K） | milestone 对账 / `agent_harvest(tail=0)` | `SendMessage(steer)`："完成当前阶段、report(done) 附遗留清单"，剩余工作按 files_touched 拆新 mission（§20.3） |
 | kind=blocked/question | `mailbox(read)` | 能答→`mailbox(answer)`+SendMessage；需查证→先派 orch-scout；workflow→`ResolveWorkflowQuestion(dwfq-id)` |
+| 需用户拍板（主题/授权/不可逆） | 用户对话 | AskUserQuestion（推荐项置顶）；无回复→记 OPEN（默认值+否决窗+爆炸半径声明）走可逆分支推进、设计稿提交时汇总 |
 | done | report/board | 读 t1_head（≤160 字）与产物路径列表；勿 read details 长文 → 聚合 → closed |
 | done 且 mission 为沙箱派发（pack.sandbox 存在） | board | 派 orch-reviewer 审 diff+越界 → `board(upsert, mission={id, qa:{verdict,…}})` → pass 则 `sandbox_apply(mission_id)`；fail 则 `sandbox_discard`（第 17 章） |
 | done 且任务登记过写集（RULES 清单或 scope_paths） | board/pack | 审计产物 diff（或 files_touched）⊆ 写集；越界 → 追问 worker 或 verdict=fail |
@@ -144,6 +145,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 
 ## 5. 提问-回答-恢复闭环
 
+- 提问分流（P8）：worker/用户的提问先分流——环境可查证的（board 字段/源码/日志/镜像）先自查再问。
 - 常规通道：子代理 `report(kind=blocked|question)` → 事件落邮箱、mission 置 blocked/question → 你 `mailbox(peek)` 发现 → `mailbox(read)` 消费 → **需要查证就先派 orch-scout** → `mailbox(action=answer, mission_id, answer)`（留痕并拿回 `recommended_call`）→ 按建议发 `SendMessage(to=agent_id, summary≤200, message=答复+继续指令)`。运行中=steer 注入；已终态=后台恢复续聊（可反复）。
 - 紧急四情形（验收标准要变 / 继续无意义 / 需不可逆操作 / 阻塞超 10 分钟）：子代理直接用内核 `RespondToCoordinator` 唤醒你（仅当你给它发过消息、该工具出现时才有）。你正常作答即可。
 - workflow 场景：子代理 `escalate` → 你收到通知与 `dwfq-…` 问题 id → `ResolveWorkflowQuestion(question_id, answer)`。答题期间 run 其余部分照常跑；**dwfq 无超时，不能放着不答**。通知丢失兜底：`GetWorkflowRun` 看 `pendingQuestions`。脚本本身坏了 → 改 script 文件 + `AmendWorkflow(path)`。
@@ -228,13 +230,13 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 - ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
 - **探针原文回显是隐形大头**：4 个会话合计 111 次 DB/二进制原文回显（单会话最高 149KB）——DB 探针禁 `SELECT *`、必须聚合 + LIMIT ≤100；二进制只回显类型/大小/哈希/首 256 字节；单次输出 ≤50 行或 ≤10KB（第 20.4 节）。
 - **已读的文件别重读**：server.mjs 曾被单会话重读 12/10/7 次、全文读码 1638 行——派发时把函数/行号锚点写进任务包；≥1000 行文件禁一次全文读入（先 grep 结构再定点读）。
-- **typed 角色派发报 "Required MCP tool is not available in the parent startup snapshot"**：确定性失败——校验面（会话 create 时点冻结的 MCP 启动快照）与执行面（继承 live 注册表）数据源分叉，重试无新信息；处置 = 立即回退 general-purpose + persona 注入（第 10 章主形态）+ 任务包附 REPORT 双通道节（第 3 章），勿重试同一 typed 角色、勿归因会话新旧（机制与证据链见 (internal design docs, not published)）。
+- **typed 角色派发报 "Required MCP tool is not available in the parent startup snapshot"**：确定性失败——校验面（会话 create 时点冻结的 MCP 启动快照）与执行面（继承 live 注册表）数据源分叉，重试无新信息；处置 = 立即回退 general-purpose + persona 注入（第 10 章主形态）+ 任务包附 REPORT 双通道节（第 3 章），勿重试同一 typed 角色、勿归因会话新旧（机制与证据链见 designs/dispatch-probe-20261014/）。
 
 ## 13. 学习记忆与记忆归敛
 
 教训库落在 `<存储根>/memory/lessons.jsonl`，一行一条，**只增不重排**（修改走全文件原子重写）。字段：`id`（l-日期-6hex）、`type`（error-fix 报错修复 / pitfall 踩坑 / preference 用户偏好 / env-fact 环境事实）、`trigger`（≤120 字，什么时候会踩）、`lesson`（≤200 字单句原子教训，可空）、`fix`（≤200 字可执行动作）、`confidence`/`hits`/`status`、`scope`（"project"/"global"，由写入目标库隐含，非调用参数）、`source`（"report"/"add"/"stage"，按写入路径自动标注）、`refs`/`counter_refs`/`note`。
 
-**scope 双级库（v0.8）**：项目库 = `<存储根>/memory/lessons.jsonl`；全端库 = `<~/.zcode>/orchestrator-memory/memory/lessons.jsonl`（server 参数 `--memory-root` 覆盖全端根；落位图权威 (internal design docs, not published) §2.2）。检索注入已是**双库合并选材**（同 normKey 条目全端优先去重，跨项目稳定的教训自动生效）；全端库写面（跨项目晋升 `promote` target="global"）由归敛通道启用（第 22 章）。
+**scope 双级库（v0.8）**：项目库 = `<存储根>/memory/lessons.jsonl`；全端库 = `<~/.zcode>/orchestrator-memory/memory/lessons.jsonl`（server 参数 `--memory-root` 覆盖全端根；落位图权威 designs/agent-orchestrator-v0.8-DESIGN.md §2.2）。检索注入已是**双库合并选材**（同 normKey 条目全端优先去重，跨项目稳定的教训自动生效）；全端库写面（跨项目晋升 `promote` target="global"）由归敛通道启用（第 22 章）。
 
 **两级写入（防污染的核心）**：
 
@@ -312,7 +314,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 | agent_harvest | `mcp__plugin_agent-orchestrator_orch__agent_harvest` | 主控 |
 | probe | `mcp__plugin_agent-orchestrator_orch__probe` | 主控+子代理 |
 
-**board 行为**：action ∈ upsert/get/list/ack/claim；ack 说明：`board(action="ack", mission_id, note?) → ack={at, by:"coordinator", note}`；answer/close 自动补签；list 顶层另附 `scope_conflicts`（在飞 mission 两两 scope 相交视图，与 upsert 的 `scope_warnings` 同构，≤10 条，无冲突省略键）。
+**board 行为**：action ∈ upsert/get/list/ack/claim；ack 说明：`board(action="ack", mission_id, note?) → ack={at, by:"coordinator", note}`；answer/close 自动补签；list 顶层另附 `scope_conflicts`（在飞 mission 两两 scope 相交视图，与 upsert 的 `scope_warnings` 同构，≤10 条，无冲突省略键）。**upsert 响应面条件键 `duplicate_warning`（v0.10 P9）**：来包与既有 mission 同 title（trim+小写归一化相等）或 scope_paths 相交（scope 冲突单源判定）、且两 mission 状态组合跨 {drafted}/{dispatched,running}、非同 id 时出现，数组项 `{with_mission_id, reason:title|scope|title+scope, hint, overlap?}`；无并存/空 title/同侧状态组合 → 键整体缺省（零字节差）。
 
 **board claim 行为**：`board(action="claim", mission_id, worker, lease_minutes?)`——CAS 领取 ready/drafted 任务（owner 置空才可领、依赖全绿才可领），成功即 running 并写租约；worker 每次 report 自动续租；超时自动回 ready。沙箱 apply/discard：门禁=done+qa.verdict=pass；discard 幂等零损伤。
 
@@ -507,9 +509,15 @@ manifest/inputs 速查：done 可带 `manifest_entries`（≤12 条；条目七�
 
 **与哨兵职责互换（反向监控）**：设计分工=watcher 接管唤醒、哨兵 v2.1 降为「watcher 存活监控+回退唤醒」（心跳超龄即告警并按回退路径补枪）；watcher 进程死亡**不自动拉起**（不做守护守护进程的无限递归），交用户/主控处置。**现状如实**：watcher 侧心跳/watcher-signals 写入面已落地，bg-sentinel 对 `watcher-heartbeat` 的消费面**尚未接线**（hooks 零 watcher 引用）——反向监控告警当前靠人工巡检心跳文件 mtime，哨兵侧接线列后续卡。
 
+**直连回环注记（v0.10 EXP-10 实测入册，W5）**：
+
+- **verdict=delivered 语义**：蕴含三证=**传输面**（①workspace-list 应答②bridge-ready③rpc-frame-ack）；**不蕴含 CLI 受理**——watcher 不 await callP，且 session-send-response awaitData（reqId ow-N）在 V4 链恒空→classifyAccept(null)=accepted。EXP10-findings R2 实证：host 连接闸以 `fault.connection.handshakeRequired` 拒绝时 verdict 仍=delivered（三证传输面全过、注入根本没落地）。哨兵兜底语义（S0+ 用户裁决）在该拒形态下不触发（verdict≠failed）。
+- **wake_sentinel 缺省 on**：配置面零存置时 bg-gate 按缺省 on 判定（bg-gate.mjs:67 注释逻辑）；开直连实验窗前应在插件 UI 显式置 `wake_sentinel=off`，否则 SessionStart/派发钩子会自动拉起哨兵家族（EXP10 R2-0②/N2-N3：桌面重启即三实例复活）。替代缓解=窗内主控零派发+哨兵再现即清杀。
+- **loopback 实验与云远控互斥面**（EXP10 R2-5 用户回填）：桌面实例加载两枚回环 env 后 device 角色改连 shim（127.0.0.1），**云侧远控页在此期间不可用/停在等待配对属实验态预期副作用非故障**；实验结束按正常方式重启桌面即恢复云连接。shim 常驻（loopback transport）与云远控不可同时服务同一桌面实例。
+
 ## 22. 记忆归敛（v0.8）
 
-**定位**：lessons 库是事件层（只增不重排），主控与子代理的记忆视图是视图层——ORCH.md（你的记忆文件）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）。**归敛（glean）**= 后台子代理定期把事件层整理进视图层：消费 ORCHTEMP、巡检晋升候选、维护超帽裁剪，产出归敛报告。设计权威 (internal design docs, not published) §6/§9。
+**定位**：lessons 库是事件层（只增不重排），主控与子代理的记忆视图是视图层——ORCH.md（你的记忆文件）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）。**归敛（glean）**= 后台子代理定期把事件层整理进视图层：消费 ORCHTEMP、巡检晋升候选、维护超帽裁剪，产出归敛报告。设计权威 designs/agent-orchestrator-v0.8-DESIGN.md §6/§9。
 
 ### 22.1 文件地图
 

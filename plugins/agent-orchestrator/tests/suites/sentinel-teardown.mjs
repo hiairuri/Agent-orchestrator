@@ -536,16 +536,28 @@ try {
   const QMARK = path.join(SENT_DIR, "quarantine.json");
   const echoQCount = () => readText(ECHO).split("\n").filter((x) => x.includes('"category":"quarantine"')).length;
   {
-    // WS-5a/b 隔离进入 + 家族级抑制：板缺失（不可读）×3 tick（standby_poll 强置 300，
-    // 证明进入路径不受待命节流影响）→ 三实例全转 quarantined 零退出、quarantine.json
-    // 恰一份（wx 仲裁唯一首告者，含证据快照）、聚合告警恰一条（echo 类别计数 + 总行数
-    // 恰 +1）、fired 零新增。
+    // WS-5a/b 隔离进入 + 家族级抑制：板缺失（不可读）×3 tick → 三实例全转 quarantined
+    // 零退出、quarantine.json 恰一份（wx 仲裁唯一首告者，含证据快照）、聚合告警恰一条
+    // （echo 类别计数 + 总行数恰 +1）、fired 零新增。
+    // 时序余量（v0.10 G 满载 flake 修复）：先以 running mission 保持三实例 active 态就绪
+    // （slot 文件 = 首 tick 已开跑），再等 settle 让各实例首 tick 的 pruneEcho（echo.jsonl
+    // 全文件 RMW 重写）全部完成，最后才制造板不可读——消除「晚启实例首 tick prune 与
+    // 隔离首告者 appendEcho 同窗 RMW 互踩致旧行丢失」的竞态（run-all 满载实测 WS-5b 偶红）。
+    // standby_poll 强置 300 保留（与既有口径一致）。
     cleanSlots();
-    fs.rmSync(path.join(ROOT, "board.json"), { force: true });
-    const echoBeforeT8 = countLines(ECHO);
-    const firedBeforeT8 = firedCount();
+    writeBoard([{ id: "m-ws5prep", title: "live", status: "running", dispatch: {} }]);
     const fam8 = [];
     for (let i = 0; i < 3; i++) fam8.push(spawnSentinel({ standbyPollSec: 300 }));
+    await waitFor(() => {
+      return [0, 1, 2].every((k) => {
+        const d = readJson(slotFile(k));
+        return Boolean(d) && Number.isInteger(d.pid);
+      });
+    }, 10000);
+    await sleep(1200); // settle：跨 ≥1 poll，确保三实例首 tick（含 pruneEcho 重写）收卷
+    const echoBeforeT8 = countLines(ECHO);
+    const firedBeforeT8 = firedCount();
+    fs.rmSync(path.join(ROOT, "board.json"), { force: true });
     const qAll = await waitFor(() => {
       return [0, 1, 2].every((k) => {
         const d = readJson(slotFile(k));
