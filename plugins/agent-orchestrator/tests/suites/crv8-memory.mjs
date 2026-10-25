@@ -578,6 +578,8 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     // + W4 PO 案 A 激进重建（2026-10-24，A-v0110-PO-W4，先例 v0.6 裁决 A）：缺省模板
     //   CONTRACT 规则块/围栏节头/阻塞处置句变字——新旧两形各自归一为规范形（预期增量掩码；
     //   理由逐条见 v0.11.x.md §0；新文案本体由 A-v0110-PO-W4-01/02 静态钉）。
+    // + v1.1 W4（A1/Q5a，A-v110-W4-A1-06）：CONTRACT 节头括注「派发 prompt 头部→尾块」
+    //   措辞级字节变更——同型掩码先行（DESIGN §6.1/§6.2）。
     const norm = (s) =>
       String(s)
         .replace(/\[token\] [0-9a-f]{4,32}/g, "[token] X")
@@ -586,6 +588,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
         .replace(/kind ∈ \{milestone, blocked, question, done\}。\nsummary ≤ 200 字。\nkind=done 必带 artifacts 路径。/g, "REPORT-KIND summary artifacts")
         .replace(/kind ∈ \{milestone, blocked, question, done\}；summary ≤ 200 字；done 必带 artifacts 路径[^\n]*/g, "REPORT-KIND summary artifacts")
         .replace(/受阻\/目标矛盾\/必败门禁：立即 report\(kind=blocked, question=…\)[^\n]*/g, "RULES-BLOCKED")
+        .replace(/也出现在派发 prompt (?:头部|尾块)/g, "也出现在派发 prompt 尾块")
         .replace(/## CONTEXT（[^）]*）/g, "## CONTEXT 节头")
         .replace(/## LESSONS（[^）]*）/g, "## LESSONS 节头");
     const s71 = startServer({ serverPath: baseline, root: T71 });
@@ -897,10 +900,11 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     const G13_PINS = [
       "主控零组装", // 固定物化定性
       "agents/orch-gleaner.md", // persona 路径（READ FIRST）
-      "三行契约以派发 prompt 头部为准", // CONTRACT：server 预物化、token 不入包
+      "三行契约以派发 prompt 尾块为准", // CONTRACT：server 预物化、token 不入包（v1.1 W4 Q5a）
       "glean-brief 逐字内嵌", // CONTEXT 节定性
       "权威指针勿手写", // 锁纪律：lock 位置=brief.lock_path（模板事故① 根治口径）
       "四态口径", // 候选处置：晋升/合并/退役/保留
+      "promote/promote_batch 合并语义走 server", // v1.1 W1 B2：GL-30 括注同步（批入口在案）
       "视图层边界", // ORCH.md/标记区/全端 AGENTS.md 写面
       "日志纪律", // 报告=reports/<ts>-glean.md
       "-glean.md", // 报告命名形
@@ -909,7 +913,7 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       "report(kind=blocked, question=需要主控决策的事项)。", // 阻塞处置（WK-8 形）
     ];
     const g13Misses = G13_PINS.filter((n) => !packRaw.includes(n));
-    ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 12 钉）", g13Misses.length === 0, g13Misses);
+    ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 13 钉）", g13Misses.length === 0, g13Misses);
     ck.ok(
       "G13-f brief 逐字内嵌：brief 文件字节 ⊂ pack 字节（brief 物化后组合，read-back 保真）",
       packRaw.includes(briefRaw),
@@ -1333,15 +1337,15 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       brief522.orchtemp_pending,
     );
 
-    // ---- GLEAN-05k：§9.4 工具 schema 描述行逐字在案 + action 枚举含 stage（W3 任务①收口）
+    // ---- GLEAN-05k：§9.4 工具 schema 描述行逐字在案 + action 枚举含 stage/promote_batch（W3 任务①收口；v1.1 W1 B2 扩 promote_batch）
     //（描述行内 source="orchestrator" 在 server.mjs 字面量中带 \" 转义—— grep 取无反斜杠的
     //  首尾两个逐字片段 + 枚举行，三段同钉）
     const srvSrc52 = fs.readFileSync(DEFAULT_SERVER, "utf8");
     ck.ok(
-      "GLEAN-05k §9.4 逐字稿落 schema：stage 描述行首尾片段逐字在案 + action 枚举扩至 stage",
+      "GLEAN-05k §9.4 逐字稿落 schema：stage 描述行首尾片段逐字在案 + action 枚举含 stage/promote_batch",
       srvSrc52.includes("stage: 主控随手暂存（ORCHTEMP）。写 source=") &&
         srvSrc52.includes("；不合并不注入；由归敛代理消费（置 retired+视图层落笔）。trigger/fix 必填。") &&
-        srvSrc52.includes('["list", "add", "promote", "retire", "stage"]'),
+        srvSrc52.includes('["list", "add", "promote", "promote_batch", "retire", "stage"]'),
       null,
     );
   } finally {
@@ -1349,7 +1353,127 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
   }
 }
 
-/* ============ 场景 12：INJ-06b（双库合并+normKey 去重全端优先+contradicts 不跨库）+ §7.2 全端节（root r-inj6b） ============ */
+/* ============ 场景 11b：GLEAN-05l..q（v1.1 W1 §5.1 promote_batch 事务化，root r-batch1） ============ */
+{
+  const R16 = subRoot("r-batch1");
+  const lib16 = path.join(R16, "memory", "lessons.jsonl");
+  const gLib16 = path.join(R16, "orchestrator-memory", "memory", "lessons.jsonl");
+  const now16 = new Date().toISOString();
+  const seed16 = (over) => ({
+    v: 1,
+    ts: "2026-01-01T00:00:00.000Z",
+    updated_at: now16,
+    mission_id: null,
+    worker: "t",
+    lesson: "",
+    refs: [],
+    superseded_by: null,
+    counter_refs: [],
+    note: null,
+    scope: "project",
+    ...over,
+  });
+  writeJsonl(lib16, [
+    seed16({ id: "l-20260101-b7a001", type: "pitfall", trigger: "BATCHA 批内新建触发", fix: "BATCHA 修正", confidence: 0, hits: 0, status: "candidate" }),
+    seed16({ id: "l-20260101-b7b002", type: "pitfall", trigger: "BATCHB 矛盾晋升触发", fix: "BATCHB 修正", confidence: 0, hits: 0, status: "candidate" }),
+    seed16({ id: "l-20260101-b7m003", type: "error-fix", trigger: "BATCHM 批内合并触发", fix: "BATCHM 修正", confidence: 0.6, hits: 1, status: "active" }),
+    seed16({ id: "l-20260101-b7c004", type: "error-fix", trigger: "BATCHM 批内合并触发", fix: "BATCHM 修正", confidence: 0, hits: 0, status: "candidate" }),
+    seed16({ id: "l-20260101-b7d005", type: "preference", trigger: "BATCHD 单条兼容触发", fix: "BATCHD 修正", confidence: 0, hits: 0, status: "candidate" }),
+    seed16({ id: "l-20260101-b7e006", type: "env-fact", trigger: "BATCHE 矛盾靶触发", fix: "BATCHE 修正", confidence: 0.8, hits: 2, status: "active" }),
+    seed16({ id: "l-20260101-b7f007", type: "pitfall", trigger: "BATCHF 全端批触发", fix: "BATCHF 修正", confidence: 0, hits: 0, status: "candidate" }),
+  ]);
+  const s16 = startServer({ root: R16 });
+  try {
+    await s16.call("lessons", { action: "list" }); // 启动副作用（名册/目录）落地
+    const row16 = (id) => readLessons(R16).find((l) => l.id === id);
+
+    // ---- GLEAN-05l：合法批（A 新建 + C 合并）一次调用全落 + 逐条结果/汇总
+    const b1 = resultText(await s16.call("lessons", { action: "promote_batch", ids: ["l-20260101-b7a001", "l-20260101-b7c004"] }));
+    const a16 = row16("l-20260101-b7a001");
+    const c16 = row16("l-20260101-b7c004");
+    const m16 = row16("l-20260101-b7m003");
+    ck.ok(
+      "GLEAN-05l 合法批全落：A 新建 active + C 合并进 M（行 retired/note 溯源，M hits 1→2 conf 0.6→0.7）+ 响应 count/results/summary",
+      b1.ok === true && b1.count === 2 && Array.isArray(b1.results) && b1.results.length === 2 &&
+        b1.summary && b1.summary.total === 2 && b1.summary.merged === 1 && b1.summary.activated === 1 &&
+        Boolean(a16) && a16.status === "active" && a16.confidence === 0.6 && a16.hits === 1 &&
+        Boolean(c16) && c16.status === "retired" && c16.note === "auto: merged into l-20260101-b7m003" &&
+        Boolean(m16) && m16.hits === 2 && approx2(m16.confidence) === 0.7 &&
+        b1.results.some((r) => r.id === "l-20260101-b7a001" && r.ok === true && r.merged === false && r.target === "project") &&
+        b1.results.some((r) => r.id === "l-20260101-b7c004" && r.ok === true && r.merged === true && r.merged_into === "l-20260101-b7m003"),
+      { b1, a: a16 && a16.status, c: c16 && c16.status, m: m16 && { hits: m16.hits, conf: m16.confidence } },
+    );
+
+    // ---- GLEAN-05m：非法混批 → 整批 isError + 库字节零变更（不存在的 id / 坏 refinement 两腿）
+    const beforeBad = fs.readFileSync(lib16, "utf8");
+    const badMissing = await s16.call("lessons", { action: "promote_batch", ids: ["l-20260101-b7d005", "l-20260101-missing"] });
+    const badRefine = await s16.call("lessons", {
+      action: "promote_batch",
+      ids: ["l-20260101-b7d005", { id: "l-20260101-b7b002", type: "moon" }],
+    });
+    ck.ok(
+      "GLEAN-05m 中途败整批拒零写入：不存在的 id / 坏 refinement 均 isError 且 lessons.jsonl 逐字节不变（D 仍 candidate，无半态）",
+      badMissing.isError === true && String(badMissing.text).includes("missing") &&
+        badRefine.isError === true && String(badRefine.text).includes("invalid type") &&
+        fs.readFileSync(lib16, "utf8") === beforeBad &&
+        row16("l-20260101-b7d005").status === "candidate" &&
+        row16("l-20260101-b7b002").status === "candidate",
+      { missing: String(badMissing.text).slice(0, 120), refine: String(badRefine.text).slice(0, 120) },
+    );
+
+    // ---- GLEAN-05n：单条 promote 并行兼容（响应形状零变化：无 target 键的 project 形）
+    const single16 = resultText(await s16.call("lessons", { action: "promote", id: "l-20260101-b7d005" }));
+    ck.ok(
+      "GLEAN-05n 单条 promote 并行兼容：D candidate→active，响应仍 {ok,id,status,merged,confidence,hits} 且无 target/standard 键",
+      single16.ok === true && single16.id === "l-20260101-b7d005" && single16.status === "active" && single16.merged === false &&
+        approx2(single16.confidence) === 0.6 && single16.hits === 1 && !("target" in single16) && !("standard" in single16) &&
+        row16("l-20260101-b7d005").status === "active",
+      single16,
+    );
+
+    // ---- GLEAN-05o：批 target=global 腿（B 晋升全端新行；项目源条原地不动）
+    const bRaw16 = fs.readFileSync(lib16, "utf8").split("\n").find((l) => l.includes('"l-20260101-b7b002"'));
+    const b2 = resultText(await s16.call("lessons", { action: "promote_batch", ids: [{ id: "l-20260101-b7b002", target: "global" }] }));
+    const gRow16 = fs.existsSync(gLib16) && b2.results ? readJsonl(gLib16).find((l) => l.id === b2.results[0].result_id) : null;
+    ck.ok(
+      "GLEAN-05o 批 target=global：逐条覆盖生效（新行 scope=global/source=promote）+ 项目源条逐字节不动 + 单次全端落盘",
+      b2.ok === true && b2.results[0].target === "global" && b2.results[0].merged === false &&
+        Boolean(gRow16) && gRow16.scope === "global" && gRow16.source === "promote" && gRow16.status === "active" &&
+        fs.readFileSync(lib16, "utf8").split("\n").find((l) => l.includes('"l-20260101-b7b002"')) === bRaw16,
+      { b2: b2.results, gRow: gRow16 && { id: gRow16.id, scope: gRow16.scope, source: gRow16.source } },
+    );
+
+    // ---- GLEAN-05p：contradicts 逐条语义（批内对象覆盖；E 置 superseded 指回 B 的晋升结果）
+    const b3 = resultText(await s16.call("lessons", { action: "promote_batch", ids: [{ id: "l-20260101-b7b002", contradicts: "l-20260101-b7e006" }] }));
+    const e16 = row16("l-20260101-b7e006");
+    ck.ok(
+      "GLEAN-05p 批内 contradicts：B 晋升后 E 置 superseded 且 superseded_by=晋升结果 id（content 原样保留）",
+      b3.ok === true && b3.results[0].contradicts === "l-20260101-b7e006" && b3.summary.contradicting === 1 &&
+        Boolean(e16) && e16.status === "superseded" && e16.superseded_by === b3.results[0].result_id &&
+        e16.trigger === "BATCHE 矛盾靶触发" && e16.fix === "BATCHE 修正",
+      e16 && { status: e16.status, superseded_by: e16.superseded_by },
+    );
+
+    // ---- GLEAN-05q：一次落盘源面钉（批分支内各库恰一次 save；不逐条 save）
+    const srvSrc16 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    const batchBranch = srvSrc16.slice(
+      srvSrc16.indexOf('if (action === "promote_batch")'),
+      srvSrc16.indexOf('if (action === "retire")'),
+    );
+    ck.ok(
+      "GLEAN-05q 一次落盘源面钉：promote_batch 分支 saveLessons(list)×1 ∧ saveGlobalLessons(globalList)×1（循环内零逐条 save）",
+      (batchBranch.match(/saveLessons\(list\)/g) || []).length === 1 &&
+        (batchBranch.match(/saveGlobalLessons\(globalList\)/g) || []).length === 1 &&
+        (batchBranch.match(/saveLessons\(/g) || []).length === 1 &&
+        (batchBranch.match(/saveGlobalLessons\(/g) || []).length === 1,
+      { len: batchBranch.length },
+    );
+  } finally {
+    s16.close();
+  }
+}
+
+
 {
   const R10 = subRoot("r-inj6b");
   const MEM10 = path.join(R10, "orchestrator-memory");
@@ -1803,6 +1927,174 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
     );
   } finally {
     s15.close();
+  }
+}
+
+/* ============ 场景 16：v1.1 W3 Q11 digest 消费面（回落/新鲜/STALE/信号） ============ */
+{
+  const R16 = subRoot("r-digest");
+  const MEM16 = path.join(R16, "orchestrator-memory");
+  const lib16 = path.join(R16, "memory", "lessons.jsonl");
+  const digestDir = path.join(MEM16, "digest");
+  const digestMd = path.join(digestDir, "pack-tail-digest.md");
+  const digestJson = path.join(digestDir, "pack-tail-digest.json");
+  fs.mkdirSync(MEM16, { recursive: true });
+  // GLOBAL MEMORY 显式开启（digest 只在「至少一节旧记忆节将渲染」时替代渲染）+ gate due。
+  fs.writeFileSync(path.join(MEM16, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0, pack_global_section: true }));
+  fs.writeFileSync(path.join(MEM16, "AGENTS.md"), "# GLOBAL\n- DIGSEC 全端稳定事实行\n");
+  writeJsonl(lib16, [
+    {
+      v: 1,
+      id: "l-20260101-dg0001",
+      ts: "2026-01-01T00:00:00.000Z",
+      updated_at: new Date().toISOString(),
+      mission_id: null,
+      worker: "t",
+      type: "pitfall",
+      trigger: "DIGPROBE 触发行",
+      lesson: "",
+      fix: "DIGPROBE 修正行",
+      confidence: 0.9,
+      hits: 5,
+      status: "active",
+      refs: [],
+      superseded_by: null,
+      counter_refs: [],
+      note: null,
+    },
+  ]);
+  const s16d = startServer({ root: R16 });
+  try {
+    const packOf = async (mid) => {
+      await s16d.call("context_pack", { mission_id: mid, title: "digest 探针", task: "DIGPROBE 任务" });
+      return readPack(R16, mid);
+    };
+    const listDigest = async () => {
+      const r = await s16d.call("board", { action: "list" });
+      return r.json && r.json.glean_due ? r.json.glean_due.digest : null;
+    };
+
+    // ---- 腿 1：digest 缺失 → 旧两节回落（零字节差语义：GLOBAL MEMORY 原样在位） + 信号 missing
+    const pMiss = await packOf("m-dg-miss");
+    ck.ok("W3-DG-01 digest 缺失 → 回落 GLOBAL MEMORY 且无 PROJECT DIGEST（缺省行为不变）",
+      Boolean(pMiss) && pMiss.includes("## GLOBAL MEMORY") && !pMiss.includes("## PROJECT DIGEST"),
+      pMiss && pMiss.split("\n").filter((l) => l.startsWith("## ")));
+    const dMiss = await listDigest();
+    ck.ok("W3-DG-02 glean_due.digest 三态信号 status=missing（gate due 时出现）",
+      Boolean(dMiss) && dMiss.status === "missing" && dMiss.generated_at === null, dMiss);
+
+    // ---- 腿 2：digest 在位 + 指纹合 → 单节 PROJECT DIGEST 替代两旧节 + 信号 fresh
+    const genAt = new Date().toISOString();
+    fs.mkdirSync(digestDir, { recursive: true });
+    fs.writeFileSync(
+      digestMd,
+      `generated_at: ${genAt}\n- DIGEST 项目现状行\n- DIGEST 在飞 m-digest\n- DIGEST 近期裁决 2026-10-25 W3\n`,
+    );
+    const libStat = fs.statSync(lib16);
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({
+        generated_at: genAt,
+        sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs },
+        bytes: Buffer.byteLength(fs.readFileSync(digestMd, "utf8"), "utf8"),
+      }),
+    );
+    const pFresh = await packOf("m-dg-fresh");
+    ck.ok("W3-DG-03 digest 指纹合 → 单节 PROJECT DIGEST 替代 GLOBAL MEMORY（节头 ts=generated_at）",
+      Boolean(pFresh) && pFresh.includes(`## PROJECT DIGEST（归敛物化，ts:${genAt}）`) &&
+        !pFresh.includes("## GLOBAL MEMORY") && pFresh.includes("DIGEST 项目现状行"),
+      pFresh && pFresh.split("\n").filter((l) => l.startsWith("## ")));
+    const dFresh = await listDigest();
+    ck.ok("W3-DG-04 glean_due.digest status=fresh + generated_at 透出",
+      Boolean(dFresh) && dFresh.status === "fresh" && dFresh.generated_at === genAt, dFresh);
+
+    // ---- 腿 2b：帽边界（v1.1 W6 QA P2-a）——口径=正文（GL-32「正文 ≤12 行/≤1200B」，
+    // generated_at 首行不占正文预算）。修复前 12 行正文即 STALE（off-by-one）。
+    const writeDigestBody = (bodyLines) => {
+      const md = `generated_at: ${genAt}\n${bodyLines.join("\n")}\n`;
+      fs.writeFileSync(digestMd, md);
+      fs.writeFileSync(
+        digestJson,
+        JSON.stringify({
+          generated_at: genAt,
+          sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs },
+          bytes: Buffer.byteLength(md, "utf8"),
+        }),
+      );
+      return md;
+    };
+    // 正文恰 12 行（短行）→ fresh（12 行是上限内，不得误判 STALE）
+    const body12 = Array.from({ length: 12 }, (_, i) => `- BOUNDARY12-${String(i + 1).padStart(2, "0")}`);
+    writeDigestBody(body12);
+    const pCap12 = await packOf("m-dg-cap12");
+    ck.ok("W6-P2a 正文恰 12 行 → 不 STALE（fresh；12 行为上限内）",
+      Boolean(pCap12) && pCap12.includes(`## PROJECT DIGEST（归敛物化，ts:${genAt}）`) &&
+        !pCap12.includes("；STALE：") && pCap12.includes("BOUNDARY12-12"),
+      pCap12 && pCap12.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+    const dCap12 = await listDigest();
+    ck.ok("W6-P2a 正文 12 行 glean_due.digest status=fresh", Boolean(dCap12) && dCap12.status === "fresh", dCap12);
+    // 正文 13 行 → STALE（正文口径理由）+ 渲染 clamp 到 12 行（第 13 行不泄）
+    writeDigestBody(body12.concat("- BOUNDARY13-13"));
+    const pCap13 = await packOf("m-dg-cap13");
+    ck.ok("W6-P2a 正文 13 行 → STALE（超帽理由按正文计）+ 渲染 clamp 12 行（13 行不泄）",
+      Boolean(pCap13) && pCap13.includes("；STALE：digest 超帽（正文 13 行/") &&
+        pCap13.includes("BOUNDARY12-12") && !pCap13.includes("BOUNDARY13-13"),
+      pCap13 && pCap13.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+    // 字节帽边界（正文口径）：12 行恰 1200B → fresh；1201B → STALE（首行字节不占正文预算）
+    // 11 行×99 字符 + 1 行×100 字符 = 1189B 文本 + 11×"\n" = 1200B
+    const byteLines = [
+      ...Array.from({ length: 11 }, (_, i) => `${String(i + 1).padStart(2, "0")}${"a".repeat(97)}`),
+      `12${"b".repeat(98)}`,
+    ];
+    writeDigestBody(byteLines);
+    const pByteOk = await packOf("m-dg-bytes-ok");
+    ck.ok("W6-P2a 正文恰 1200B → 不 STALE（字节帽=正文口径）",
+      Boolean(pByteOk) && !pByteOk.includes("；STALE：") && pByteOk.includes(`12${"b".repeat(98)}`),
+      pByteOk && pByteOk.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+    writeDigestBody([...byteLines.slice(0, 11), `12${"b".repeat(99)}`]);
+    const pByteOver = await packOf("m-dg-bytes-over");
+    ck.ok("W6-P2a 正文 1201B → STALE（字节超帽仍检出）",
+      Boolean(pByteOver) && pByteOver.includes("；STALE：digest 超帽（正文 12 行/1201B"),
+      pByteOver && pByteOver.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+    // 边界腿收尾：恢复腿 2 的三行正文（供腿 3/4 的指纹不合/侧车缺失腿使用）
+    writeDigestBody(["- DIGEST 项目现状行", "- DIGEST 在飞 m-digest", "- DIGEST 近期裁决 2026-10-25 W3"]);
+
+    // ---- 腿 3：指纹不合（lessons_lines 漂移）→ 标 STALE 不阻断组包 + 信号 stale
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
+    );
+    const pStale = await packOf("m-dg-stale");
+    ck.ok("W3-DG-05 指纹不合 → digest 节标 STALE（仍渲染、不阻断组包）",
+      Boolean(pStale) && pStale.includes("## PROJECT DIGEST（归敛物化，") && pStale.includes("；STALE：") &&
+        pStale.includes("DIGEST 项目现状行") && !pStale.includes("## GLOBAL MEMORY"),
+      pStale && pStale.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+    const dStale = await listDigest();
+    ck.ok("W3-DG-06 glean_due.digest status=stale", Boolean(dStale) && dStale.status === "stale", dStale);
+
+    // ---- 腿 4：指纹侧车缺失 → STALE（fail-safe，不回落旧节——digest 仍在位）
+    fs.rmSync(digestJson, { force: true });
+    const pNoSide = await packOf("m-dg-noside");
+    ck.ok("W3-DG-07 指纹侧车缺失 → STALE（不阻断）",
+      Boolean(pNoSide) && pNoSide.includes("；STALE：") && pNoSide.includes("DIGEST 项目现状行"),
+      pNoSide && pNoSide.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
+
+    // ---- 腿 5：digest md 删除 → 回到旧两节渲染 + missing 信号
+    fs.rmSync(digestMd, { force: true });
+    const pBack = await packOf("m-dg-back");
+    ck.ok("W3-DG-08 digest 删除 → 回退旧两节渲染（GLOBAL MEMORY 复位）",
+      Boolean(pBack) && pBack.includes("## GLOBAL MEMORY") && !pBack.includes("## PROJECT DIGEST"),
+      pBack && pBack.split("\n").filter((l) => l.startsWith("## ")));
+    const dBack = await listDigest();
+    ck.ok("W3-DG-09 删除后信号回 missing", Boolean(dBack) && dBack.status === "missing", dBack);
+
+    // ---- 腿 6：brief 暴露 digest 权威路径（gleaner 物化面：路径不手写）
+    const brief16 = JSON.parse(fs.readFileSync(path.join(MEM16, "glean-brief.json"), "utf8"));
+    ck.ok("W3-DG-10 brief.digest 权威路径（path/sidecar_path 双指针）",
+      Boolean(brief16.digest) && brief16.digest.path === digestMd && brief16.digest.sidecar_path === digestJson,
+      brief16.digest);
+  } finally {
+    s16d.close();
   }
 }
 

@@ -91,7 +91,7 @@ function seedEvent(mid, id, text) {
     // ---- SG-04：既有合法 id 形态全回归（连字符/点/数字混排）
     {
       const r = await upsert({ id: "m-sg4-reg.1-a", title: "合法形态回归" });
-      ck.ok("SG-04 既有合法 id 形态不回退", r.isError !== true && resultText(r).mission?.id === "m-sg4-reg.1-a", r.text.slice(0, 80));
+      ck.ok("SG-04 既有合法 id 形态不回退", r.isError !== true && resultText(r).id === "m-sg4-reg.1-a", r.text.slice(0, 80));
     }
 
     // ---- SPL-01：unread 混放坏+好事件 → 读消费好事件、坏件更名 .bad、unread 归零
@@ -161,7 +161,7 @@ function seedEvent(mid, id, text) {
     ck.ok("RES-03b degraded 键只出现一次（第二个 list 不再携带）", !("board_degraded_from" in l2), Object.keys(l2));
     // 隔离后的板可正常写入（重建空板可用）
     const up = await s.call("board", { action: "upsert", mission: { id: "m-res1-after", title: "隔离后写入" } });
-    ck.ok("RES-01d 重建空板可正常写入", up.isError !== true && resultText(up).mission?.id === "m-res1-after", up.text.slice(0, 80));
+    ck.ok("RES-01d 重建空板可正常写入", up.isError !== true && resultText(up).id === "m-res1-after", up.text.slice(0, 80));
   } finally {
     s.close();
   }
@@ -242,7 +242,7 @@ function seedEvent(mid, id, text) {
     blankMission({ id: "m-res8b", status: "running", owner: "w8b", claim: mkClaim("w8b", "also-bad", "garbage") }), // 畸形+新鲜 updated_at → 不动
   ]);
   const s = startServer({ root: R });
-  const getM = async (id) => resultText(await s.call("board", { action: "get", mission_id: id }));
+  const getM = async (id) => resultText(await s.call("board", { action: "get", mission_id: id, view: "full" }));
   try {
     // 任意板写触发 sweepGraph
     await s.call("board", { action: "upsert", mission: { id: "m-sweep-trigger", title: "sweep 触发" } });
@@ -383,7 +383,7 @@ function seedEvent(mid, id, text) {
     fs.renameSync(path.join(R, "board.json"), path.join(R, "board.json.recovered")); // 崩溃遗留形态
     const s = startServer({ root: R });
     try {
-      const g = resultText(await s.call("board", { action: "get", mission_id: "m-atw2" }));
+      const g = resultText(await s.call("board", { action: "get", mission_id: "m-atw2", view: "full" }));
       ck.ok("ATW-02a 缺板+.recovered → load 回收（数据非空板）", g.id === "m-atw2" && g.original_prompt === "precious", [g.id, g.original_prompt]);
       ck.ok("ATW-02b .recovered 已消费（更名回 board.json）", fs.existsSync(path.join(R, "board.json")) && !fs.existsSync(path.join(R, "board.json.recovered")), "");
       const src = fs.readFileSync(DEFAULT_SERVER, "utf8");

@@ -405,13 +405,25 @@ function rolloutHeartbeatMs(rolloutDir, sessionId) {
   return ms > 0 ? ms : null;
 }
 
-/** 主会话 id：<root>/sentinel/coord-session.txt（server resume 通道刷新）。 */
+/** 主会话 id：<root>/sentinel/coord-session.txt（server resume 通道刷新）。
+ * v1.1 W3 rider（B1① 同型守卫，W2 遗留）：消费面前置形状校验——子代理会话
+ * id（sess_subagent_agent_<agentId>，EXP10-findings R6 锚劫持形态）绝不作为
+ * 唤醒/门控目标。前缀形覆盖未来 sess_subagent_* 变体；判中即忽略该锚并落
+ * 一行 stderr（fail-loud 定因），由 coordBusy 后续档兜底（hooks 零依赖纪律，
+ * 谓词与 watcher/inject.mjs isSubagentSessionId / session-start G14 同语义）。 */
 function coordSessionId(rootDir, signals) {
   const f = path.isAbsolute(signals.coordSessionFile)
     ? signals.coordSessionFile
     : path.join(rootDir, signals.coordSessionFile);
   try {
     const v = fs.readFileSync(f, "utf8").trim();
+    if (v.startsWith("sess_subagent")) {
+      process.stderr.write(
+        `[bg-sentinel] coord-session 命中 sess_subagent 前缀（子代理短寿命会话，EXP10-findings R6）——` +
+          `已忽略该锚，按无主控会话兜底判定（零唤醒目标）\n`,
+      );
+      return null;
+    }
     return v || null;
   } catch {
     return null;

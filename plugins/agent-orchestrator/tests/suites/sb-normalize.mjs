@@ -70,7 +70,7 @@ try {
   const m1 = await newMission("SB1");
   const a = await s.call("context_pack", { mission_id: m1, title: "SB1", task: "请读 " + fwd(G.dir) + "/src/a.txt 并总结", isolation: "worktree", oob_allowlist: ["src/"] });
   const wt1 = path.join(T.root, "sandboxes", m1);
-  ck.ok("SB1 出包+沙箱信息", !a.isError && !!m1 && a.json?.sandbox?.branch === "orch/" + m1, a.text.slice(0, 150));
+  ck.ok("SB1 出包+沙箱信息", !a.isError && !!m1 && mission(m1)?.pack?.sandbox?.branch === "orch/" + m1, a.text.slice(0, 150));
   ck.ok("SB1 worktree list 含沙箱路径与分支", G.git(["worktree", "list"]).toLowerCase().includes(fwd(wt1).toLowerCase()) && G.git(["worktree", "list"]).includes("orch/" + m1));
   ck.ok("SB1 分支存在", G.git(["branch", "--list", "orch/" + m1]).trim() !== "");
   const sb1 = mission(m1)?.pack?.sandbox;

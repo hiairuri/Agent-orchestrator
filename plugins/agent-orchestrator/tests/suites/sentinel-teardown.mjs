@@ -34,6 +34,10 @@
  *      signals 块（v2 十键+桥四键全缺省）、显式单键仅该键+signals（黑盒 spawn server
  *      两腿）+零漂移对拍锁（server 十键 numArgOpt 无 numArg 遗留 ∧ 哨兵内建默认字面量
  *      表逐条在位 ∧ 对拍表登记 v0.9.x.md）
+ *   T12 W4 A1（v1.1，A-v110-W4-A1-01/02）：stop-check coord-tail 抽取黑盒——有块→
+ *      `<存储根>/context/coord-tail.md` 原子写（全形字段序/短形 delta 合并/多块取末）；
+ *      无标记零写；超帽（全形 900B/短形 400B）/未知字段/seq 非递增/subagent 前缀→拒写
+ *      保留旧文件+stderr；短形无全形基线不立文件（ORT-1..8）
  *
  * live 行为无法自动化的部分（手动验收步骤）：
  *   - 平台通知面：全清后主控 0 唤醒（旧版实测三实例三连唤）——需宿主后台任务真跑 3 实例
@@ -52,10 +56,11 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PLUGIN_DIR, Checker, startServer } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot } from "../harness/temp-root.mjs";
-import { captureBackground } from "../harness/capture.mjs";
+import { captureBackground, runCapture } from "../harness/capture.mjs";
 
 const ck = new Checker("sentinel-teardown");
 const SENTINEL = path.join(PLUGIN_DIR, "hooks", "bg-sentinel.mjs");
+const STOP_CHECK = path.join(PLUGIN_DIR, "hooks", "stop-check.mjs");
 const BASE = makeTempRoot({ prefix: "orch-sentd-" });
 const PROJ = path.join(BASE.root, "proj");
 const ROOT = path.join(PROJ, ".zcode", "orchestrator");
@@ -1015,6 +1020,153 @@ try {
       srvSparseAll && sentDefaultsAll && registered,
       { srvSparse: srvSparse.filter((x) => !(x.opt && x.noLegacy)), sentDefaults: sentDefaults.filter((x) => !x.hit).map((x) => x.s), registered },
     );
+  }
+
+  /* ---- T12 v1.1 W4 A1：coord-tail 抽取（stop-check 黑盒，ORT-1..8） ----
+     DESIGN §1.2/§1.3：有块→原子写合并全量态；无标记→零写；短形 delta + seq 防线；
+     超帽/解析失败/subagent 前缀→拒写保留旧文件 + stderr（fail-loud）。 */
+  {
+    const SCP = path.join(BASE.root, "stopcheck");
+    const SCR = path.join(SCP, ".zcode", "orchestrator");
+    const CT = path.join(SCR, "context", "coord-tail.md");
+    const resetSC = () => {
+      fs.rmSync(SCP, { recursive: true, force: true });
+      fs.mkdirSync(SCR, { recursive: true });
+      fs.writeFileSync(path.join(SCR, "board.json"), JSON.stringify({ version: 2, missions: [] }) + "\n");
+    };
+    const fullBlock = (over = {}) =>
+      [
+        "<!-- orch-tail v1",
+        `ts: ${over.ts ?? "2026-10-25T05:00:00.000Z"}`,
+        `seq: ${over.seq ?? 1}`,
+        `project: ${over.project ?? "v1.1 施工中"}`,
+        `stage: ${over.stage ?? "W4 A1"}`,
+        `flying: ${over.flying ?? "m-a"}`,
+        `ruled: ${over.ruled ?? "裁剪案"}`,
+        `next: ${over.next ?? "下一步"}`,
+        "-->",
+      ].join("\n");
+    const shortBlock = (over = {}) =>
+      [
+        "<!-- orch-tail v1",
+        `ts: ${over.ts ?? "2026-10-25T05:01:00.000Z"}`,
+        `seq: ${over.seq ?? 2}`,
+        `flying: ${over.flying ?? "m-b"}`,
+        `next: ${over.next ?? "收口"}`,
+        "-->",
+      ].join("\n");
+    const runStop = (msg, { session_id = "sess_main-1", stop_hook_active = false } = {}) =>
+      runCapture({
+        script: process.execPath,
+        args: [STOP_CHECK, "--mirror", "off"],
+        input: JSON.stringify({ session_id, stop_hook_active, last_assistant_message: msg }),
+        cwd: SCP,
+        env: { ZCODE_PROJECT_DIR: SCP },
+      });
+    const readCT = () => (fs.existsSync(CT) ? fs.readFileSync(CT, "utf8") : null);
+
+    resetSC();
+    {
+      const r = runStop("本轮无契约块，只有正文。");
+      ck.ok(
+        "T12-a 无标记轮次零写：coord-tail.md 不产生（context 目录亦不建）+ exit 0 静默",
+        r.code === 0 && !fs.existsSync(CT) && !fs.existsSync(path.dirname(CT)) && !r.stderr.trim(),
+        { code: r.code, stderr: r.stderr, exists: fs.existsSync(CT) },
+      );
+    }
+    {
+      const r = runStop(fullBlock());
+      const got = readCT();
+      ck.ok(
+        "T12-b 全形块 → coord-tail.md 原子写（字段序恒同/内容逐字/exit 0）",
+        r.code === 0 && got === fullBlock() && !r.stderr.trim(),
+        { got, stderr: r.stderr },
+      );
+    }
+    {
+      const before = readCT();
+      const r = runStop(shortBlock({ flying: "+m-b,-m-a" }));
+      const got = readCT();
+      const want = fullBlock({ ts: "2026-10-25T05:01:00.000Z", seq: 2, flying: "m-b", next: "收口" });
+      ck.ok(
+        "T12-c 短形 delta 合并：project/stage/ruled 保留、flying +/- 应用、ts/seq 替换",
+        r.code === 0 && got === want && got !== before,
+        { got, want },
+      );
+    }
+    {
+      const r = runStop(shortBlock({ seq: 3, flying: "-m-z,+m-b,+m-c" }));
+      const got = readCT();
+      ck.ok(
+        "T12-d 短形 flying 边界：-不存在 id 忽略、+已存在 id 不重复（合并后 ≤3）",
+        r.code === 0 && got.includes("flying: m-b, m-c") && got.includes("seq: 3") && !r.stderr.trim(),
+        { got, stderr: r.stderr },
+      );
+      const before4 = readCT();
+      const r4 = runStop(shortBlock({ seq: 4, flying: "+m-d,+m-e" }));
+      ck.ok(
+        "T12-e 短形 flying 合并超 3 条 → 整轮丢弃（旧文件逐字节不动）",
+        r4.code === 0 && readCT() === before4 && r4.stderr.includes("flying"),
+        { stderr: r4.stderr, changed: readCT() !== before4 },
+      );
+    }
+    {
+      const before = readCT();
+      const r = runStop(fullBlock({ seq: 9, project: "x".repeat(950) }));
+      ck.ok(
+        "T12-f 全形超帽（>900B）→ 拒写 + stderr，旧文件逐字节保留",
+        r.code === 0 && readCT() === before && r.stderr.includes("超帽"),
+        { stderr: r.stderr, changed: readCT() !== before },
+      );
+    }
+    {
+      const before = readCT();
+      const r = runStop(fullBlock({ seq: 10 }).replace("next: 下一步", "owner: 未知字段\nnext: 下一步"));
+      ck.ok(
+        "T12-g 未知字段（白名单外）→ 整块拒绝 + stderr，旧文件逐字节保留",
+        r.code === 0 && readCT() === before && r.stderr.includes("未知字段"),
+        { stderr: r.stderr, changed: readCT() !== before },
+      );
+    }
+    {
+      const before = readCT();
+      const r = runStop(fullBlock({ seq: 3 }));
+      ck.ok(
+        "T12-h seq 非递增（≤旧值）→ 整轮丢弃，旧文件逐字节保留",
+        r.code === 0 && readCT() === before && r.stderr.includes("seq 非递增"),
+        { stderr: r.stderr, changed: readCT() !== before },
+      );
+    }
+    {
+      const before = readCT();
+      const r = runStop(fullBlock({ seq: 99 }), { session_id: "sess_subagent_agent_abc" });
+      ck.ok(
+        "T12-i 子代理会话（sess_subagent_ 前缀）→ 跳过抽取，零写零告警",
+        r.code === 0 && readCT() === before && !r.stderr.trim(),
+        { stderr: r.stderr, changed: readCT() !== before },
+      );
+    }
+    {
+      resetSC();
+      const r = runStop(shortBlock({ seq: 1, flying: "+m-b" }));
+      ck.ok(
+        "T12-j 短形无全形基线 → 不立文件 + stderr「缺全形基线」",
+        r.code === 0 && !fs.existsSync(CT) && r.stderr.includes("缺全形基线"),
+        { stderr: r.stderr, exists: fs.existsSync(CT) },
+      );
+    }
+    {
+      resetSC();
+      const msg =
+        "正文引用旧块：\n" + fullBlock({ seq: 1, project: "旧" }) + "\n正文尾巴\n" + fullBlock({ seq: 2, project: "新" });
+      const r = runStop(msg);
+      const got = readCT();
+      ck.ok(
+        "T12-k 多块取最后一块（正文引用不误取）：文件=seq 2 块",
+        r.code === 0 && got === fullBlock({ seq: 2, project: "新" }),
+        { got },
+      );
+    }
   }
 } finally {
   for (const k of kids) {

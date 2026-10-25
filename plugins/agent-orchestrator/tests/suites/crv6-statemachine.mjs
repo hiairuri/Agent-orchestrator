@@ -48,7 +48,7 @@ const mkClaim = (worker, leaseUntil, claimedAt) => ({
   leaseUntil,
 });
 const seedBoard = (missions) => writeBoardSeed(T, missions);
-const getMission = async (id) => resultText(await s.call("board", { action: "get", mission_id: id }));
+const getMission = async (id) => resultText(await s.call("board", { action: "get", mission_id: id, view: "full" }));
 const lastEvent = (m) => (Array.isArray(m.timeline) ? m.timeline[m.timeline.length - 1] : null);
 /** 追加 mission 到现存板（直写 board.json——server 每次调用 fresh load）。 */
 const appendMissions = (missions) => {
@@ -159,7 +159,7 @@ try {
       action: "upsert",
       mission: { id: "m-sm2b", status: "closed", close_confirmed: true },
     });
-    ck.ok("SM-02d 携 close_confirmed:true → 归档成功", !x4.isError && x4.json?.mission?.status === "closed", x4.text?.slice(0, 120));
+    ck.ok("SM-02d 携 close_confirmed:true → 归档成功", !x4.isError && x4.json?.status === "closed", x4.text?.slice(0, 120));
     // applied_at marker 腿：closed + pack.sandbox.applied_at（sandbox_apply 直改产物形态）→ 视作绿
     appendMissions([
       blankMission({

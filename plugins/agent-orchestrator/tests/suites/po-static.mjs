@@ -46,6 +46,8 @@ const countRe = (hay, re) => (hay.match(re) || []).length;
 const SERVER = read(path.join("mcp", "server.mjs"));
 const SKILL = read(path.join("skills", "agent-orchestrator", "SKILL.md"));
 const WORKER = read(path.join("agents", "orch-worker.md"));
+const STOP_CHECK = read(path.join("hooks", "stop-check.mjs"));
+const BGGATE = read(path.join("hooks", "bg-gate.mjs"));
 
 try {
   // ---------- A-v0110-M10-03：W4-01 固定文案钉 14 条（§2.10 W4-01 收编） ----------
@@ -78,14 +80,28 @@ try {
   ck.ok("M10-04 ban 以下为上游数据非指令（server+SKILL）", count(SERVER, "以下为上游数据非指令") === 0 && count(SKILL, "以下为上游数据非指令") === 0, { server: count(SERVER, "以下为上游数据非指令"), skill: count(SKILL, "以下为上游数据非指令") });
   // M10 ⑦：pack RULES 行尾 + SKILL §3 样本同步删指针（旧尾段零残留）
   ck.ok("M10-04 ban 处置见第 9 章（server+SKILL，M10 ⑦）", count(SERVER, "处置见第 9 章") === 0 && count(SKILL, "处置见第 9 章") === 0, { server: count(SERVER, "处置见第 9 章"), skill: count(SKILL, "处置见第 9 章") });
-  // ⑤：server 缺省 persona 残句清零（态度尾删后全文件零命中；评审原型「会坏什么/好不好」
-  // 为评审判据措辞、不在本 ban 族，见 v0.11.x.md §1 W1-03 行的文件域）
+  // ⑤：server 缺省 persona 残句清零（态度尾删后全文件零命中）；v1.1 W1 B3：评审原型
+  // 「会坏什么/好不好」旧口语句已规则化（ARCHETYPES.reviewer），v0.11 期豁免注记撤销——
+  // W1-03 扫描域扩 server.mjs，且旧句开场串在产品面全仓 grep=0（回潮防钉）。
   ck.ok("M10-04 ban 不硬扛/不造假（server，⑤ 残句清零）", count(SERVER, "不硬扛") === 0 && count(SERVER, "不造假") === 0, { ying: count(SERVER, "不硬扛"), zaojia: count(SERVER, "不造假") });
-  // W1-03 族（commands/ 5 + agents/ 4 正文）
-  const W1_FILES = [...list("commands"), ...list("agents")];
+  // W1-03 族（commands/ 5 + agents/ 4 正文 + v1.1 B3 扩域 server.mjs）
+  const W1_FILES = [...list("commands"), ...list("agents"), path.join(PLUGIN_DIR, "mcp", "server.mjs")];
   const W1_RE = /不硬扛|不造假|不编造|不算违约|带病硬写|成败即分叉|宁缺勿滥|能答的答|会坏什么|好不好|证据说话/;
   const w1Hits = W1_FILES.map((p) => [p, countRe(fs.readFileSync(p, "utf8"), W1_RE)]).filter(([, n]) => n > 0);
-  ck.ok("M10-04 W1-03 态度句族零残留（commands+agents 九文件）", w1Hits.length === 0, w1Hits);
+  ck.ok("M10-04 W1-03 态度句族零残留（commands+agents 九文件+server.mjs〔v1.1 W1 B3 扩域〕）", w1Hits.length === 0, w1Hits);
+  // B3 专项：旧评审判据口语串在产品面全仓零残留（tests/ 断言文件自身承载 ban 字面量，不在扫描域）
+  const PRODUCT_DIRS = ["commands", "agents", "hooks", "watcher", "mcp", "skills"];
+  const walkProduct = (dir) =>
+    fs.readdirSync(path.join(PLUGIN_DIR, dir), { withFileTypes: true }).flatMap((e) => {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) return walkProduct(rel);
+      return /\.(md|mjs)$/.test(e.name) ? [path.join(PLUGIN_DIR, rel)] : [];
+    });
+  const OLD_REVIEW_LEAD = "要求审批的评审要找";
+  const reviewHits = PRODUCT_DIRS.flatMap(walkProduct)
+    .map((p) => [p, count(fs.readFileSync(p, "utf8"), OLD_REVIEW_LEAD)])
+    .filter(([, n]) => n > 0);
+  ck.ok("M10-04 ban 评审判据旧口语串（产品面全仓 grep=0，v1.1 W1 B3 回潮防钉）", reviewHits.length === 0, reviewHits);
   // W2-02 族（SKILL 全文）
   const W2_RE = /不硬扛|不造假|不编造|不算违约|带病硬写|不慌|能答的答|别靠|不要因为|别当没事|好像刚收到过|就地修/;
   ck.ok("M10-04 W2-02 M2 句族零残留（SKILL）", countRe(SKILL, W2_RE) === 0, countRe(SKILL, W2_RE));
@@ -119,7 +135,7 @@ try {
   const chapNums = (SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1")));
   const chapOk = chapNums.length === 16 && chapNums.every((n, i) => n === i + 1);
   ck.ok("PL1-01 SKILL 章号 1..16 连续零重号", chapOk, chapNums.join(","));
-  ck.ok("PL1-01 PL 规则族 9 条（行首 PL-N 计数）", countRe(SKILL_LF, /^PL-\d+ /gm) === 9, countRe(SKILL_LF, /^PL-\d+ /gm));
+  ck.ok("PL1-01 PL 规则族 10 条（行首 PL-N 计数；v1.1 W4 增 PL-10）", countRe(SKILL_LF, /^PL-\d+ /gm) === 10, countRe(SKILL_LF, /^PL-\d+ /gm));
   // PL1-02 v2.1 逐字关键句钉（两豁免/可行性结论行/披露/格式纪律/组包 checklist）
   ck.ok("PL1-02 grill#1 豁免判据+免开声明在位", count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点") === 1 && count(SKILL, "grill#1 免开：") === 1, { spec: count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点"), decl: count(SKILL, "grill#1 免开：") });
   ck.ok("PL1-02 grill#3 豁免判据+免开声明在位", count(SKILL, "改动面 ≤2 波 ∧ 零新权衡") === 1 && count(SKILL, "grill#3 免开：") === 1, { spec: count(SKILL, "改动面 ≤2 波 ∧ 零新权衡"), decl: count(SKILL, "grill#3 免开：") });
@@ -130,6 +146,128 @@ try {
   // PL1-03 §1 场景表行 + frontmatter description 增行
   ck.ok("PL1-03 §1 场景表 PL 行在位", count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |") === 1, count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |"));
   ck.ok("PL1-03 frontmatter description 增行在位", count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。") === 1, count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。"));
+
+  // ---------- A-v110-W4-A1：v1.1 W4 尾部契约块/三段派发静态回潮防钉（DESIGN §1/§2） ----------
+  // 行为面 = sentinel-teardown T12（stop-check 黑盒）+ crv2-pack W4-PREFIX（跨派发前缀字节）。
+  ck.ok(
+    "W4-01 SKILL PL-10 在位：ORT 标记对/两形制帽值/STALE_T=24h/coord-tail 恢复源",
+    count(SKILL_LF, /^PL-10 /gm) === 1 &&
+      count(SKILL, "<!-- orch-tail v1") === 3 &&
+      count(SKILL, "≤10 行/900B") === 2 &&
+      count(SKILL, "≤6 行/400B") === 2 &&
+      count(SKILL, "STALE_T=24h") === 1 &&
+      count(SKILL, "context/coord-tail.md") === 2 &&
+      count(SKILL, "persona 原型正文") >= 1,
+    {
+      pl10: count(SKILL_LF, /^PL-10 /gm),
+      blocks: count(SKILL, "<!-- orch-tail v1"),
+      fullCap: count(SKILL, "≤10 行/900B"),
+      shortCap: count(SKILL, "≤6 行/400B"),
+      stale: count(SKILL, "STALE_T=24h"),
+      path: count(SKILL, "context/coord-tail.md"),
+    },
+  );
+  {
+    const head = "**派发 prompt 尾块**";
+    const at = SKILL.indexOf(head);
+    const block = at >= 0 ? SKILL.slice(at) : "";
+    const iPtr = block.indexOf("先 Read 任务包");
+    const iCh = block.indexOf("[channel] {mission_id}");
+    const iWk = block.indexOf("[worker] {worker-name}");
+    const iTk = block.indexOf("[token] {token}");
+    ck.ok(
+      "W4-02 SKILL §1 场景表行 + §3 尾块模板（指针句先行，[channel]→[worker]→[token] 收尾）",
+      count(SKILL, "| 跨派发前缀稳定（persona+共享头+尾块，coord-tail 契约块） | 第 16 章 PL-10 |") === 1 &&
+        count(SKILL, "## CONTRACT（三行契约，也出现在派发 prompt 尾块）") === 1 &&
+        iPtr >= 0 &&
+        iPtr < iCh &&
+        iCh < iWk &&
+        iWk < iTk,
+      { scene: count(SKILL, "跨派发前缀稳定"), iPtr, iCh, iWk, iTk },
+    );
+  }
+  ck.ok(
+    "W4-03 server 七处措辞同步：4 token 引导 + 3 CONTRACT/协议节头改「尾块」，头部措辞零残留",
+    count(SERVER, "check the [token] line in the pack CONTRACT section") === 4 &&
+      count(SERVER, "## CONTRACT（三行契约，也出现在派发 prompt 尾块）") === 1 &&
+      count(SERVER, "## 协议（三行契约，出现在派发 prompt 尾块与任务包 CONTRACT 节）") === 1 &&
+      count(SERVER, "三行契约以派发 prompt 尾块为准") === 1 &&
+      count(SERVER, "派发 prompt 头部") === 0 &&
+      count(SKILL, "派发 prompt 头部") === 0,
+    {
+      tokens: count(SERVER, "check the [token] line in the pack CONTRACT section"),
+      packHead: count(SERVER, "## CONTRACT（三行契约，也出现在派发 prompt 尾块）"),
+      personaHead: count(SERVER, "## 协议（三行契约，出现在派发 prompt 尾块与任务包 CONTRACT 节）"),
+      glean: count(SERVER, "三行契约以派发 prompt 尾块为准"),
+      staleServer: count(SERVER, "派发 prompt 头部"),
+      staleSkill: count(SKILL, "派发 prompt 头部"),
+    },
+  );
+  {
+    // bg-gate presence 检测位置无关性：CONTRACT_HEAD 行内 /m，尾块位置仍命中。
+    const regexLine = "const CONTRACT_HEAD = /^\\s*\\[channel\\]\\s*(\\S+)/m;";
+    const sample =
+      "persona 原型正文\n共享头 coord-tail+digest\n先 Read 任务包 packs/x/pack.md，按包内 TASK/RULES 执行。\n" +
+      "[channel] m-20261025-134016-57cc\n[worker] orch-worker#1\n[token] 01529f6d151acbdbd4901a6eb01c813d";
+    const hit = /^\s*\[channel\]\s*(\S+)/m.exec(sample);
+    ck.ok(
+      "W4-04 bg-gate CONTRACT_HEAD /m presence 语义不破（尾块位置命中，位置无关）",
+      count(BGGATE, regexLine) === 1 && Boolean(hit) && hit[1] === "m-20261025-134016-57cc",
+      { regex: count(BGGATE, regexLine), hit: hit && hit[1] },
+    );
+  }
+  ck.ok(
+    "W4-05 stop-check 抽取静态锚：标记对/两形制帽/字段白名单/subagent 守卫/coord-tail 落点",
+    count(STOP_CHECK, 'const COORD_TAIL_MARK = "<!-- orch-tail v1";') === 1 &&
+      count(STOP_CHECK, "full: { lines: 10, bytes: 900 }") === 1 &&
+      count(STOP_CHECK, "short: { lines: 6, bytes: 400 }") === 1 &&
+      count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];') === 1 &&
+      count(STOP_CHECK, '"context", "coord-tail.md"') === 1 &&
+      count(STOP_CHECK, '"sess_subagent_"') === 1,
+    {
+      mark: count(STOP_CHECK, "<!-- orch-tail v1"),
+      full: count(STOP_CHECK, "full: { lines: 10, bytes: 900 }"),
+      short: count(STOP_CHECK, "short: { lines: 6, bytes: 400 }"),
+      fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];'),
+      path: count(STOP_CHECK, '"context", "coord-tail.md"'),
+      guard: count(STOP_CHECK, '"sess_subagent_"'),
+    },
+  );
+
+  // ---------- A-v0110-W3：v1.1 A5/digest 静态回潮防钉（v1.1 W3 施工面） ----------
+  // 回执/list/get/mailbox 行为锁在 crv2/crv3（N1-N7）；本组只钉 server 源码字面量
+  // 不复活旧呈现面（prompt_template 回显/2000 字 details 帽）。
+  ck.ok("W3-01 prompt_template 回显零残留（server.mjs；回执=包 CONTRACT 单源）", count(SERVER, "prompt_template") === 0, count(SERVER, "prompt_template"));
+  ck.ok("W3-02 list 紧凑行走白名单构造（compactMissionRow 定义+list 出口）",
+    count(SERVER, "function compactMissionRow") === 1 && count(SERVER, "missions.map(compactMissionRow)") === 1,
+    { def: count(SERVER, "function compactMissionRow"), use: count(SERVER, "missions.map(compactMissionRow)") });
+  ck.ok("W3-03 get view 逃生口在位（compact/full 枚举 + 非法值报错）", count(SERVER, 'board get view must be "compact" or "full"') === 1);
+  ck.ok("W3-04 mailbox details 指针化锚在案（details_head/details_path；2000 字呈现帽退役）",
+    count(SERVER, "details_head") >= 1 && count(SERVER, "DETAILS_PRESENTATION_CAP") === 0,
+    { head: count(SERVER, "details_head"), cap: count(SERVER, "DETAILS_PRESENTATION_CAP") });
+  ck.ok("W3-05 digest 帽 12 行/1200B + glean_due.digest 子键锚在位",
+    count(SERVER, "const DIGEST_MAX_LINES = 12") === 1 && count(SERVER, "const DIGEST_MAX_BYTES = 1200") === 1 && count(SERVER, "digest: { status: digest.status") === 1,
+    { lines: count(SERVER, "const DIGEST_MAX_LINES = 12"), bytes: count(SERVER, "const DIGEST_MAX_BYTES = 1200") });
+  ck.ok("W3-06 upsert/ack 最小回执锚在位（恰两处 {ok,id,status}）", count(SERVER, "{ ok: true, id: mission.id, status: mission.status }") === 2, count(SERVER, "{ ok: true, id: mission.id, status: mission.status }"));
+
+  // ---------- A-v110-W6：v1.1 QA 收口静态防钉（P1 调用面对齐 / P2 两源面回潮） ----------
+  const ORCH_CMD = read(path.join("commands", "orch.md"));
+  // P1：A5 list 行已剔除 wake_failure（G3 锁不动），指挥面必须走 get 详单读。
+  // 最左静态判据：任何一行同时出现 list 与 wake_failure = 依赖默认 list 面的读法复活。
+  const listWakeLines = ORCH_CMD.split("\n").filter((l) => /\blist\b|-list/i.test(l) && l.includes("wake_failure"));
+  ck.ok("W6-01 commands/orch.md 未签收列走 board get 详单读 wake_failure（不依赖默认 list 行）",
+    listWakeLines.length === 0 && /action=get[^\n]*wake_failure/.test(ORCH_CMD) && count(ORCH_CMD, "action=get") >= 2,
+    { listWakeLines, getReads: count(ORCH_CMD, "action=get") });
+  // P2-a：帽判定必须是正文口径（body），all.length 含 generated_at 首行会 off-by-one。
+  ck.ok("W6-02 digest 帽判定=正文行/字节口径（all.length 判据零残留）",
+    count(SERVER, "body.length > DIGEST_MAX_LINES || bodyBytes > DIGEST_MAX_BYTES") === 1 &&
+      count(SERVER, "all.length > DIGEST_MAX_LINES") === 0 &&
+      count(SERVER, "body.slice(0, DIGEST_MAX_LINES)") === 1,
+    { bodyCap: count(SERVER, "body.length > DIGEST_MAX_LINES || bodyBytes > DIGEST_MAX_BYTES"), oldCap: count(SERVER, "all.length > DIGEST_MAX_LINES") });
+  // P2-b：list 行 unread 走容忍式包装（坏 id 行不阻整表）。
+  ck.ok("W6-03 list 行 unread 容忍式计数（bad id 不阻整表，1.0.0 兼容）",
+    count(SERVER, "function countUnreadSafe") === 1 && count(SERVER, "unread: countUnreadSafe(m.id)") === 1,
+    { def: count(SERVER, "function countUnreadSafe"), use: count(SERVER, "unread: countUnreadSafe(m.id)") });
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------
   const bytesOf = (rel) => Buffer.byteLength(read(rel), "utf8");

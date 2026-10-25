@@ -195,6 +195,226 @@ function recordMirrorIfEnabled(input, argv) {
   }
 }
 
+/* --- v1.1 W4 (A1): orch-tail extraction → <root>/context/coord-tail.md (ORT-1..8) ---
+   The coordinator emits a tail contract block at the end of its last assistant
+   message each turn. Stop is the only hook that sees that message text, so the
+   merged full state lives here (recovery source after compaction). Two shapes:
+   full (all five business fields) and short (delta: flying +/-). The block is
+   validated before any write; every rejection keeps the old file (fail-safe)
+   and prints one stderr line (fail-loud). Sessions without a marker are a
+   zero-write no-op (ORT-7). */
+const COORD_TAIL_MARK = "<!-- orch-tail v1";
+const COORD_TAIL_CLOSE = "-->";
+const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];
+const COORD_TAIL_FIELD_SET = new Set(COORD_TAIL_FIELDS);
+const COORD_TAIL_CAPS = {
+  full: { lines: 10, bytes: 900 },
+  short: { lines: 6, bytes: 400 },
+};
+
+function coordTailWarn(msg) {
+  try {
+    process.stderr.write("[agent-orchestrator] coord-tail: " + msg + "\n");
+  } catch {
+    /* stderr 不可写也不阻塞 */
+  }
+}
+
+/** Last complete block in the message (later quotes/echoes win, ORT-1). */
+function coordTailLastBlock(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trimEnd() !== COORD_TAIL_MARK) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trimEnd() === COORD_TAIL_CLOSE) return { lines: lines.slice(i, j + 1) };
+    }
+    return { unterminated: true };
+  }
+  return null;
+}
+
+/** flying 值 → 条目数组（「无」/空 = 零条目；全形整表与短形 delta 共用）。 */
+function coordTailFlyingItems(value) {
+  const s = String(value ?? "").trim();
+  if (!s || s === "无" || s === "（无）" || s === "-") return [];
+  return s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function coordTailCapError(block, form) {
+  const cap = COORD_TAIL_CAPS[form];
+  const lines = block.lines.length;
+  const bytes = Buffer.byteLength(block.lines.join("\n"), "utf8");
+  if (lines > cap.lines) return `块超帽（${lines} 行 > ${cap.lines} 行），本轮不更新`;
+  if (bytes > cap.bytes) return `块超帽（${bytes}B > ${cap.bytes}B），本轮不更新`;
+  return null;
+}
+
+/** Parse one full/short block. Unknown/missing/duplicate fields reject the whole block. */
+function coordTailParse(block) {
+  if (!block || block.unterminated) return { error: "标记未闭合" };
+  const body = block.lines.slice(1, -1);
+  const fields = Object.create(null);
+  for (const line of body) {
+    const m = /^([a-z]+): (.+)$/.exec(line);
+    if (!m) return { error: `坏行（须 field: value）：${String(line).slice(0, 40)}` };
+    if (!COORD_TAIL_FIELD_SET.has(m[1])) return { error: `未知字段：${m[1]}（整块拒绝）` };
+    if (Object.prototype.hasOwnProperty.call(fields, m[1])) return { error: `重复字段：${m[1]}` };
+    fields[m[1]] = m[2].trim();
+  }
+  const hasFull = ["project", "stage", "ruled"].some((k) => Object.prototype.hasOwnProperty.call(fields, k));
+  const required = hasFull ? COORD_TAIL_FIELDS : ["ts", "seq", "flying", "next"];
+  for (const k of required) {
+    if (!Object.prototype.hasOwnProperty.call(fields, k) || fields[k] === "") return { error: `缺字段：${k}` };
+  }
+  const seq = Number(fields.seq);
+  if (!/^\d+$/.test(fields.seq) || !Number.isSafeInteger(seq)) return { error: `seq 非整数：${fields.seq}` };
+  if (!Number.isFinite(Date.parse(fields.ts))) return { error: `ts 非 ISO8601：${fields.ts}` };
+  const flyingItems = coordTailFlyingItems(fields.flying);
+  if (flyingItems.length > 3) return { error: "flying 超过 3 条" };
+  if (hasFull) {
+    if (flyingItems.some((x) => /^[+-]/.test(x))) return { error: "全形 flying 必须是整表（禁 +/- 前缀）" };
+    return { form: "full", fields, seq, flyingItems };
+  }
+  for (const token of flyingItems) {
+    if (!/^[+-]\S+$/.test(token)) return { error: `短形 flying 必须 +id/-id：${token}` };
+  }
+  return { form: "short", fields, seq, flyingItems };
+}
+
+/** Old file is the merged full state (already canonical); corrupt/missing → null. */
+function coordTailRead(file) {
+  try {
+    const parsed = coordTailParse(coordTailLastBlock(fs.readFileSync(file, "utf8")));
+    if (parsed.error || parsed.form !== "full") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function coordTailRender(state) {
+  return [
+    COORD_TAIL_MARK,
+    `ts: ${state.ts}`,
+    `seq: ${state.seq}`,
+    `project: ${state.project}`,
+    `stage: ${state.stage}`,
+    `flying: ${state.flying}`,
+    `ruled: ${state.ruled}`,
+    `next: ${state.next}`,
+    COORD_TAIL_CLOSE,
+  ].join("\n");
+}
+
+function coordTailMerge(prev, parsed) {
+  if (!prev && parsed.form === "short") return { error: "缺全形基线，短形不立文件" };
+  const prevSeq = prev ? Number(prev.fields.seq) : -1;
+  if (prev && parsed.seq <= prevSeq) return { error: `seq 非递增（${parsed.seq} ≤ ${prevSeq}），本轮丢弃` };
+  let state;
+  if (parsed.form === "full") {
+    state = {
+      ts: parsed.fields.ts,
+      seq: String(parsed.seq),
+      project: parsed.fields.project,
+      stage: parsed.fields.stage,
+      flying: parsed.flyingItems.join(", ") || "无",
+      ruled: parsed.fields.ruled,
+      next: parsed.fields.next,
+    };
+  } else {
+    // ORT-3/4:缺省字段=不变; flying 只应用 +/- 增删（-不存在的 id 忽略）。
+    const flying = coordTailFlyingItems(prev.fields.flying);
+    for (const token of parsed.flyingItems) {
+      const id = token.slice(1);
+      if (token[0] === "-") {
+        const i = flying.indexOf(id);
+        if (i >= 0) flying.splice(i, 1);
+      } else if (!flying.includes(id)) {
+        flying.push(id);
+      }
+    }
+    if (flying.length > 3) return { error: "flying 合并后超过 3 条，本轮丢弃" };
+    state = {
+      ts: parsed.fields.ts,
+      seq: String(parsed.seq),
+      project: prev.fields.project,
+      stage: prev.fields.stage,
+      flying: flying.join(", ") || "无",
+      ruled: prev.fields.ruled,
+      next: parsed.fields.next,
+    };
+  }
+  const text = coordTailRender(state);
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > COORD_TAIL_CAPS.full.bytes) {
+    return { error: `合并结果超帽（${bytes}B > ${COORD_TAIL_CAPS.full.bytes}B），本轮丢弃` };
+  }
+  return { text };
+}
+
+/** Atomic replace with mirrorRecord's best-effort retry shape (no lock). */
+function coordTailWrite(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = path.join(path.dirname(file), `.coord-tail-${process.pid}.tmp`);
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      fs.writeFileSync(tmp, text, "utf8");
+      fs.renameSync(tmp, file);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const end = Date.now() + 20;
+      while (Date.now() < end) {
+        /* 20ms spin（同 mirrorRecord 重试语义） */
+      }
+    }
+  }
+  try {
+    fs.unlinkSync(tmp);
+  } catch {
+    /* best effort */
+  }
+  throw lastErr;
+}
+
+/** Extract from Stop stdin; subagent sessions are skipped (B1③ same-type defense). */
+function recordCoordTailIfEnabled(input) {
+  try {
+    if (String(input.session_id || "").startsWith("sess_subagent_")) return;
+    const raw = input.last_assistant_message ?? input.last_message ?? input.assistant_message;
+    if (typeof raw !== "string" || !raw.includes(COORD_TAIL_MARK)) return; // ORT-7 zero write
+    const block = coordTailLastBlock(raw);
+    if (!block) return;
+    const parsed = coordTailParse(block);
+    if (parsed.error) {
+      coordTailWarn(`解析失败（${parsed.error}），本轮不更新`);
+      return;
+    }
+    const capError = coordTailCapError(block, parsed.form);
+    if (capError) {
+      coordTailWarn(capError);
+      return;
+    }
+    const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
+    const rootDir = locateRoot(projectDir);
+    const file = path.join(rootDir, "context", "coord-tail.md");
+    const merged = coordTailMerge(coordTailRead(file), parsed);
+    if (merged.error) {
+      coordTailWarn(merged.error);
+      return;
+    }
+    coordTailWrite(file, merged.text);
+  } catch (err) {
+    coordTailWarn(`写入失败（${err && err.message ? err.message : String(err)}），本轮不更新`);
+  }
+}
+
+
+
 /* --- ack / suspected wake-failure helpers (verbatim twin of server.mjs) --- */
 
 function missionAck(m) {
@@ -391,6 +611,9 @@ function main() {
   // v0.3: mirror recording happens before the stop_hook_active short-circuit so
   // even reminded stops leave an assistant-side journal entry (always silent).
   recordMirrorIfEnabled(input, process.argv.slice(2));
+  // v1.1 W4 (A1): coord-tail extraction follows the same pre-short-circuit order
+  // (every Stop carries a last assistant message; no marker = zero write).
+  recordCoordTailIfEnabled(input);
   // Already reminded once: let the coordinator finish (platform re-prompts at
   // most ~3 times; respecting stop_hook_active avoids fighting that limit).
   if (input.stop_hook_active === true) return;

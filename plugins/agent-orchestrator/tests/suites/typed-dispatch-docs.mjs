@@ -153,7 +153,15 @@ function main() {
   subGroup(ck, "A-SKILL-3", "SKILL.md §9（坑位清单）", skill9, { need: [SNAPSHOT_ERR, "校验面", "执行面", "回退", "勿重试"] }, "E-05");
   // A-SKILL-4 语义更新（W2 重排裁决，策划档 §4.2）：原钉 §3 模板内「## REPORT（双通道）」示例节；
   // buildPackMarkdown 实际不产出该节（Stage A §0 实测），W2 删幻影示例并改钉「模板同构 + 无幻影节」。
-  subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, { need: ["## CONTRACT（三行契约", "prompt_template"], ban: ["## REPORT（双通道）"] }, "E-06");
+  // v1.1 W3（C 面）：`prompt_template` 回显已从 context_pack 返回删除（回执=包 CONTRACT 单源；
+  // N4 白名单锁在 crv2-pack）。本锚改为「包 CONTRACT 三行结构」——不依赖派发模板正文措辞；
+  // SKILL §2/§3 的 prompt_template 文案改写需 SKILL.md（W3 写面外，主控复核项）随波同步。
+  // v1.1 W4（A1/Q5a）：CONTRACT 三行自派发 prompt 头移尾块——§3 增钉「尾块」措辞与尾块模板，
+  // §1 场景表 PL-10 行 + §16 PL-10 本体由 po-static W4-01/02 锁。
+  subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, {
+    need: ["## CONTRACT（三行契约", "也出现在派发 prompt 尾块", "**派发 prompt 尾块**", "三行契约唯一权威=包 CONTRACT", "[channel] {mission_id}", "[worker] {worker 名，如 orch-worker#1}", "[token] {token}"],
+    ban: ["## REPORT（双通道）"],
+  }, "E-06");
   subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona"] }, "E-07");
   subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
   subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");

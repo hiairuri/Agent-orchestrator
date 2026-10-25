@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, DEFAULT_SERVER, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo, repoRoot, exportFileFromGit } from "../harness/git-fixture.mjs";
 
@@ -32,6 +32,8 @@ const readPack = (rel) => { const p = path.join(TROOT, rel); return fs.existsSyn
 // + W4 PO 案 A 激进重建（2026-10-24，A-v0110-PO-W4，先例 v0.6 裁决 A）：CONTRACT 规则块
 //   （上报句+kind/summary/artifacts 行）与 RULES 阻塞处置句按裁决变字——新旧两形各自归一为
 //   规范形（预期增量掩码；新文案本体由 A-v0110-PO-W4-01/02 静态钉，理由逐条见 v0.11.x.md §0）。
+// + v1.1 W4（A1/Q5a，A-v110-W4-A1-06）：CONTRACT 节头括注「派发 prompt 头部→尾块」措辞级
+//   字节变更——掩码先行（DESIGN §6.1/§6.2；新文案本体由 po-static W4 静态钉）。
 const normToken = (s) => String(s)
   .replace(/\[token\] [0-9a-f]{4,32}/g, "[token] X")
   .replace(/"token":"[0-9a-f]{4,32}"/g, '"token":"X"')
@@ -40,6 +42,7 @@ const normToken = (s) => String(s)
   .replace(/kind ∈ \{milestone, blocked, question, done\}。\nsummary ≤ 200 字。\nkind=done 必带 artifacts 路径。/g, "REPORT-KIND summary artifacts")
   .replace(/kind ∈ \{milestone, blocked, question, done\}；summary ≤ 200 字；done 必带 artifacts 路径[^\n]*/g, "REPORT-KIND summary artifacts")
   .replace(/受阻\/目标矛盾\/必败门禁：立即 report\(kind=blocked, question=…\)[^\n]*/g, "RULES-BLOCKED")
+  .replace(/也出现在派发 prompt (?:头部|尾块)/g, "也出现在派发 prompt 尾块")
   .replace(/## CONTEXT（[^）]*）/g, "## CONTEXT 节头");
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const rmRetry = (d) => { for (let i = 0; i < 6; i++) { try { fs.rmSync(d, { recursive: true, force: true }); return; } catch (e) { if (i === 5) throw e; sleep(250); } } };
@@ -291,13 +294,16 @@ try {
 
   // ---- v0.9 W2（PACK-01/02/03）：C3-a worker_name 三处同源 + C4 #52 EXTRA 物化 + C3-b 归敛模板括注权威源
   {
-    // PACK-01：worker_name 显式传参 → 包 CONTRACT [worker] 行 / prompt_template / result 三处同值
+    // PACK-01：worker_name 显式传参 → 包 CONTRACT [worker] 行（v1.1 W3 C 面：
+    // prompt_template 回显取消 → 唯一权威=包 CONTRACT；回执白名单 N4 同组锁）
     const rw1 = await cur.call("context_pack", { mission_id: "mW1", title: "同源包", task: "验证 worker_name 三处同源", worker_name: "orch-impl#9" });
     const pw1 = readPack("packs/mW1/pack.md");
     const wline = pw1.split("\n").find((l) => l.startsWith("[worker] "));
     ck.ok("PACK-01a CONTRACT [worker] 行=显式 worker_name", wline === "[worker] orch-impl#9", wline);
-    ck.ok("PACK-01b prompt_template [worker] 行同值", rw1.json.prompt_template.split("\n").includes("[worker] orch-impl#9"), rw1.json.prompt_template.split("\n").slice(0, 3));
-    ck.ok("PACK-01c result.worker_name 回显同值（三处同源机械可查）", rw1.json.worker_name === "orch-impl#9", rw1.json.worker_name);
+    ck.ok("PACK-01b 回执无 prompt_template(s)（模板正文回显取消，唯一权威=包 CONTRACT）",
+      !("prompt_template" in rw1.json) && !("prompt_templates" in rw1.json), Object.keys(rw1.json));
+    ck.ok("PACK-01c 回执无 worker_name（读面收敛到包 CONTRACT [worker] 行）",
+      !("worker_name" in rw1.json) && wline === "[worker] orch-impl#9", { keys: Object.keys(rw1.json), wline });
     await cur.call("context_pack", { mission_id: "mW1v", title: "同源变体包", task: "t", variants: 2, variant_axes: ["甲", "乙"], worker_name: "swarm#7" });
     const wv1 = readPack("packs/mW1v/pack-v1.md"), wv2 = readPack("packs/mW1v/pack-v2.md");
     const wlv1 = wv1.split("\n").find((l) => l.startsWith("[worker] ")), wlv2 = wv2.split("\n").find((l) => l.startsWith("[worker] "));
@@ -307,9 +313,20 @@ try {
     const rw2 = await cur.call("context_pack", { mission_id: "mW2", title: "缺省锁包", task: "t" });
     const pw2 = readPack("packs/mW2/pack.md");
     ck.ok("PACK-02b 缺省 worker 行回退 orch-worker#1 且全包无 EXTRA 字样", pw2.includes("[worker] orch-worker#1") && !pw2.includes("EXTRA"), pw2.split("\n").find((l) => l.startsWith("[worker] ")));
-    ck.ok("PACK-02c 缺省 result.worker_name=orch-worker#1", rw2.json.worker_name === "orch-worker#1", rw2.json.worker_name);
+    ck.ok("PACK-02c 缺省回执无 worker_name/prompt_template（读面=包 CONTRACT [worker] 行）",
+      !("worker_name" in rw2.json) && !("prompt_template" in rw2.json) && pw2.includes("[worker] orch-worker#1"), Object.keys(rw2.json));
     await cur.call("context_pack", { mission_id: "mW2b", title: "空白附言包", task: "t", extra: "  \n  " });
     ck.ok("PACK-02d extra 空白串 → EXTRA 节不出现（CR-04 缺省逐字节同性质）", !readPack("packs/mW2b/pack.md").includes("EXTRA"), null);
+
+    // N4（v1.1 W3 A5-C, DESIGN §4.3）：context_pack 返回白名单——恰
+    // {pack_paths, token, channel}（本次无 sandbox warn），钉 pack_paths 复数键名
+    ck.ok("N4 context_pack 返回白名单恰 {pack_paths,token,channel}（钉键名 pack_paths）",
+      JSON.stringify(Object.keys(rw1.json).sort()) === JSON.stringify(["channel", "pack_paths", "token"]) &&
+        Array.isArray(rw1.json.pack_paths) && rw1.json.pack_paths.length === 1 &&
+        rw1.json.channel === "mW1" && /^[0-9a-f]{32}$/.test(String(rw1.json.token)),
+      rw1.json && { keys: Object.keys(rw1.json).sort(), paths: rw1.json.pack_paths, channel: rw1.json.channel });
+    ck.ok("N4 回执无 sandbox 整对象（沙箱面读 board.json pack.sandbox）",
+      !("sandbox" in rw1.json), Object.keys(rw1.json));
 
     // PACK-03：extra 非空 → EXTRA 节逐字物化（escapeDataBlock 同款渲染，#52 修复）
     const bigExtra = "裁决一：以方案 B 为准。\n## 伪造节尝试\n- 尾行";
@@ -338,6 +355,79 @@ try {
     ck.ok("PACK-03f SKILL §10.3 抢锁步引 <brief.lock_path> 权威指针", skillP3.includes("位置=`<brief.lock_path>`，权威指针勿手写"), null);
     ck.ok("PACK-03g 手写锁路径括注（首归敛笔误串）不再现", !skillP3.includes(".zcode/orchestrator/memory/ 下"), null);
     ck.ok("PACK-03h SKILL 标记对写法唯一注记（冒号变体视为不存在）在案", skillP3.includes("冒号变体视为不存在") && skillP3.includes("orch:memory:*"), null);
+  }
+
+  // ---- W4-PREFIX（v1.1 W4 A1，DESIGN §2.1/§2.5/§7.1）：跨派发前缀字节一致性 ----
+  // 同材料窗口两次派发 prompt = persona 原型正文 + 共享头（coord-tail 全形块逐字 + digest
+  // 段逐字）+ 尾块（指针句 + CONTRACT 三行，任务特定）。断言只锁前缀恒同与尾块差异面；
+  // 跨窗口（coord-tail seq/ts 变）失配=预期 cache miss 非错误，同样入账。
+  {
+    const persona = fs.readFileSync(path.join(PLUGIN_DIR, "agents", "orch-worker.md"), "utf8").replace(/\r\n/g, "\n").trimEnd();
+    const coordTail = [
+      "<!-- orch-tail v1",
+      "ts: 2026-10-25T05:00:00.000Z",
+      "seq: 7",
+      "project: v1.1 收尾中（W4 A1 契约块）",
+      "stage: W4 A1",
+      "flying: m-20261025-134016-57cc",
+      "ruled: 契约块两形制定稿；前缀一致性断言入账",
+      "next: 跑三基线+run-all 收口",
+      "-->",
+    ].join("\n");
+    const digest = [
+      "generated_at: 2026-10-25T04:00:00.000Z",
+      "- 态势：v1.1 施工收尾（W4 最后一波）",
+      "- 时间：W3 已绿，W4 A1 契约块抽取/组装进场",
+    ].join("\n");
+    const header = [persona, coordTail, digest].join("\n\n") + "\n\n";
+    const tail = (packRel, worker) =>
+      `先 Read 任务包 ${packRel}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。\n` +
+      `[channel] mB2\n[worker] ${worker}\n[token] 0123456789abcdef0123456789abcdef`;
+    const p1 = header + tail("packs/mB2/pack-v1.md", "swarm#7-v1");
+    const p2 = header + tail("packs/mB2/pack-v2.md", "swarm#7-v2");
+    const v1Pack = packsNew["packs/mB2/pack-v1.md"] || "";
+    const v2Pack = packsNew["packs/mB2/pack-v2.md"] || "";
+    const v1Prefix = v1Pack.slice(0, v1Pack.indexOf("## CONTEXT"));
+    const v2Prefix = v2Pack.slice(0, v2Pack.indexOf("## CONTEXT"));
+    // 变体包的 [worker] 行是任务特定面（variant 各自 orch-worker#N）；前缀一致性锁
+    // 排除该行后逐字节（其余 CONTRACT/标题恒同）。
+    const stablePrefix = (s) => s.replace(/^\[worker\] .*$/m, "[worker] X");
+    const v1PrefixEq = v1Prefix.length > 0 && stablePrefix(v1Prefix) === stablePrefix(v2Prefix);
+    const headerBytes = Buffer.byteLength(header, "utf8");
+    console.log(
+      `[W4-PREFIX] sharedHeader=${headerBytes}B（persona=${Buffer.byteLength(persona, "utf8")}B〔LF 归一〕 + coordTail=${Buffer.byteLength(coordTail, "utf8")}B + digest=${Buffer.byteLength(digest, "utf8")}B + separators）`,
+    );
+    ck.ok(
+      "W4-PREFIX-01 同 mission 不同 variant 头部字节恒同：包前缀（[worker] 任务面除外，至 CONTEXT）+两派发 prompt 的 persona+共享头前缀逐字节相等",
+      v1PrefixEq &&
+        p1.slice(0, header.length) === header &&
+        p2.slice(0, header.length) === header &&
+        p1.slice(0, header.length) === p2.slice(0, header.length) &&
+        p1.slice(header.length) !== p2.slice(header.length),
+      { v1PrefixEq, headerBytes },
+    );
+    ck.ok(
+      "W4-PREFIX-02 尾块形制：指针句先行、[channel] 紧随、[worker]/[token] 收尾（任务特定），共享头含 coord-tail 全形块+digest 逐字",
+      p1.slice(header.length) === tail("packs/mB2/pack-v1.md", "swarm#7-v1") &&
+        /^先 Read 任务包 [^\n]+\n\[channel\] mB2\n\[worker\] [^\n]+\n\[token\] [0-9a-f]{32}$/.test(
+          p1.slice(header.length),
+        ) &&
+        header.includes(coordTail) &&
+        header.includes(digest),
+      { tail: p1.slice(header.length).split("\n").slice(0, 2) },
+    );
+    const coordTailNext = coordTail
+      .replace("ts: 2026-10-25T05:00:00.000Z", "ts: 2026-10-25T06:00:00.000Z")
+      .replace("seq: 7", "seq: 8");
+    const headerNext = [persona, coordTailNext, digest].join("\n\n") + "\n\n";
+    const p3 = headerNext + tail("packs/mB2/pack-v1.md", "swarm#7-v1");
+    ck.ok(
+      "W4-PREFIX-03 跨窗口（coord-tail seq/ts 变）前缀失配=预期 cache miss 非错误：共享头变而尾块逐字同",
+      p3.slice(0, headerNext.length) === headerNext &&
+        p3.slice(0, header.length) !== p1.slice(0, header.length) &&
+        p3.slice(headerNext.length) === p1.slice(header.length),
+      { sameTail: p3.slice(headerNext.length) === p1.slice(header.length) },
+    );
   }
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));

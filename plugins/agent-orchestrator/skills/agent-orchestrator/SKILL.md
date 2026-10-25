@@ -21,13 +21,14 @@ OV-1 读者：本文件只给**主控 agent** 读；子代理不加载本文件�
 | 写代码任务隔离进 worktree 并安全合并 | 第 12 章 |
 | 依赖编排（DAG）与池工自领取 | 第 13 章 |
 | 控制派发成本（写集分区 / 预算 / 探针） | 第 15 章 |
+| 跨派发前缀稳定（persona+共享头+尾块，coord-tail 契约块） | 第 16 章 PL-10 |
 | 标准编排流水线与 grill 确认门 | 第 16 章 |
 | 沉淀编排教训（lessons）与归敛记忆视图 | 第 10 章 |
 
 ```
 主控（唯一轮询者与答题者）
  ├─ Agent(run_in_background=true) → 子代理（orch-worker / orch-scout / orch-reviewer）
- │      ↑ prompt = 三行契约派发头 + 任务包路径
+ │      ↑ prompt = persona 原型正文 + 共享头 + 尾块（PL-10）+ 任务包路径
  │      ← 完成通知（含输出文件路径）/ report 事件
  ├─ board.json  任务板：mission 状态机、dispatch、产物、timeline
  └─ spool/      邮箱：unread →(rename)→ read；answers/ 留痕
@@ -43,7 +44,7 @@ OV-3 权威：本文件是提示词与流程的唯一权威；`agents/*.md` 与 
 | 主控 | 你；唯一轮询 board/spool 并作答的 agent |
 | 子代理 | 被派发的执行体（worker/scout/reviewer/gleaner/pool） |
 | 任务包（pack） | `context_pack` 物化的自包含任务文件，含 CONTRACT/TASK/RULES |
-| 三行契约 | `[channel]/[worker]/[token]` 三行，派发 prompt 头与包 CONTRACT 同源 |
+| 三行契约 | `[channel]/[worker]/[token]` 三行，派发 prompt 尾块与包 CONTRACT 同源 |
 | mission | 任务板条目，状态机见 14 章 |
 | 派发（dispatch） | 用 Agent 工具启动子代理并记 board dispatch 字段 |
 | 签收（ack） | 主控接手处置结果；answer/close 自动补签 |
@@ -54,9 +55,9 @@ OV-3 权威：本文件是提示词与流程的唯一权威；`agents/*.md` 与 
 ## 2. 标准派发七步
 
 DP-1 建 mission：`board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})`；original_prompt 必填（跨会话恢复种子）。
-DP-2 组包：`context_pack(mission_id, title, task, read_first, rules, upstream_context)` → 任务包 + token + prompt_template（模板见第 3 章）。
-DP-3 派发：`Agent(description, prompt=<agents/<role>.md 原型正文> + prompt_template + 任务要点, run_in_background=true)`（宿主快照缺陷期间一律走第 8 章主形态）。
-DP-4 worker 名同源：Agent 后台任务名 = prompt_template 的 [worker] 行；`context_pack` 显式传 `worker_name="<实际任务名>"`（如 `orch-impl#9`），包 CONTRACT / prompt_template / result 三处取值一致；缺省 `orch-worker#N`。
+DP-2 组包：`context_pack(mission_id, title, task, read_first, rules, upstream_context)` → `{pack_paths, token, channel}`（`prompt_template` 不再回显；三行契约唯一权威=包 CONTRACT，模板见第 3 章）。
+DP-3 派发：`Agent(description, prompt=<agents/<role>.md 原型正文> + 共享头（coord-tail 全形块+digest 段，PL-10） + 尾块（一行指针句+CONTRACT 三行）, run_in_background=true)`（宿主快照缺陷期间一律走第 8 章主形态）。
+DP-4 worker 名同源：Agent 后台任务名 = 包 CONTRACT 的 [worker] 行；`context_pack` 显式传 `worker_name="<实际任务名>"`（如 `orch-impl#9`），包 CONTRACT / result 两处取值一致；缺省 `orch-worker#N`。
 DP-5 记派发：`board(upsert, mission={id, status:"running", dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}})`。
 DP-6 拉哨兵：本回合首次派发后，同一条消息后台连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`；阈值与待命语义见第 11 章。
 DP-7 不等：继续其他工作；多条 Agent 调用放同一条消息即并发（上限 8）。
@@ -79,7 +80,7 @@ PC-4 上报通道：包内不设双通道示例节；上报通道协议以第 8 
 ````markdown
 # 任务包：{title}（{mission_id}）
 
-## CONTRACT（三行契约，也出现在派发 prompt 头部）
+## CONTRACT（三行契约，也出现在派发 prompt 尾块）
 [channel] {mission_id}
 [worker] {worker 名，如 orch-worker#1}
 [token] {token}
@@ -131,13 +132,13 @@ L 档附加（仅 L 档出现）：任务应已预拆阶段或转 workflow——
 - 验证/测试结果（如适用）
 ````
 
-**派发 prompt 头**（`context_pack` 返回的 `prompt_template`，逐字粘进 Agent prompt）：
+**派发 prompt 尾块**（`context_pack` 回执给出 `pack_paths`/`token`/`channel`，`prompt_template` 不再回显；三段固定序=persona 原型正文→共享头（PL-10）→尾块；三行契约唯一权威=包 CONTRACT，尾块三行供 bg-gate presence 检测）：
 
 ```
+先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。
 [channel] {mission_id}
 [worker] {worker-name}
 [token] {token}
-You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（kind ∈ milestone/blocked/question/done）。Return：做了什么+产物路径+遗留问题。
 ```
 
 PC-5 主控手写包附加节 `ENV FACTS`：给 CLI/工具可用性、脚本/驱动路径、转义与调用坑、平台红线四类，缺项写"无"、不得整节省略；worker 与其实测矛盾时 report(question)。
@@ -190,7 +191,7 @@ PR-3 并发上限：单会话同时在飞 ≤8；迭代任务排队，签收一�
 PR-4 不轮询：靠完成通知；`TaskOutput(task_id, block=true, timeout≤600000)` 仅显式等待；"No task found" 兜底 = 完成通知输出路径 / `GetWorkflowRun` / `ListWorkflowRuns`。
 PR-5 收敛：失控任务用 `TaskStop(task_id)`。
 PR-6 聚合：全文写文件、只带 ≤200 字摘要进上下文；禁止把子代理长文原样读回。
-PR-7 分叉：2–8 个独立变体一轮出结果 → `context_pack(variants=N, variant_axes=[...])` → 同一条消息发 N 条 Agent（用对应 `prompt_templates`）；适合 A/B 方案、多库调研、多风格实现。
+PR-7 分叉：2–8 个独立变体一轮出结果 → `context_pack(variants=N, variant_axes=[...])` → 同一条消息发 N 条 Agent（各用对应包 CONTRACT 三行+pack_path 指针句）；适合 A/B 方案、多库调研、多风格实现。
 PR-8 workflow fan-out：需要循环/门禁/结果互联 → `CreateWorkflow` 脚本；workflow 角色 = persona(system+model)，工具面全局同一。
 PR-9 结果比较：变体跑完派 orch-reviewer 汇总，再向用户给 verdict。
 PR-10 流水线输入冻结：第 N+1 轮调研/设计可在第 N 轮进入 QA/评审时启动，三条全满足才算冻结——输入已落盘；与上一轮交集仅为只读上游（评审打回不波及已开工部分，或仅波及读上游阶段）；本轮任务包已物化。
@@ -215,7 +216,7 @@ MD-8 使用纪律：仅用户要求或明显轻量层（judge/router）用 per-a
 
 RP-1 主派发形态 = GP + persona 注入（宿主快照缺陷存在期间所有插件角色派发一律用它）。
 RP-2 成因：宿主 typed 校验读取会话 create 时点冻结的 MCP 启动快照；快照为空期间 `subagent_type` 派发插件角色在 spawn 前恒拒（"Required MCP tool is not available in the parent startup snapshot"），重试无新信息。
-RP-3 协议：Read `plugins/agent-orchestrator/agents/<role>.md` 原型正文 → `Agent(description, prompt=<原型正文> + system_prompt + 三行契约头 + 任务要点, run_in_background=true)`。
+RP-3 协议：Read `plugins/agent-orchestrator/agents/<role>.md` 原型正文 → `Agent(description, prompt=<原型正文> + 共享头（PL-10）+ 尾块（一行指针句+三行契约）, run_in_background=true)`。
 RP-4 双通道：主通道 `mcp__plugin_agent-orchestrator_orch__report`；降级通道 report 不在工具面（TOOL_ABSENT）→ 终态回复行首标注 `KIND=xxx`（仅终态、无 milestone 与哨兵联动，中途进度丢失属预期）。
 RP-5 形态保全：GP 形态不经快照收敛路径，同时保全 milestone 事件、哨兵联动、manifest/inputs 牵引与板面时间线；typed 派发当前无法启动。
 RP-6 恢复条件与复核：原生 typed 派发恢复条件 = 宿主修复快照数据源（判据：`subagent_type` 派发不再报快照缺工具）；恢复后 typed 为默认形态、GP+persona 降为备选注记；宿主升级后跑一次最小 GP 探针（任务=调用 report 回显）复核该面未变。
@@ -486,3 +487,36 @@ PL-6 grill#3 设计确认默认必开；豁免判据 = 改动面 ≤2 波 ∧ �
 PL-7 grill 格式纪律：一轮问全部前沿；每问带推荐答案；用户答「是」即采纳该问措辞；首行标注「grill#N：<主题>」；结果回填策划档 §grill 节。
 PL-8 提问分流：事实类问题派代理查证（orch-scout）；决策类问题问用户（第 4 章「需用户拍板」行）。
 PL-9 主控组包 checklist（每波派发前逐项过）：context_pack 必传 worker_name（DP-4 同源）；波前断言锁 grep 预检（先 grep tests/ 钉既有行为断言面再动手）；OPEN 项发版门逐条对账；播报只报增量。
+PL-10 尾部契约块与三段派发（A1，v1.1）：①每轮收工的最后一条 assistant 消息尾部携 `<!-- orch-tail v1` … `-->` 块（stop-check 抽取并合并为 `<存储根>/context/coord-tail.md` 全量态），守 ORT-1..8：标记对逐字固定（改格式必须升 v2 并同步 stop-check 与全部消费端）；ts+会话内单调递增 seq 恒带，消费端 seq ≤ 旧值即弃；短形缺省字段=「不变」非「清空」，project/stage 变更轮必须以全形重述；flying 全形=整表替换（≤3 条），短形=`+id`/`-id` 增删（`-` 不存在的 id 忽略不报错）；ruled 仅追加、文件保留最近 3 条（全形携最近 3 条整表，FIFO）；帽=全形 ≤10 行/900B、短形 ≤6 行/400B，超帽或解析失败=该轮不更新（stop-check 拒写+stderr 一行，主控下轮补全形）；无标记轮次不更新；全形触发=project/stage 变更、flying 需整表重述（批量变化>2 或语义歧义）、共享头过龄（now−ts>STALE_T=24h）。②派发 prompt 三段固定序：persona 原型正文（恒同）→共享头（主控最后发射的 orch-tail 全形块逐字+项目 digest 段逐字，同一材料态窗口内恒同字节）→尾块（一行指针句+CONTRACT 三行，任务特定）。③共享头材料同窗口内逐字节复用上一派发文本（主控上下文自带），禁即兴改写；主控上下文压缩后 Read `<存储根>/context/coord-tail.md` 一次重建（文件=恢复源）。④三行契约唯一权威=包 CONTRACT 节；派发尾块按下列模板自写，digest 段粘贴源=`<memoryRoot>/digest/pack-tail-digest.md`（每归敛周期 Read 一次，周期内复用；首行 generated_at 自带新鲜度）：
+
+```text
+先 Read 任务包 <pack_path>，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。
+[channel] <mission_id>
+[worker] <worker 名>
+[token] <token>
+```
+
+全形（变化轮，≤10 行/900B）：
+
+```text
+<!-- orch-tail v1
+ts: <ISO8601>
+seq: <会话内单调递增整数>
+project: <项目一句话现状>
+stage: <当前 stage/波次>
+flying: <全量清单，≤3 条逗号分隔；无则「无」>
+ruled: <最近 3 条裁决 FIFO；无则「无」>
+next: <下一步意图一句话>
+-->
+```
+
+短形（稳态轮，≤6 行/400B；缺省字段=不变）：
+
+```text
+<!-- orch-tail v1
+ts: <ISO8601>
+seq: <会话内单调递增整数>
+flying: <+id/-id 增删，可逗号并置>
+next: <下一步意图一句话>
+-->
+```

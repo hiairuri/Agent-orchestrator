@@ -42,6 +42,9 @@
  *          重启后 coord-workspace 缺失的根因修复）+session_id 消毒+三触发面源锁+D3 归类）
  *   G14   锚重发布子代理过滤（v0.10 G14：子代理会话 id → publishWakeAnchor 入口跳过，
  *          锚零写+存量锚零触碰；主控 id 成对写不误伤；EXP10-findings R6 重启恢复实锤）
+ *   W2    B1 锚自愈三面 + C3 rider（v1.1 W2）：锚消费面前置形状校验（sess_subagent 拒用
+ *          fail-loud/零帧）、唤醒前存活性判别（D3 拒用路径/主控不误伤）、toolResume 子代理
+ *          零写拒绝、watcher.mjs 真实 eventId 生产接线（latestUnreadEventId）
  *   W-VRD  VERDICT（三证合一矩阵/busy=noop/③复活观测窗）
  *   W-DGR  DEGRADE（降级树全表 D1-D3/kicked/signals 落盘+滚动+脱敏）
  *   W-E2E  全链 e2e（mock relay+mock 凭据：success/noop-busy×2 静默/kicked 断路/D1 凭据缺失/
@@ -59,11 +62,11 @@ import { makeTempRoot } from "../harness/temp-root.mjs";
 import { runNode } from "../harness/capture.mjs";
 
 import { redact, redactionSelfCheck, deriveCredentialSecret, encryptEntry, decryptEntry, inspectJwt, loadPlatformJwt, pickDesktopDevice, issueTerminalToken, fetchDevices, TOKEN_RE } from "../../watcher/credentials.mjs";
-import { classifyForWatcher, pickNext, readBoardSafe, spoolUnreadCount, RESULT_STATUSES } from "../../watcher/poller.mjs";
+import { classifyForWatcher, pickNext, readBoardSafe, spoolUnreadCount, latestUnreadEventId, truncateTitleClosed, RESULT_STATUSES } from "../../watcher/poller.mjs";
 import { TxnGate, signAndConnect, MIN_INTERVAL_MS, BUSY_SILENCE_MS } from "../../watcher/txn.mjs";
 import { RelaySession, connectRelay, mapClose, mapErrorFrame, buildWs2Url, isSignalType } from "../../watcher/relay.mjs";
 import { crc32, encodeRpcFrame, decodeRpcFrames, openBridge, LIMITS, bridgeOf, mapBridgeFailure, BRIDGE_FAILURE_REASONS, workspaceKeyMatches, normalizeWorkspaceKey } from "../../watcher/bridge.mjs";
-import { buildTemplateShell, sanitizeSummary, shellCompliant, sendPrompt, vqlEncode, vqlDecode, ChannelClient, attachChannelClient, buildConversationCommandParams, buildCreateSessionParams, buildSendPromptParams, buildClientHello, ensureChannelHandshake, V4_WIRE_PROTOCOL_VERSION, uuidv7, wakeCoordSession, sessionErrorHit, resolveResponseWorkspaceKey, RESP_TIMEOUT_MS } from "../../watcher/inject.mjs";
+import { buildTemplateShell, sanitizeSummary, shellCompliant, sendPrompt, vqlEncode, vqlDecode, ChannelClient, attachChannelClient, buildConversationCommandParams, buildCreateSessionParams, buildSendPromptParams, buildClientHello, ensureChannelHandshake, V4_WIRE_PROTOCOL_VERSION, uuidv7, wakeCoordSession, sessionErrorHit, resolveResponseWorkspaceKey, RESP_TIMEOUT_MS, isSubagentSessionId } from "../../watcher/inject.mjs";
 import { classifyAccept, finalVerdict, observeRevival, rolloutRevivedProbe } from "../../watcher/verdict.mjs";
 import { DegradeState, classifyFailure, failureFromClose, CLASSES, SIGNALS_MAX_LINES, loopbackD2Hint } from "../../watcher/degrade.mjs";
 import { createWatcher, resolveRoot, resolveRolloutDir, guardPendingResponse } from "../../watcher/watcher.mjs";
@@ -352,6 +355,29 @@ try {
     fs.mkdirSync(path.join(spoolRoot, "spool", "m-9", "read"), { recursive: true });
     ck.ok("W-POL-07 spool 未读只数不改（正文永不读取；server 布局 root/spool/<mission>/unread）", spoolUnreadCount(spoolRoot, "m-9") === 2 && spoolUnreadCount(spoolRoot, "m-none") === 0);
     ck.ok("W-POL-08 RESULT_STATUSES 口径与哨兵一致（verbatim twin）", JSON.stringify(RESULT_STATUSES) === JSON.stringify(["done", "failed", "blocked", "question"]));
+    // v1.1 W1（C3）：title 截断闭合化——30 码点安全（代理对不切破）+未闭合括号剥离（R5-4）
+    ck.ok("W-POL-09 title 截断码点安全（Array.from 取 30 码点：40 emoji→恰 30 码点，不切破代理对）",
+      truncateTitleClosed("😀".repeat(40)) === "😀".repeat(30) && Array.from(truncateTitleClosed("😀".repeat(40))).length === 30,
+      Array.from(truncateTitleClosed("😀".repeat(40))).length);
+    const titleConds = classifyForWatcher(
+      { missions: [mission("m-title", "blocked", old, { title: "前置说明（direct 后续超长内容需要截断更多字符" })] },
+      { nowMs: T0 },
+    );
+    ck.ok("W-POL-10 title 未闭合括号闭合化（R5-4「（direct」：最早未闭合开括号起截、闭合对保留、全括号兜底「(未命名)」）",
+      titleConds.length === 1 && titleConds[0].title === "前置说明" &&
+        truncateTitleClosed("A（B）C（D") === "A（B）C" &&
+        truncateTitleClosed("（direct") === "" &&
+        classifyForWatcher({ missions: [mission("m-title2", "done", old, { title: "（direct" })] }, { nowMs: T0 })[0].title === "(未命名)",
+      titleConds[0] && titleConds[0].title);
+    // v1.1 W1（C3）：事件解析上移调用面——真实最新 eventId（文件名零填充 epochMs 降序，正文不读）
+    const spoolLatest = path.join(BASE.root, "spool-latest");
+    fs.mkdirSync(path.join(spoolLatest, "spool", "m-10", "unread"), { recursive: true });
+    fs.writeFileSync(path.join(spoolLatest, "spool", "m-10", "unread", "000000000000001-aaaaaaaa.json"), "{not-json（正文不读）");
+    fs.writeFileSync(path.join(spoolLatest, "spool", "m-10", "unread", "000000000000002-bbbbbbbb.json"), "{}");
+    ck.ok("W-POL-11 latestUnreadEventId 取真实最新事件 id（文件名降序；正文不读；无未读/目录缺失→null）",
+      latestUnreadEventId(spoolLatest, "m-10") === "000000000000002-bbbbbbbb" &&
+        latestUnreadEventId(spoolLatest, "m-none") === null,
+      latestUnreadEventId(spoolLatest, "m-10"));
   }
 
   /* ======== W-TXN 闸 ======== */
@@ -740,6 +766,19 @@ try {
     let badState = null;
     try { buildTemplateShell({ missionId: "m", state: "running", summary: "" }); } catch (e) { badState = e; }
     ck.ok("W-INJ-05 非 RESULT 状态拒构造", badState && badState.code === "shell-bad-args");
+    // v1.1 W1（C3）：eventId 悬空显式化——必填（撤 "latest" 缺省）+ null→显式无事件句
+    const shellNoEvent = buildTemplateShell({ missionId: "m-20261020-2", state: "question", summary: "worker asks", eventId: null });
+    ck.ok("W-INJ-09 eventId=null 显式无事件形态（不产 unread/latest.json 假路径，含 mailbox read 指引；shellCompliant 放行两形）",
+      shellNoEvent === "[orch-watch] mission=m-20261020-2 state=question summary=worker asks 指引=(无未读事件：question 待答，走 mailbox read)" &&
+        !shellNoEvent.includes("spool/") && shellCompliant(shellNoEvent),
+      shellNoEvent);
+    let missingEvent = null;
+    try { buildTemplateShell({ missionId: "m", state: "blocked", summary: "" }); } catch (e) { missingEvent = e; }
+    ck.ok("W-INJ-10 eventId 必填（撤 latest 缺省）：缺省→shell-bad-args；显式 eventId 仍出真实指针形",
+      Boolean(missingEvent) && missingEvent.code === "shell-bad-args" &&
+        buildTemplateShell({ missionId: "m", state: "done", summary: "", eventId: "000000000000003-cccccccc" })
+          .includes("spool/m/unread/000000000000003-cccccccc.json"),
+      missingEvent && missingEvent.code);
     /* v0.10 W3 基线修订：V1 buildSessionSendParams（裸 JSON {method:"session/send"}）退役——
        内层换代 VQL/ChannelClient（L3 §1.4：裸 JSON 会被 host ChannelServer deserialize 读出垃圾） */
     const p1 = buildConversationCommandParams({ bridge: { workspaceKey: "ws-f", workspace: { workspacePath: "D:/a", workspaceIdentity: " ident " } }, sessionId: "sess-9", content: "c", nowMs: 1700000000000, commandId: "018f0000-0000-7000-8000-000000000000" });
@@ -1220,6 +1259,95 @@ try {
       { inFn: g14Fn.includes("sess_subagent"), guardFirst: g14Fn.indexOf("startsWith") < g14Fn.indexOf("atomicWriteBestEffort") });
   }
 
+  /* ======== W2 B1 锚自愈三面 + C3 rider（v1.1 W2：DESIGN §5.4） ======== */
+  {
+    grp("W2 anchor-selfheal");
+    const w2SubagentId = "sess_subagent_agent_583ee58a-4b51-46b0-9120-2177449d22a0"; // R6 实证同形状
+    const w2MainId = "sess_0f1e2d3c-4b5a-4697-8c9d-0a1b2c3d4e5f";
+
+    // 01：① 锚消费面前置形状校验——coord-session 锚=子代理 id → wakeCoordSession 入口
+    // fail-loud 拒用（不建桥/不发帧/不写锚）；allowLegacyFirst 逃生口只免工作区锚缺失面，
+    // 不豁免本形状闸（劫持态宁可不唤醒）。
+    const w2Hijack = mkC11("w2-hijack", { coord: w2SubagentId });
+    const w2Relay = new MockRelay({ liveSessionId: "sess-live-w2" });
+    const w2Session = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: w2Relay.transportFactory, authAckTimeoutMs: 200 });
+    const w2Warns = [];
+    let w2Err = null;
+    try {
+      await wakeCoordSession({ session: w2Session, workspaceKeyHint: "ws-1", coordSessionPath: w2Hijack.coordPath, content: "shell-w2", fsImpl: w2Hijack.fsImpl, ackTimeoutMs: 500, respTimeoutMs: 500, warn: (w) => w2Warns.push(w) });
+    } catch (e) { w2Err = e; }
+    let w2LegacyErr = null;
+    try {
+      await wakeCoordSession({ session: w2Session, coordSessionPath: w2Hijack.coordPath, content: "shell-w2", fsImpl: w2Hijack.fsImpl, allowLegacyFirst: true, ackTimeoutMs: 500, respTimeoutMs: 500, warn: (w) => w2Warns.push(w) });
+    } catch (e) { w2LegacyErr = e; }
+    const w2Opens = w2Relay.received.filter((m) => m.payload && m.payload.zcode_type === "workspace-bridge-open").length;
+    ck.ok("W2-01 B1① 锚消费面前置形状校验：coord-session.txt=sess_subagent_agent_<id> → wakeCoordSession 前置 fail-loud 拒用（code=coord-anchor-subagent，错误串含 sess_subagent/拒绝消费；warn 面同串），不建桥（workspace-bridge-open=0）不发帧不写锚（存量锚逐字不动）；allowLegacyFirst:true 逃生口不豁免形状闸（同误拒）",
+      w2Err && w2Err.code === "coord-anchor-subagent" &&
+      String(w2Err.message).includes("sess_subagent") && String(w2Err.message).includes("拒绝消费") &&
+      w2Warns.some((w) => w.includes("coord-anchor-subagent") && w.includes("sess_subagent")) &&
+      w2Opens === 0 && w2Hijack.writesRef() === 0 &&
+      fs.readFileSync(w2Hijack.coordPath, "utf8") === w2SubagentId + "\n" &&
+      w2LegacyErr && w2LegacyErr.code === "coord-anchor-subagent",
+      { err: w2Err && w2Err.code, legacy: w2LegacyErr && w2LegacyErr.code, opens: w2Opens, warns: w2Warns });
+
+    // 02：② 主控形状不误伤——前缀判别只吃 sess_subagent_*（含裸前缀），sess_<uuid> 恒 false；
+    // 主控锚照常唤醒（attempts=1、活体零重写），不做额外 rollout 探活（G11 面不重复建设）。
+    const w2Main = mkC11("w2-main", { coord: w2MainId });
+    const w2RelayMain = new MockRelay({ liveSessionId: w2MainId });
+    const w2SessionMain = await connectRelay({ url: "ws://mock", deviceSid: "s", transportFactory: w2RelayMain.transportFactory, authAckTimeoutMs: 200 });
+    const w2RMain = await wakeCoordSession({ session: w2SessionMain, workspaceKeyHint: "ws-1", coordSessionPath: w2Main.coordPath, content: "shell-w2", fsImpl: w2Main.fsImpl, ackTimeoutMs: 500, respTimeoutMs: 500 });
+    ck.ok("W2-02 B1② 主控形状不误伤：sess_subagent 前缀判别只吃子代理形状（sess_subagent_agent_<id>/裸前缀→true；sess_<uuid>→false），主控锚照常唤醒（attempts=1、活体零重写、不误判非主控），且不做额外 rollout 探活（G11 探测面不重复建设）",
+      isSubagentSessionId(w2SubagentId) && isSubagentSessionId("sess_subagent") &&
+      !isSubagentSessionId(w2MainId) && !isSubagentSessionId("sess") && !isSubagentSessionId("") &&
+      w2RMain.attempts === 1 && w2RMain.selfHealed === false &&
+      fs.readFileSync(w2Main.coordPath, "utf8") === w2MainId + "\n" && w2Main.writesRef() === 0,
+      { pred: [isSubagentSessionId(w2SubagentId), isSubagentSessionId(w2MainId)], r: w2RMain });
+
+    // 03：③ toolResume 过滤守卫（server 黑盒）——子代理 id 前置拒绝，双锚内容+mtime 零触碰。
+    const w2SrvRoot = path.join(BASE.root, "w2-resume-root");
+    const w2Proj = path.join(BASE.root, "w2-resume-proj");
+    fs.mkdirSync(path.join(w2SrvRoot, "sentinel"), { recursive: true });
+    fs.mkdirSync(w2Proj, { recursive: true });
+    const w2Cs = path.join(w2SrvRoot, "sentinel", "coord-session.txt");
+    const w2Cw = path.join(w2SrvRoot, "sentinel", "coord-workspace.txt");
+    fs.writeFileSync(w2Cs, w2MainId + "\n");
+    fs.writeFileSync(w2Cw, "D:/keep-workspace\n");
+    const w2CsMtime = fs.statSync(w2Cs).mtimeMs;
+    const w2CwMtime = fs.statSync(w2Cw).mtimeMs;
+    const w2Srv = startServer({ root: w2SrvRoot, cwd: w2Proj });
+    let w2Rv = null;
+    try { w2Rv = await w2Srv.call("resume", { session_id: w2SubagentId }); } finally { w2Srv.close(); }
+    ck.ok("W2-03 B1③ toolResume 子代理 id 零写（server 黑盒）：resume(session_id=sess_subagent_agent_<id>) → ToolError 前置拒绝（isError + 错误串含 sess_subagent 与 report/mailbox 指引），coord-session.txt/coord-workspace.txt 内容+mtime 逐字不动（G4-03 主控双写正控不受影响）",
+      w2Rv && w2Rv.isError === true && w2Rv.json &&
+      String(w2Rv.json.error || "").includes("sess_subagent") && String(w2Rv.json.error || "").includes("report/mailbox") &&
+      fs.readFileSync(w2Cs, "utf8") === w2MainId + "\n" &&
+      fs.readFileSync(w2Cw, "utf8") === "D:/keep-workspace\n" &&
+      fs.statSync(w2Cs).mtimeMs === w2CsMtime && fs.statSync(w2Cw).mtimeMs === w2CwMtime,
+      { isError: w2Rv && w2Rv.isError, err: w2Rv && w2Rv.json && String(w2Rv.json.error || "").slice(0, 140), cs: fs.readFileSync(w2Cs, "utf8"), cw: fs.readFileSync(w2Cw, "utf8") });
+
+    // 04：C3 rider 接线面钉——生产壳 eventId=真实最新未读事件 id（或 null 显式态），
+    // 「latest」悬空缺省零残留（W1 偏差 (a) 清账）。
+    const w2WatcherSrc = fs.readFileSync(new URL("../../watcher/watcher.mjs", import.meta.url), "utf8");
+    ck.ok("W2-04 C3 rider 生产接线源面钉：watcher.mjs 主路径 `latestUnreadEventId(rootDir, missionId, fsImpl)` 解析真实事件 id（无未读→null 显式无事件句），壳构造不再含 eventId:\"latest\"（W1 偏差 (a) 已接线）",
+      /latestUnreadEventId\(rootDir, missionId, fsImpl\)/.test(w2WatcherSrc) &&
+      w2WatcherSrc.includes("buildTemplateShell({ missionId, state: cond.status, summary: cond.title, eventId })") &&
+      !w2WatcherSrc.includes('eventId: "latest"'),
+      { wiring: w2WatcherSrc.includes("latestUnreadEventId(rootDir, missionId, fsImpl)"), old: w2WatcherSrc.includes('eventId: "latest"') });
+
+    // 05：② 生产面存活性判别——唤醒前即拒（连-发前零建连），D3 配置告警终态落 signals，
+    // reason 保留真实 kind（分类映射 workspace-anchor-missing 同族 D3，degrade 表在波外）。
+    const w2RootWatch = path.join(BASE.root, "w2-watcher-hijack");
+    writeCoord(w2RootWatch, w2SubagentId, "ws-1");
+    const w2RelayWatch = new MockRelay();
+    const w2W = buildWatcher({ root: w2RootWatch, relay: w2RelayWatch, now: () => Date.now(), board: [mission("m-w2", "done", Date.now() - 3600_000)], coord: false });
+    const w2R = await w2W.tick();
+    ck.ok("W2-05 B1② 唤醒前存活性判别（watcher 生产面）：锚=sess_subagent 形状 → 判非主控，与 inject ① 同款拒用（不建连/零桥帧/零唤醒），按 D3 配置告警终态落 signals（reason=coord-anchor-subagent 保留真实 kind，分类输入映射 workspace-anchor-missing 同族 D3、不落 unknown:D2 重试）",
+      w2R.outcome === "D3" && w2W.disabled === "D3" && w2R.kind === "coord-anchor-subagent" &&
+      w2RelayWatch.connCount === 0 &&
+      readSignals(w2RootWatch).some((s) => s.cls === "D3" && s.reason === "coord-anchor-subagent"),
+      { r: w2R, disabled: w2W.disabled, conn: w2RelayWatch.connCount, sig: readSignals(w2RootWatch) });
+  }
+
   /* ======== W-VRD VERDICT ======== */
   {
     ck.ok("W-VRD-01 ②受理分类：accepted/busy(-32010)/rejected", classifyAccept({ result: {} }).accept === "accepted" && classifyAccept({ error: { code: -32010 } }).accept === "busy" && classifyAccept({ error: { code: -32002 } }).accept === "rejected");
@@ -1316,6 +1444,11 @@ try {
     {
       const root = path.join(BASE.root, "e2e-ok");
       const relay = new MockRelay({ noiseBeforeBridge: true });
+      // v1.1 W2 (C3-rider)：事件解析上移调用面后，生产壳取真实最新未读事件 id——预置一条
+      // 未读事件（文件名=<15 位 epochMs>-<8hex>.json），W-E2E-03 锁「不再恒写 latest」。
+      const e2eEventId = "000000000000001-abcdef12";
+      fs.mkdirSync(path.join(root, "spool", "m-ok", "unread"), { recursive: true });
+      fs.writeFileSync(path.join(root, "spool", "m-ok", "unread", e2eEventId + ".json"), "{}\n");
       const w = buildWatcher({ root, relay, now: () => Date.now(), board: [mission("m-ok", "done", Date.now() - 3600_000)] });
       const r1 = await w.tick();
       ck.ok("W-E2E-01 happy 全链 verdict=success（三证合一）", r1.state === "transacting" && r1.outcome === "success", r1);
@@ -1323,10 +1456,10 @@ try {
       const frameDec = relay.captured.find((c) => c.header && c.header[3] === "sendConversationCommandV4"); // W3s：G8 握手两帧先于命令，命令帧按方法名寻址
       const frameArgs = frameDec && Array.isArray(frameDec.body) && frameDec.body.length === 1 ? frameDec.body[0] : null; // G9：位置参数组
       const shellText = frameArgs && frameArgs.envelope ? frameArgs.envelope.payload.text : "";
-      ck.ok("W-E2E-03 注入壳=id+状态+spool 指针（正文留 spool 隐私最小化；内层=VQL 频道调用 [100,id,zcode-agent,sendConversationCommandV4]，sessionId=coord 目标；L4 W3r payload 直传；W3s 基线修订：命令帧前置 G8 握手两帧按方法名寻址；G3 基线修订：命令 body=位置参数组 [params]，envelope 在 body[0]）",
+      ck.ok("W-E2E-03 注入壳=id+状态+spool 指针（正文留 spool 隐私最小化；内层=VQL 频道调用 [100,id,zcode-agent,sendConversationCommandV4]，sessionId=coord 目标；L4 W3r payload 直传；W3s 基线修订：命令帧前置 G8 握手两帧按方法名寻址；G3 基线修订：命令 body=位置参数组 [params]；v1.1 W2 rider 修订：指针=latestUnreadEventId 解析的真实事件 id，不再恒写 latest）",
         frameDec && Array.isArray(frameDec.header) && frameDec.header[0] === 100 && frameDec.header[2] === "zcode-agent" &&
         frameDec.header[3] === "sendConversationCommandV4" && Array.isArray(frameDec.body) && frameArgs.envelope.sessionId === "sess-coord-test" &&
-        String(shellText).startsWith("[orch-watch] mission=m-ok state=done") && String(shellText).includes("spool/m-ok/unread/latest.json（路径指针，非正文）"), shellText);
+        String(shellText).startsWith("[orch-watch] mission=m-ok state=done") && String(shellText).includes(`spool/m-ok/unread/${e2eEventId}.json（路径指针，非正文）`), shellText);
       ck.ok("W-E2E-04 桥接前噪声推送帧被计数吞掉（EXP-3 F4 全链复现：新形 payload 噪声在位且事务照常 success）",
         (relay.serverSent || []).some((m) => m.payload && m.payload.zcode_type === "desktop-state-push") && r1.outcome === "success", { noise: (relay.serverSent || []).some((m) => m.payload && m.payload.zcode_type === "desktop-state-push"), outcome: r1.outcome });
       ck.ok("W-E2E-05 心跳自证文件在位（哨兵反向监控面，60s mtime 即心跳）", fs.existsSync(path.join(root, "sentinel", "watcher-heartbeat")));
@@ -1635,6 +1768,15 @@ try {
     const rReject = parseUpgradeResponse(Buffer.from("HTTP/1.1 403 Forbidden\r\n\r\n"), "K");
     const rPartial = parseUpgradeResponse(Buffer.from("HTTP/1.1 101 S", "latin1"), "K");
     ck.ok("W-WS-10 握手三拒：Accept 错/非 101/半包 incomplete", rBad.error === "accept-mismatch" && rReject.error === "handshake-rejected" && rPartial.incomplete === true);
+  }
+
+  /* ======== v1.1 W3 rider：bg-sentinel coord-session 消费面同型守卫（源码静态锚） ======== */
+  {
+    const sentinelSrc = fs.readFileSync(path.join(PLUGIN_DIR, "hooks", "bg-sentinel.mjs"), "utf8");
+    const fnSrc = sentinelSrc.slice(sentinelSrc.indexOf("function coordSessionId"), sentinelSrc.indexOf("function coordBusy"));
+    ck.ok("W3-RIDER bg-sentinel coord-session 消费面前置形状守卫（sess_subagent→忽略锚+stderr 定因；与 W2 inject/session-start 同语义、不引共享模块）",
+      fnSrc.includes('v.startsWith("sess_subagent")') && fnSrc.includes("已忽略该锚") && fnSrc.includes("[bg-sentinel]"),
+      { hasFn: fnSrc.length > 0 });
   }
 
   void T0;
