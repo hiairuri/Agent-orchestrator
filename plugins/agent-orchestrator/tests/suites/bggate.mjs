@@ -2,6 +2,8 @@
  * suites/bggate.mjs —— M-08/M-09/M-10（bg-gate C4/C7/strict=ask 收尾）+ A-v020-B01…B07
  *   + A-v031-S09 扩展（两代哨兵在岗都认/前台叠加句/冷却静默等九分支）
  *   + v0.6 B3（V6-53 契约头正则统一 CONTRACT_HEAD + V6-57 截断代理对回退）
+ *   + v1.1.1 W22（cwd 漂移祖先回退：子目录 cwd+env 下契约校验命中祖先根板 / 默认根有板
+ *     不回退 / 祖先链无合法根静默默认根 / 板不可读文案携 rootDir board.json 路径）
  *
  * 覆盖断言组：A-v050-M08…M10、A-v020-B01…B07（L1 直接层，hook 同步捕获）、S09 扩展分支；
  *   plugin.json userConfig dispatch_contract 形状（version 字段存在性断言，容忍阶段 8 版本号推进）。
@@ -48,6 +50,12 @@ const run = (args, stdinObj, extraEnv = {}) => runCapture({
   script: process.execPath, args: [GATE, ...args],
   input: typeof stdinObj === "string" ? stdinObj : JSON.stringify(stdinObj),
   cwd: PROJ, env: { ZCODE_PROJECT_DIR: PROJ, ...extraEnv },
+});
+/** v1.1.1 W22：以任意目录为 cwd+ZCODE_PROJECT_DIR（cwd 漂移场景还原）。 */
+const runFrom = (dir, args, stdinObj) => runCapture({
+  script: process.execPath, args: [GATE, ...args],
+  input: typeof stdinObj === "string" ? stdinObj : JSON.stringify(stdinObj),
+  cwd: dir, env: { ZCODE_PROJECT_DIR: dir },
 });
 const ctx = (r) => (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext) || "";
 const reason = (r) => (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.permissionDecisionReason) || "";
@@ -224,6 +232,42 @@ try {
     const r = run(["--policy", "remind", "--contract", "ask"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
     ck.ok("V6-52b 板不可读不升级 ask（fail-open 不变量）", decision(r) === "allow" && ctx(r).includes("契约校验跳过"), r.raw);
+  }
+
+  // ---- v1.1.1 W22：cwd 漂移祖先回退（默认根无板无 root-id → 采用最近合法祖先根）
+  resetFixture();
+  fs.writeFileSync(path.join(ROOT, "root-id"), "0123456789abcdef\n");
+  cool();
+  {
+    // 子目录 cwd + env（宿主把会话 cwd 同步进子目录）：板与 root-id 在 PROJ 根 →
+    // 契约校验必须命中，且不得出现「板不可读」（修前 rootDir 读子目录 → fail-open 三连）。
+    const sub = path.join(PROJ, "plugins", "x");
+    fs.mkdirSync(sub, { recursive: true });
+    const ok = runFrom(sub, ["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_OK}\n`, { run_in_background: true }));
+    allOutputs.push(ok.raw);
+    ck.ok("W22-a 子目录 cwd：祖先根契约校验命中（合法 token 静默，无板不可读）", silent(ok) && !ctx(ok).includes("板不可读"), { raw: ok.raw, stderr: ok.stderr.slice(0, 200) });
+    ck.ok("W22-b 子目录 cwd：stderr 定根回退且携祖先根路径", ok.stderr.includes("定根回退") && ok.stderr.includes(ROOT), ok.stderr.slice(0, 200));
+    // 负例：祖先根板上无此 token → 报未匹配（证明读的确实是祖先根板，而非 fail-open 静默）
+    const bad = runFrom(sub, ["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
+    allOutputs.push(bad.raw);
+    ck.ok("W22-c 子目录 cwd：token 校验在祖先根板生效（未匹配负例）", decision(bad) === "allow" && ctx(bad).includes("未匹配任何在册 mission") && !ctx(bad).includes("板不可读"), bad.raw);
+  }
+  {
+    // 默认根有 board.json（正常项目）→ 不触发回退（日志/行为与现版一致）
+    const r = run(["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
+    allOutputs.push(r.raw);
+    ck.ok("W22-d 默认根有板：不触发祖先回退（stderr 无定根回退，校验照常）", !r.stderr.includes("定根回退") && ctx(r).includes("未匹配任何在册 mission"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
+  }
+  {
+    // 祖先链上无合法根 → 静默回默认根（现行为不变）；板不可读文案须携 <rootDir>/board.json
+    const orphan = path.join(BASE.root, "orphan", "sub");
+    const orphanRoot = path.join(orphan, ".zcode", "orchestrator");
+    fs.mkdirSync(orphanRoot, { recursive: true });
+    fs.writeFileSync(path.join(orphanRoot, "sentinel-hint-stamp"), new Date().toISOString());
+    const r = runFrom(orphan, ["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
+    allOutputs.push(r.raw);
+    ck.ok("W22-e 祖先链无合法根：静默默认根（无定根回退告警）", !r.stderr.includes("定根回退") && !r.stderr.includes("祖先根") && ctx(r).includes("契约校验跳过"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
+    ck.ok("W22-f 板不可读文案携 <rootDir>/board.json 路径", ctx(r).includes(path.join(orphanRoot, "board.json")), ctx(r));
   }
 
   // ---- v0.6 B3 / V6-57：截断代理对回退（session-start truncateStr + stop-check 末尾裁剪）

@@ -3,7 +3,7 @@ name: orch-gleaner
 description: "记忆归敛代理：按任务包消费 ORCHTEMP/巡检候选/维护视图层（ORCH.md、AGENTS.md 标记区、全端 AGENTS.md）并交归敛报告；只在归敛派发中使用。"
 color: green
 tools: [Read, Write, Edit, Glob, Grep, Bash, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe, mcp__plugin_agent-orchestrator_orch__lessons]
-disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest]
+disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 
 # orch-gleaner（记忆归敛代理）

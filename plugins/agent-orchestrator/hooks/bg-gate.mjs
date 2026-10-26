@@ -72,7 +72,11 @@ function onOffHint(raw) {
 /* --- root-id 契约校验定根（v0.6；verbatim twin：五脚本同文，行为由 tests/suites/root-contract.mjs
      矩阵锁定，零代码共享）---
    分代门：temp 拒绝（两代通用）→ v2 强校验（root-id 比对）/ v1 弱校验（存在即采信 + stderr 提示）
-   → 任一失败回退默认根 + stderr 告警一行。hooks 不删指针（删除职责全归 server 自愈）。 */
+   → 任一失败回退默认根 + stderr 告警一行。hooks 不删指针（删除职责全归 server 自愈）。
+   本函数为各脚本内定根唯一副本（stop-check 主清点与镜像记录两条路径共用）。
+   v1.1.1 (W20/W22) 祖先回退：默认根既无 board.json 也无 root-id（无指针/空指针/校验失败回退）时，
+   自 projectDir 向上逐级找最近祖先目录，其 .zcode/orchestrator 同时存在 board.json 与 root-id
+   即采用（stderr 一行告知解析根）；找不到则静默默认根。root.txt 指针优先级不变。 */
 function isTempLikeDir(p) {
   try {
     const tmp = path.resolve(os.tmpdir());
@@ -100,23 +104,54 @@ function rootContractStderr(msg) {
   }
 }
 
-/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根静默；
- *  任一校验失败 → 回退默认根 + stderr 告警。不删指针。 */
+/** 祖先回退判定（v1.1.1 W20/W22；五处 twin 同文）：默认根自身合法（board.json 或 root-id 任一存在）
+ *  → 默认根；否则自 projectDir 向上找最近祖先的 .zcode/orchestrator（须同时有 board.json 与
+ *  root-id）。命中 → stderr 一行（含解析根路径）后采用；未命中 → 默认根（静默）。cwd 漂移防护。 */
+function ancestorRoot(projectDir, defaultRoot) {
+  try {
+    if (
+      fs.existsSync(path.join(defaultRoot, "board.json")) ||
+      fs.existsSync(path.join(defaultRoot, "root-id"))
+    ) {
+      return defaultRoot; // 默认根合法（新项目即便还没板，只要有 root-id 也不回退）
+    }
+    let dir = path.dirname(path.resolve(projectDir));
+    for (;;) {
+      const candidate = path.join(dir, ".zcode", "orchestrator");
+      if (
+        fs.existsSync(path.join(candidate, "board.json")) &&
+        fs.existsSync(path.join(candidate, "root-id"))
+      ) {
+        rootContractStderr("定根回退：采用祖先根 " + candidate);
+        return candidate;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) return defaultRoot; // 已到文件系统根仍无命中
+      dir = parent;
+    }
+  } catch {
+    return defaultRoot; // 任何意外 → 默认根（fail-open，不阻塞）
+  }
+}
+
+/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根（先做祖先
+ *  回退判定）；任一校验失败 → 回退默认根 + stderr 告警（同样做祖先回退判定）。不删指针。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
+  const fallbackRoot = () => ancestorRoot(projectDir, defaultRoot);
   try {
     const pointer = path.join(defaultRoot, "root.txt");
-    if (!fs.existsSync(pointer)) return defaultRoot;
+    if (!fs.existsSync(pointer)) return fallbackRoot();
     const lines = fs
       .readFileSync(pointer, "utf8")
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!lines.length) return defaultRoot; // 空指针 ≈ 无指针（静默）
+    if (!lines.length) return fallbackRoot(); // 空指针 ≈ 无指针
     const target = lines[0];
     if (isTempLikeDir(target)) {
       rootContractStderr("root.txt 指针未通过归属校验（目标位于临时目录），已回退默认根");
-      return defaultRoot;
+      return fallbackRoot();
     }
     let live = false;
     try {
@@ -126,30 +161,30 @@ function locateRoot(projectDir) {
     }
     if (!live) {
       rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
-      return defaultRoot;
+      return fallbackRoot();
     }
     const rid = rootIdOf(target);
     if (lines.length >= 2) {
       // v2 强校验：目标存活 ∧ root-id 存在 ∧ 内容 === 指针内嵌 id
       if (!rid) {
         rootContractStderr("root.txt 指针未通过归属校验（目标根缺少 root-id），已回退默认根");
-        return defaultRoot;
+        return fallbackRoot();
       }
       if (rid !== lines[1]) {
         rootContractStderr("root.txt 指针未通过归属校验（root-id 与指针内嵌 id 失配），已回退默认根");
-        return defaultRoot;
+        return fallbackRoot();
       }
       return target;
     }
     // v1 弱校验（v0.4.1–v0.5.1 旧格式兼容）：目标存活 ∧ root-id 存在即采信（值不比对）
     if (!rid) {
       rootContractStderr("root.txt 指针未通过归属校验（旧格式指针且目标根无 root-id），已回退默认根");
-      return defaultRoot;
+      return fallbackRoot();
     }
     rootContractStderr("root.txt 为旧格式指针（v1 弱校验已采信），重启 server 后自动升级");
     return target;
   } catch {
-    return defaultRoot; // 任何意外 → 默认根（fail-open，不阻塞）
+    return fallbackRoot(); // 任何意外 → 默认根（fail-open，不阻塞）
   }
 }
 
@@ -352,9 +387,12 @@ function main() {
     Boolean(contractMsg) && contract === "ask" && missionIdShaped(prompt);
   // v0.6 (V6-52): 明示放行——板不可读时 fail-open 保留，追加一句「契约校验跳过」。
   // 与 contractAsk 互斥（后者要求 contractMsg 非空）：跳过提示永不升级 ask。
+  // v1.1.1 (W22): 文案追加解析根的 board.json 路径（cwd 漂移排障；既有子串断言不破）。
   const contractSkip =
     !contractMsg && boardUnreadable
-      ? "契约校验跳过：板不可读（fail-open），本次派发未做契约核验。"
+      ? "契约校验跳过：板不可读（fail-open），本次派发未做契约核验。（" +
+        path.join(rootDir, "board.json") +
+        "）"
       : "";
 
   if (policy === "off") {

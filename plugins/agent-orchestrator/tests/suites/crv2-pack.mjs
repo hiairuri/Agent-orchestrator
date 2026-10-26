@@ -10,8 +10,8 @@
  * 前置：node >= 20；PATH 上有 git（d00f94c 基线导出 + worktree 物化）；无网。
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { startServer, Checker, DEFAULT_SERVER, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo, repoRoot, exportFileFromGit } from "../harness/git-fixture.mjs";
@@ -21,6 +21,23 @@ const BASE = makeTempRoot({ prefix: "orch-crv2-", root: parseRootArg() || undefi
 const PROJ = path.join(BASE.root, "proj");
 const TROOT = path.join(BASE.root, "troot");
 const SCRATCH = path.join(BASE.root, "scratch");
+
+// ---- v1.1.1 W20：dispatch 端到端夹具（stub CLI + 隔离 rollout 目录，零模型事务） ----
+const STUB_DIR = path.join(BASE.root, "dispatch-stub");
+const STUB_CLI = path.join(STUB_DIR, "stub-cli.mjs");
+const ROLLOUT_DIR = path.join(STUB_DIR, "rollout");
+fs.mkdirSync(ROLLOUT_DIR, { recursive: true });
+fs.writeFileSync(
+  STUB_CLI,
+  [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    'const dir = process.env.ORCH_ROLLOUT_DIR || ".";',
+    'fs.mkdirSync(dir, { recursive: true });',
+    'fs.writeFileSync(path.join(dir, "model-io-sess_crv2-dispatch.jsonl"), JSON.stringify({ t: 1 }) + "\\n");',
+    'console.log(JSON.stringify({ type: "result", sessionId: "sess_crv2-dispatch", traceId: "tr", turnId: "tu", response: "stub-ok", usage: { inputTokens: 1 }, projection: { status: "idle", turnCount: 1 } }));',
+  ].join("\n") + "\n",
+);
 
 const sectionsOf = (md) => !md ? [] : md.split("\n").filter((l) => l.startsWith("## "))
   .map((l) => l.replace(/^## ([^（(]*)?.*/, "$1").trim()).map((l) => l.split("（")[0].split("(")[0].trim());
@@ -135,9 +152,13 @@ try {
 
   // ---- 阶段 2：现行 server 同一固定路径夹具重跑（确定性 SHA → 同沙箱 base_commit）
   const repo = freshFixture();
-  cur = startServer({ root: TROOT, cwd: PROJ });
+  cur = startServer({
+    root: TROOT,
+    cwd: PROJ,
+    env: { ZCODE_CLI_PATH: STUB_CLI, ORCH_ROLLOUT_DIR: ROLLOUT_DIR },
+  });
   const tl = await cur.tools();
-  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", tl.tools?.length === 11, tl.tools?.length);
+  ck.ok("tools/list = 12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch）", tl.tools?.length === 12, tl.tools?.length);
   const packsNew = await scenarioA(cur);
 
   // ---- CRV2-05 / CR-V22：缺省包与 0.4.1 逐字节（token 归一化）
@@ -357,78 +378,400 @@ try {
     ck.ok("PACK-03h SKILL 标记对写法唯一注记（冒号变体视为不存在）在案", skillP3.includes("冒号变体视为不存在") && skillP3.includes("orch:memory:*"), null);
   }
 
-  // ---- W4-PREFIX（v1.1 W4 A1，DESIGN §2.1/§2.5/§7.1）：跨派发前缀字节一致性 ----
-  // 同材料窗口两次派发 prompt = persona 原型正文 + 共享头（coord-tail 全形块逐字 + digest
-  // 段逐字）+ 尾块（指针句 + CONTRACT 三行，任务特定）。断言只锁前缀恒同与尾块差异面；
-  // 跨窗口（coord-tail seq/ts 变）失配=预期 cache miss 非错误，同样入账。
+  // ---- v1.1.1 W20：W4-DISPATCH 族（buildDispatchPrompt 纯函数直测，DESIGN §1.2/§6.1） ----
+  // server.mjs 的 BUILD-DISPATCH-PURE 区间零 fs 依赖，抽成临时模块直测——组装序/去协议行/
+  // 旧→新/≤10 块/字节确定性/30000 拒。夹具一律 v2 双标签形制（grill#3 G3-5）。
+  let dispatchPure = null;
   {
-    const persona = fs.readFileSync(path.join(PLUGIN_DIR, "agents", "orch-worker.md"), "utf8").replace(/\r\n/g, "\n").trimEnd();
-    const coordTail = [
-      "<!-- orch-tail v1",
-      "ts: 2026-10-25T05:00:00.000Z",
-      "seq: 7",
-      "project: v1.1 收尾中（W4 A1 契约块）",
-      "stage: W4 A1",
-      "flying: m-20261025-134016-57cc",
-      "ruled: 契约块两形制定稿；前缀一致性断言入账",
-      "next: 跑三基线+run-all 收口",
-      "-->",
-    ].join("\n");
-    const digest = [
-      "generated_at: 2026-10-25T04:00:00.000Z",
-      "- 态势：v1.1 施工收尾（W4 最后一波）",
-      "- 时间：W3 已绿，W4 A1 契约块抽取/组装进场",
-    ].join("\n");
-    const header = [persona, coordTail, digest].join("\n\n") + "\n\n";
-    const tail = (packRel, worker) =>
-      `先 Read 任务包 ${packRel}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。\n` +
-      `[channel] mB2\n[worker] ${worker}\n[token] 0123456789abcdef0123456789abcdef`;
-    const p1 = header + tail("packs/mB2/pack-v1.md", "swarm#7-v1");
-    const p2 = header + tail("packs/mB2/pack-v2.md", "swarm#7-v2");
-    const v1Pack = packsNew["packs/mB2/pack-v1.md"] || "";
-    const v2Pack = packsNew["packs/mB2/pack-v2.md"] || "";
-    const v1Prefix = v1Pack.slice(0, v1Pack.indexOf("## CONTEXT"));
-    const v2Prefix = v2Pack.slice(0, v2Pack.indexOf("## CONTEXT"));
-    // 变体包的 [worker] 行是任务特定面（variant 各自 orch-worker#N）；前缀一致性锁
-    // 排除该行后逐字节（其余 CONTRACT/标题恒同）。
-    const stablePrefix = (s) => s.replace(/^\[worker\] .*$/m, "[worker] X");
-    const v1PrefixEq = v1Prefix.length > 0 && stablePrefix(v1Prefix) === stablePrefix(v2Prefix);
-    const headerBytes = Buffer.byteLength(header, "utf8");
-    console.log(
-      `[W4-PREFIX] sharedHeader=${headerBytes}B（persona=${Buffer.byteLength(persona, "utf8")}B〔LF 归一〕 + coordTail=${Buffer.byteLength(coordTail, "utf8")}B + digest=${Buffer.byteLength(digest, "utf8")}B + separators）`,
-    );
+    const src = fs.readFileSync(DEFAULT_SERVER, "utf8").replace(/\r\n/g, "\n");
+    const beginMark = "/* BUILD-DISPATCH-PURE-BEGIN";
+    const endMark = "/* BUILD-DISPATCH-PURE-END */";
+    const i = src.indexOf(beginMark);
+    const j = src.indexOf(endMark);
+    if (i >= 0 && j > i) {
+      const dir = path.join(BASE.root, "dispatch-pure");
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, "pure.mjs");
+      fs.writeFileSync(file, src.slice(i, j + endMark.length) + "\nexport { buildDispatchPrompt };\n");
+      dispatchPure = await import(pathToFileURL(file).href + "?v=" + Date.now());
+    }
     ck.ok(
-      "W4-PREFIX-01 同 mission 不同 variant 头部字节恒同：包前缀（[worker] 任务面除外，至 CONTEXT）+两派发 prompt 的 persona+共享头前缀逐字节相等",
-      v1PrefixEq &&
-        p1.slice(0, header.length) === header &&
-        p2.slice(0, header.length) === header &&
-        p1.slice(0, header.length) === p2.slice(0, header.length) &&
-        p1.slice(header.length) !== p2.slice(header.length),
-      { v1PrefixEq, headerBytes },
-    );
-    ck.ok(
-      "W4-PREFIX-02 尾块形制：指针句先行、[channel] 紧随、[worker]/[token] 收尾（任务特定），共享头含 coord-tail 全形块+digest 逐字",
-      p1.slice(header.length) === tail("packs/mB2/pack-v1.md", "swarm#7-v1") &&
-        /^先 Read 任务包 [^\n]+\n\[channel\] mB2\n\[worker\] [^\n]+\n\[token\] [0-9a-f]{32}$/.test(
-          p1.slice(header.length),
-        ) &&
-        header.includes(coordTail) &&
-        header.includes(digest),
-      { tail: p1.slice(header.length).split("\n").slice(0, 2) },
-    );
-    const coordTailNext = coordTail
-      .replace("ts: 2026-10-25T05:00:00.000Z", "ts: 2026-10-25T06:00:00.000Z")
-      .replace("seq: 7", "seq: 8");
-    const headerNext = [persona, coordTailNext, digest].join("\n\n") + "\n\n";
-    const p3 = headerNext + tail("packs/mB2/pack-v1.md", "swarm#7-v1");
-    ck.ok(
-      "W4-PREFIX-03 跨窗口（coord-tail seq/ts 变）前缀失配=预期 cache miss 非错误：共享头变而尾块逐字同",
-      p3.slice(0, headerNext.length) === headerNext &&
-        p3.slice(0, header.length) !== p1.slice(0, header.length) &&
-        p3.slice(headerNext.length) === p1.slice(header.length),
-      { sameTail: p3.slice(headerNext.length) === p1.slice(header.length) },
+      "W4-DISPATCH-00 buildDispatchPrompt 纯区可抽取（BUILD-DISPATCH-PURE 标记对在位，零 fs 依赖区）",
+      Boolean(dispatchPure && dispatchPure.buildDispatchPrompt),
+      { i, j },
     );
   }
+  if (dispatchPure) {
+    const buildDispatchPrompt = dispatchPure.buildDispatchPrompt;
+    const mkMission = (id, packPath) => ({ id, pack: { path: packPath } });
+    const mkPack = (mid, worker, token) =>
+      [
+        `# 任务包：T（${mid}）`,
+        "",
+        "## CONTRACT（三行契约，也出现在派发 prompt 尾块）",
+        `[channel] ${mid}`,
+        `[worker] ${worker}`,
+        `[token] ${token}`,
+        "",
+        "## TASK",
+        "- 做一件事",
+      ].join("\n");
+    const v2 = (seq, over = {}) =>
+      [
+        "<!-- orch-tail v2",
+        `ts: ${over.ts || "2026-10-25T05:00:00.000Z"}`,
+        `seq: ${seq}`,
+        `project: ${over.project || "v1.1.1 机制波"}`,
+        `stage: ${over.stage || "W20"}`,
+        `flying: ${over.flying || "m-a"}`,
+        `ruled: ${over.ruled || "日志唯一源"}`,
+        `next: ${over.next || "next-" + String(seq).padStart(2, "0")}`,
+        "<!-- orch-tail-end -->",
+      ].join("\n");
+    const personaFixture = "# persona 原型\n\nbody line 1\nbody line 2";
+    const digestFixture = {
+      status: "fresh",
+      generated_at: "2026-10-25T00:00:00.000Z",
+      lines: ["- digest 行一", "- digest 行二"],
+    };
+    const packFixture = mkPack("mD", "orch-worker#1", "0123456789abcdef0123456789abcdef");
+    const logFixture = v2(1, { next: "old-01" }) + "\n\n" + v2(2, { next: "old-02" });
+    const built = buildDispatchPrompt(
+      mkMission("mD", "packs/mD/pack.md"),
+      packFixture,
+      logFixture,
+      personaFixture,
+      digestFixture,
+    );
+    const text = built.ok ? built.text : "";
+    const traceStart = text.indexOf("【主控尾块轨迹");
+    const digestStart = text.indexOf("【项目 digest");
+    const personaStart = text.indexOf("# persona 原型");
+    const pointerStart = text.indexOf("先 Read 任务包 packs/mD/pack.md");
+    const traceSection = traceStart >= 0 && digestStart > traceStart ? text.slice(traceStart, digestStart) : "";
+    ck.ok(
+      "W4-DISPATCH-01 组装序：轨迹节置顶最前 → digest 条件节 → persona 正文 → 指针句+CONTRACT 三行",
+      built.ok === true &&
+        built.blocks === 2 &&
+        traceStart === 0 &&
+        traceStart < digestStart &&
+        digestStart < personaStart &&
+        personaStart < pointerStart &&
+        text.slice(pointerStart).startsWith(
+          "先 Read 任务包 packs/mD/pack.md，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。\n[channel] mD\n[worker] orch-worker#1\n[token] 0123456789abcdef0123456789abcdef",
+        ) &&
+        built.worker === "orch-worker#1" &&
+        built.channel === "mD",
+      { order: [traceStart, digestStart, personaStart, pointerStart], blocks: built.blocks },
+    );
+    ck.ok(
+      "W4-DISPATCH-02 去协议行：轨迹节无 ts:/seq: 行，五业务字段逐字在位",
+      traceSection.length > 0 &&
+        !/^(ts|seq): /m.test(traceSection) &&
+        traceSection.includes("project: v1.1.1 机制波") &&
+        traceSection.includes("stage: W20") &&
+        traceSection.includes("flying: m-a") &&
+        traceSection.includes("ruled: 日志唯一源") &&
+        traceSection.includes("next: old-02"),
+      { hasTs: /^ts: /m.test(traceSection), hasSeq: /^seq: /m.test(traceSection) },
+    );
+    ck.ok(
+      "W4-DISPATCH-03 旧→新：块序按日志顺序（最旧在前，最新在尾）",
+      traceStart >= 0 &&
+        text.indexOf("next: old-01") > 0 &&
+        text.indexOf("next: old-01") < text.indexOf("next: old-02"),
+      { i1: text.indexOf("next: old-01"), i2: text.indexOf("next: old-02") },
+    );
+    const many = Array.from({ length: 12 }, (_, k) => v2(k + 1)).join("\n\n");
+    const capped = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, many, personaFixture, null);
+    const cappedTrace = capped.ok ? capped.text.slice(0, capped.text.indexOf("# persona 原型")) : "";
+    const openCount = (cappedTrace.match(/<!-- orch-tail v2/g) || []).length;
+    ck.ok(
+      "W4-DISPATCH-04 轨迹 ≤10 块：12 块日志只取最新 10 块（最旧两块出队，置顶节恒 10 块）",
+      capped.ok === true &&
+        capped.blocks === 10 &&
+        openCount === 10 &&
+        !cappedTrace.includes("next: next-01") &&
+        !cappedTrace.includes("next: next-02") &&
+        cappedTrace.includes("next: next-03") &&
+        cappedTrace.includes("next: next-12") &&
+        !cappedTrace.includes("【项目 digest"),
+      { blocks: capped.blocks, openCount },
+    );
+    const again = buildDispatchPrompt(
+      mkMission("mD", "packs/mD/pack.md"),
+      packFixture,
+      logFixture,
+      personaFixture,
+      digestFixture,
+    );
+    ck.ok(
+      "W4-DISPATCH-05 字节确定性：同输入两次组装逐字节相等；digest 缺失整节省略；空日志=persona 单段起头",
+      built.ok === true &&
+        again.ok === true &&
+        built.text === again.text &&
+        text.split("【项目 digest").length - 1 === 1 &&        (() => {
+          const empty = buildDispatchPrompt(
+            mkMission("mD", "packs/mD/pack.md"),
+            packFixture,
+            "",
+            personaFixture,
+            null,
+          );
+          return empty.ok === true && empty.text.startsWith(personaFixture) && !empty.text.includes("【主控尾块轨迹");
+        })(),
+      { deterministic: built.ok && again.ok && built.text === again.text, digestSections: text.split("【项目 digest").length - 1 },
+    );
+    const oversized = buildDispatchPrompt(
+      mkMission("mD", "packs/mD/pack.md"),
+      packFixture,
+      logFixture,
+      "x".repeat(30000),
+      null,
+    );
+    ck.ok(
+      "W4-DISPATCH-06 字节预算闸：组装结果 >30000 字符 → ok:false（32767 CreateProcess 硬限前置）",
+      oversized.ok === false && /超预算/.test(oversized.error) && /30000/.test(oversized.error),
+      oversized.error,
+    );
+    // ---- W4-PREFIX（v1.1.1 W21 重写）：fallback 前缀=persona 单段 + 组装确定性（夹具 v2 形） ----
+    // 宿主 Agent 降级通道（RP-3）不再有共享头/粘贴面：无日志无 digest 时首条消息=persona 单段 +
+    // 指针句 + CONTRACT 三行；同窗口内只看 persona 前缀，任务面随 pack/worker 变化。
+    const personaReal = fs
+      .readFileSync(path.join(PLUGIN_DIR, "agents", "orch-worker.md"), "utf8")
+      .replace(/\r\n/g, "\n")
+      .trimEnd();
+    const pf1 = buildDispatchPrompt(
+      mkMission("mB2", "packs/mB2/pack-v1.md"),
+      mkPack("mB2", "swarm#7-v1", "0123456789abcdef0123456789abcdef"),
+      "",
+      personaReal,
+      null,
+    );
+    const pf2 = buildDispatchPrompt(
+      mkMission("mB2", "packs/mB2/pack-v2.md"),
+      mkPack("mB2", "swarm#7-v2", "0123456789abcdef0123456789abcdef"),
+      "",
+      personaReal,
+      null,
+    );
+    const headLen = personaReal.length;
+    const tailRegex = /^先 Read 任务包 [^\n]+\n\[channel\] mB2\n\[worker\] [^\n]+\n\[token\] [0-9a-f]{32}$/;
+    ck.ok(
+      "W4-PREFIX-01 fallback 前缀=persona 单段：两派发（不同 pack/worker）persona 前缀逐字节相等，任务面尾部各异",
+      pf1.ok === true &&
+        pf2.ok === true &&
+        pf1.text.slice(0, headLen) === personaReal &&
+        pf2.text.slice(0, headLen) === personaReal &&
+        pf1.text.slice(0, headLen) === pf2.text.slice(0, headLen) &&
+        pf1.text.slice(headLen + 2) !== pf2.text.slice(headLen + 2),
+      { headLen, t1: pf1.ok ? pf1.text.slice(headLen, headLen + 40) : pf1.error },
+    );
+    ck.ok(
+      "W4-PREFIX-02 fallback 尾块形制：指针句先行、[channel] 紧随、[worker]/[token] 收尾（CONTRACT 三行自包解析）",
+      pf1.ok === true && tailRegex.test(pf1.text.slice(headLen + 2)),
+      { tail: pf1.ok ? pf1.text.slice(headLen + 2).split("\n").slice(0, 2) : pf1.error },
+    );
+    const logNext = v2(7, { ts: "2026-10-26T04:00:00.000Z", next: "跑三基线+run-all 收口" });
+    const logPrev = v2(6, { ts: "2026-10-25T04:00:00.000Z", next: "跑三基线+run-all 收口" });
+    const w1 = buildDispatchPrompt(mkMission("mB2", "packs/mB2/pack-v1.md"), mkPack("mB2", "swarm#7-v1", "0123456789abcdef0123456789abcdef"), logPrev, personaReal, null);
+    const w2 = buildDispatchPrompt(mkMission("mB2", "packs/mB2/pack-v1.md"), mkPack("mB2", "swarm#7-v1", "0123456789abcdef0123456789abcdef"), logNext, personaReal, null);
+    ck.ok(
+      "W4-PREFIX-03 跨窗口（仅 ts/seq 协议行变）：首条消息逐字节不变（协议字段不入注入面）→ 前缀命中",
+      w1.ok === true && w2.ok === true && w1.text === w2.text && !/^(ts|seq): /m.test(w1.text.slice(0, w1.text.indexOf(personaReal))),
+      { same: w1.ok && w2.ok && w1.text === w2.text },
+    );
+    const w3 = buildDispatchPrompt(
+      mkMission("mB2", "packs/mB2/pack-v1.md"),
+      mkPack("mB2", "swarm#7-v1", "0123456789abcdef0123456789abcdef"),
+      v2(8, { next: "下一波施工" }),
+      personaReal,
+      null,
+    );
+    ck.ok(
+      "W4-PREFIX-03b 跨窗口（业务字段 next 变）：轨迹节失配=预期 cache miss 非错误，persona 前缀与尾块仍恒同",
+      w3.ok === true &&
+        w3.text !== w1.text &&
+        w3.text.slice(0, w3.text.indexOf(personaReal)) !== w1.text.slice(0, w1.text.indexOf(personaReal)) &&
+        w3.text.slice(w3.text.indexOf(personaReal)) === w1.text.slice(w1.text.indexOf(personaReal)),
+      { diff: w3.ok && w3.text !== w1.text },
+    );
+    {
+      const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+      const i = src.indexOf("/* BUILD-DISPATCH-PURE-BEGIN");
+      const j = src.indexOf("/* BUILD-DISPATCH-PURE-END */");
+      const region = i >= 0 && j > i ? src.slice(i, j) : "";
+      ck.ok(
+        "W4-PREFIX-04 组装确定性静态锁：纯区内零 Date/Date.now/随机源（同输入必同字节；W21 SKILL 静态面归 po-static）",
+        region.length > 0 && !/new Date\(|Date\.now\(|Math\.random\(/.test(region),
+        { regionBytes: region.length, hasDate: /new Date\(|Date\.now\(/.test(region) },
+      );
+    }
+  }
+  // ---- W4-DISPATCH-07/08：yolo 闸 / busy 闸（server 黑盒，闸门拒绝先于任何 spawn） ----
+  {
+    await cur.call("board", {
+      action: "upsert",
+      mission: { id: "mDispW", title: "yolo-worker", status: "drafted", agent_type: "agent-orchestrator:orch-worker" },
+    });
+    const wGate = await cur.call("dispatch", { mission_id: "mDispW" });
+    ck.ok(
+      "W4-DISPATCH-07a yolo 闸：worker 类 scope_paths 空 → isError（headless=--mode yolo 全放行，引导登记写集）",
+      wGate.isError === true && /yolo 闸/.test(wGate.text) && /scope_paths/.test(wGate.text),
+      wGate.text.slice(0, 200),
+    );
+    await cur.call("board", {
+      action: "upsert",
+      mission: { id: "mDispS", title: "scout-exempt", status: "drafted", agent_type: "agent-orchestrator:orch-scout" },
+    });
+    const sGate = await cur.call("dispatch", { mission_id: "mDispS" });
+    ck.ok(
+      "W4-DISPATCH-07b scout 豁免 yolo 闸：越过闸门后按包解析失败（错误非 yolo，闸门语义正向可证）",
+      sGate.isError === true && !/yolo 闸/.test(sGate.text) && /任务包/.test(sGate.text),
+      sGate.text.slice(0, 200),
+    );
+    await cur.call("board", {
+      action: "upsert",
+      mission: {
+        id: "mDispBusy",
+        title: "busy-headless",
+        status: "dispatched",
+        agent_type: "agent-orchestrator:orch-scout",
+        dispatch: { mode: "headless" },
+      },
+    });
+    const bGate = await cur.call("dispatch", { mission_id: "mDispBusy" });
+    ck.ok(
+      "W4-DISPATCH-08 busy 闸：dispatch.mode=headless 且结果 index 缺席 → isError 拒双跑",
+      bGate.isError === true && /busy 闸/.test(bGate.text) && /index/.test(bGate.text),
+      bGate.text.slice(0, 200),
+    );
+    const noMission = await cur.call("dispatch", { mission_id: "mDispNope" });
+    ck.ok(
+      "W4-DISPATCH-08b 在板校验：mission 不存在 → isError（派发面前置）",
+      noMission.isError === true && /不在板/.test(noMission.text),
+      noMission.text.slice(0, 160),
+    );
+  }
+  // ---- W4-DISPATCH-09：端到端（context_pack persona_path → dispatch → stub CLI → result/index） ----
+  {
+    await cur.call("context_pack", {
+      mission_id: "mDispOk",
+      title: "dispatch 端到端",
+      task: "验证回执与 result 侧车",
+      scope_paths: ["src/"],
+      worker_name: "orch-worker#1",
+      persona_path: path.join(PLUGIN_DIR, "agents", "orch-worker.md"),
+    });
+    await cur.call("board", {
+      action: "upsert",
+      mission: { id: "mDispOk", title: "dispatch 端到端", status: "drafted", agent_type: "agent-orchestrator:orch-worker" },
+    });
+    const board0 = JSON.parse(fs.readFileSync(path.join(TROOT, "board.json"), "utf8"));
+    const dm = board0.missions.find((m) => m.id === "mDispOk");
+    ck.ok(
+      "W4-DISPATCH-09a context_pack persona_path 登记 mission.pack.persona（dispatch persona 解析第 2 级）",
+      Boolean(dm && dm.pack && typeof dm.pack.persona === "string" && dm.pack.persona.includes("orch-worker.md")),
+      dm && dm.pack,
+    );
+    const ctxDir = path.join(TROOT, "context");
+    fs.mkdirSync(ctxDir, { recursive: true });
+    const logBlock = (seq, next) =>
+      [
+        "<!-- orch-tail v2",
+        "ts: 2026-10-25T05:00:00.000Z",
+        `seq: ${seq}`,
+        "project: v1.1.1 机制波",
+        "stage: W20",
+        "flying: m-a",
+        "ruled: 日志唯一源",
+        `next: ${next}`,
+        "<!-- orch-tail-end -->",
+      ].join("\n");
+    fs.writeFileSync(
+      path.join(ctxDir, "coord-tail-log.md"),
+      logBlock(1, "trace-旧") + "\n\n" + logBlock(2, "trace-新") + "\n",
+    );
+    const dr = await cur.call("dispatch", { mission_id: "mDispOk" });
+    const dj = dr.json || {};
+    ck.ok(
+      "W4-DISPATCH-09b 秒级回执 {ok,mission_id,worker,session_id,log_path,prompt_path,result_dir}（rollout diff ≤5s 快捕 sessionId）",
+      dr.isError !== true &&
+        dj.ok === true &&
+        dj.mission_id === "mDispOk" &&
+        dj.worker === "orch-worker#1" &&
+        dj.session_id === "sess_crv2-dispatch" &&
+        typeof dj.log_path === "string" &&
+        typeof dj.prompt_path === "string" &&
+        typeof dj.result_dir === "string",
+      dj,
+    );
+    const promptFile = dj.prompt_path
+      ? path.isAbsolute(dj.prompt_path)
+        ? dj.prompt_path
+        : path.join(PROJ, dj.prompt_path)
+      : "";
+    const ptxt = promptFile && fs.existsSync(promptFile) ? fs.readFileSync(promptFile, "utf8") : "";
+    const pTrace = ptxt.slice(0, ptxt.indexOf("# orch-worker"));
+    ck.ok(
+      "W4-DISPATCH-09c 审计 prompt 落盘：轨迹节置顶（v2 块去协议行、旧→新）→ persona 正文 → 指针句+CONTRACT（digest 缺省整节省略）",
+      ptxt.startsWith("【主控尾块轨迹（启动器自动注入") &&
+        pTrace.includes("next: trace-旧") &&
+        pTrace.indexOf("next: trace-旧") < pTrace.indexOf("next: trace-新") &&
+        !/^(ts|seq): /m.test(pTrace) &&
+        !ptxt.includes("【项目 digest") &&
+        ptxt.includes("先 Read 任务包 ") &&
+        /\[channel\] mDispOk\n\[worker\] orch-worker#1\n\[token\] [0-9a-f]{32}$/.test(ptxt),
+      { head: ptxt.slice(0, 80) },
+    );
+    const resultDir = path.join(TROOT, "context", "dispatch-results");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000) {
+      if (
+        fs.existsSync(path.join(resultDir, "sess_crv2-dispatch.json")) &&
+        fs.existsSync(resultDir) &&
+        fs.readdirSync(resultDir).some((n) => n.startsWith("mDispOk-") && n.endsWith(".index.json"))
+      ) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    const resultFile = path.join(resultDir, "sess_crv2-dispatch.json");
+    const resultJson = fs.existsSync(resultFile) ? JSON.parse(fs.readFileSync(resultFile, "utf8")) : null;
+    const indexName = fs.existsSync(resultDir)
+      ? fs.readdirSync(resultDir).find((n) => n.startsWith("mDispOk-") && n.endsWith(".index.json"))
+      : null;
+    const indexJson = indexName ? JSON.parse(fs.readFileSync(path.join(resultDir, indexName), "utf8")) : null;
+    ck.ok(
+      "W4-DISPATCH-09d runner 异步落盘：<sessionId>.json（envelope+mission/worker/exit）+ 侧车 index（mission→result）",
+      Boolean(resultJson) &&
+        resultJson.mission_id === "mDispOk" &&
+        resultJson.worker === "orch-worker#1" &&
+        resultJson.session_id === "sess_crv2-dispatch" &&
+        resultJson.exit_code === 0 &&
+        resultJson.timed_out === false &&
+        resultJson.envelope &&
+        resultJson.envelope.sessionId === "sess_crv2-dispatch" &&
+        Boolean(indexJson) &&
+        indexJson.mission_id === "mDispOk" &&
+        indexJson.session_id === "sess_crv2-dispatch" &&
+        String(indexJson.result_path || "").includes("sess_crv2-dispatch.json"),
+      { resultJson, indexJson },
+    );
+    const board1 = JSON.parse(fs.readFileSync(path.join(TROOT, "board.json"), "utf8"));
+    const dm1 = board1.missions.find((m) => m.id === "mDispOk");
+    ck.ok(
+      "W4-DISPATCH-09e board 登记：status dispatched ∧ dispatch.mode=headless ∧ session_id 快捕回填",
+      dm1 &&
+        dm1.status === "dispatched" &&
+        dm1.dispatch &&
+        dm1.dispatch.mode === "headless" &&
+        dm1.dispatch.session_id === "sess_crv2-dispatch",
+      dm1 && { status: dm1.status, dispatch: dm1.dispatch },
+    );
+  }
+  // v1.1.1 W21：SKILL PL-10/DP-3 的静态锁归 po-static（W21 车道）；本套只保留
+  // 启动器/回退形态的行为面（W4-DISPATCH 族 + W4-PREFIX 重写），零文档措辞重复钉。
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));
 } finally {

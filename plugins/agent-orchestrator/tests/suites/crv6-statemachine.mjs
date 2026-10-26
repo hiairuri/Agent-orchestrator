@@ -15,6 +15,9 @@
  *     除 timeline echo 外逐字段不变）；03 边界三（双方 timeline 回放+档全文可溯）；04 失效面
  *     （target 不存在/终态/非持有者即错不建档+TTL 过期 expired+双 echo）；05 ask 前置态限
  *     blocked/question；06 哨兵活性语义不回归（lastActivityMs 计任意 timeline 事件，echo 自动计入）。
+ *   WB-SRV-a..g（v1.1.1 W-B 完成即唤队列：headless done→事件恰一落内容形状锁/非 headless 与
+ *     milestone 零事件/毒丸容忍/认领残留 acquired_at 可识别/并发双写两事件两文件/dispatch
+ *     lock_hold_ms<2000ms；权威=v1.1.1-wake-PLAN-draft + grill#wake 七答）
  *   转录自 W-A1 §1 各断言草案；suite 注册行归主控 G 胶水波收口（run-all REGISTRY）。
  *
  * 运行方式：node tests/suites/crv6-statemachine.mjs [--root <临时根>]
@@ -22,7 +25,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, DEFAULT_SERVER, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
 import {
   makeTempRoot,
   parseRootArg,
@@ -797,6 +800,202 @@ try {
         finalAsker.blocked.answered === false,
       { ask: a3.ok, ans: a4.ok, status: finalAsker.status },
     );
+  }
+  // ================================================================
+  // v1.1.1 W-B：完成即唤队列（server 生产者① headless 闸 + 队列形三钉 + lock-hold 量测；
+  // grill#wake Q1-Q5 裁定：闸=dispatch.mode==="headless" 零新字段；逐事件单文件 wx/毒丸
+  // 跳过/认领残留含 acquired_at；lock-hold <2000ms=2s 锁预算）
+  // ================================================================
+  {
+    const qdir = path.join(T, "context", "wake-queue");
+    const qevents = () =>
+      fs.existsSync(qdir)
+        ? fs.readdirSync(qdir).filter((f) => f.endsWith(".json") && f !== "claim.json").sort()
+        : [];
+    const qread = (f) => JSON.parse(fs.readFileSync(path.join(qdir, f), "utf8"));
+    const qclaimText = () => {
+      try {
+        return fs.readFileSync(path.join(qdir, "claim.json"), "utf8");
+      } catch {
+        return null;
+      }
+    };
+    const upsertWb = (mission) => s.call("board", { action: "upsert", mission });
+    const seedHeadless = (id, sessionId) =>
+      upsertWb({
+        id,
+        title: "wb-" + id,
+        status: "dispatched",
+        dispatch: { mode: "headless", agent_id: null, task_id: null, session_id: sessionId },
+      });
+    const doneReport = (id, worker = "gp-wb#1") =>
+      s.call("report", { mission_id: id, worker, kind: "done", summary: "wb 收口" });
+
+    // ---- WB-SRV-a：headless done → 事件恰一落（内容形状锁）----
+    await seedHeadless("m-wb-head", "sess_wb_head");
+    const beforeA = qevents();
+    const rdA = resultText(await doneReport("m-wb-head"));
+    const freshA = qevents().filter((f) => !beforeA.includes(f));
+    const evA = freshA.length === 1 ? qread(freshA[0]) : null;
+    ck.ok(
+      "WB-SRV-a headless done → wake-queue 事件恰一落：文件名 <ms>-<mission_id>.json（逐事件单文件形），" +
+        "内容 {mission_id,worker,session_id(=dispatch.session_id),result_path(null=server 源),created_at ISO,source=server}；" +
+        "认领文件 spawn 后已释放；板 status=done",
+      rdA.ok === true && rdA.status === "done" &&
+        freshA.length === 1 && /^\d+-m-wb-head\.json$/.test(freshA[0]) &&
+        evA && evA.mission_id === "m-wb-head" && evA.worker === "gp-wb#1" &&
+        evA.session_id === "sess_wb_head" && evA.result_path === null &&
+        Number.isFinite(Date.parse(evA.created_at)) && evA.source === "server" &&
+        qclaimText() === null &&
+        boardJson().missions.find((m) => m.id === "m-wb-head").status === "done",
+      { rd: { ok: rdA.ok, status: rdA.status }, fresh: freshA, ev: evA, claim: qclaimText() },
+    );
+
+    // ---- WB-SRV-b：非 headless done → 零事件（宿主托管形态有平台通知，防双唤噪声）----
+    await upsertWb({
+      id: "m-wb-agent",
+      title: "wb-agent",
+      status: "dispatched",
+      dispatch: { mode: "agent", agent_id: "a-wb" },
+    });
+    await upsertWb({ id: "m-wb-nodisp", title: "wb-nodisp", status: "dispatched" });
+    const beforeB = qevents();
+    const rdB1 = resultText(await doneReport("m-wb-agent", "gp-wb#2"));
+    const rdB2 = resultText(await doneReport("m-wb-nodisp", "gp-wb#3"));
+    ck.ok(
+      "WB-SRV-b 非 headless（mode=agent / 无 dispatch 键）done → 零事件落（闸面负例，grill#wake Q3 headless 标记判定）",
+      rdB1.ok === true && rdB2.ok === true && qevents().length === beforeB.length,
+      { before: beforeB.length, after: qevents().length },
+    );
+
+    // ---- WB-SRV-c：headless 但 kind≠done（milestone）→ 零事件 ----
+    const beforeC = qevents();
+    const rdC = resultText(
+      await s.call("report", { mission_id: "m-wb-head", worker: "gp-wb#1", kind: "milestone", summary: "wb 里程碑" }),
+    );
+    ck.ok(
+      "WB-SRV-c headless mission 的 milestone → 零事件落（done 分支闸，:4467 区域挂点语义）",
+      rdC.ok === true && qevents().length === beforeC.length,
+      { before: beforeC.length, after: qevents().length },
+    );
+
+    // ---- WB-SRV-d：毒丸容忍——坏事件文件+坏认领文件在场，生产面不受染（认领 EEXIST=静默
+    //      跳过、claim 字节不动、新事件照落、report 主流程 ok）----
+    fs.mkdirSync(qdir, { recursive: true });
+    fs.writeFileSync(path.join(qdir, "garbage.json"), "{corrupt 毒丸坏件");
+    const poisonClaim = "{corrupt claim 毒丸";
+    fs.writeFileSync(path.join(qdir, "claim.json"), poisonClaim);
+    await seedHeadless("m-wb-poison", "sess_wb_poison");
+    const beforeD = qevents();
+    const rdD = resultText(await doneReport("m-wb-poison", "gp-wb#4"));
+    const freshD = qevents().filter((f) => !beforeD.includes(f));
+    ck.ok(
+      "WB-SRV-d 毒丸容忍（三钉之二）：坏件 garbage.json+坏 claim.json 在场 → 新事件照落恰一、" +
+        "坏 claim 字节级不动（生产者不读既有内容只 wx 写自己文件=天然隔离）、report 主流程 ok 不受阻",
+      rdD.ok === true && freshD.length === 1 && qread(freshD[0]).mission_id === "m-wb-poison" &&
+        qclaimText() === poisonClaim,
+      { fresh: freshD, claimIntact: qclaimText() === poisonClaim, ok: rdD.ok },
+    );
+
+    // ---- WB-SRV-e：认领残留可识别——合法 claim.json（含 acquired_at）在场=他者持有中 →
+    //      静默不夺不删不 spawn，残留原样保留（认领后 crash 的残留超龄回收=WB 波，本波钉可识别面）----
+    const residueClaim =
+      JSON.stringify({ acquired_at: new Date(Date.now() - 3600000).toISOString(), source: "test-residue" }, null, 2) + "\n";
+    try {
+      fs.unlinkSync(path.join(qdir, "claim.json"));
+    } catch { /* 前腿坏 claim 换合法残留 */ }
+    fs.writeFileSync(path.join(qdir, "claim.json"), residueClaim);
+    await seedHeadless("m-wb-residue", "sess_wb_residue");
+    const rdE = resultText(await doneReport("m-wb-residue", "gp-wb#5"));
+    const claimAfter = qclaimText();
+    let residueFresh = false;
+    try {
+      residueFresh = Number.isFinite(Date.parse(JSON.parse(claimAfter).acquired_at));
+    } catch { /* keep false */ }
+    ck.ok(
+      "WB-SRV-e 认领残留可识别（三钉之三）：他者 claim（含 acquired_at）在场 → 事件照落、" +
+        "claim 字节级原样保留+acquired_at 可解析（残留识别面；超龄回收归 WB 波）、report ok",
+      rdE.ok === true && claimAfter === residueClaim && residueFresh,
+      { claimIntact: claimAfter === residueClaim, parseable: residueFresh },
+    );
+
+    // ---- WB-SRV-f：并发双写 → 两事件两文件（wx 原子建，禁共享单 jsonl 追加）----
+    await seedHeadless("m-wb-c1", "sess_wb_c1");
+    await seedHeadless("m-wb-c2", "sess_wb_c2");
+    const beforeF = qevents();
+    const [rf1, rf2] = await Promise.all([
+      resultText(await doneReport("m-wb-c1", "gp-c1#1")),
+      resultText(await doneReport("m-wb-c2", "gp-c2#1")),
+    ]);
+    const freshF = qevents().filter((f) => !beforeF.includes(f));
+    const freshIds = freshF.map((f) => { try { return qread(f).mission_id; } catch { return null; } }).sort();
+    ck.ok(
+      "WB-SRV-f 并发双写 → 两事件两文件（每文件恰一 mission、逐事件 wx 独占创建、无共享追加形）",
+      rf1.ok === true && rf2.ok === true && freshF.length === 2 &&
+        JSON.stringify(freshIds) === JSON.stringify(["m-wb-c1", "m-wb-c2"]),
+      {
+        fresh: freshF, ids: freshIds,
+        r1: { ok: rf1.ok, err: rf1.ok ? null : String(rf1._raw ?? rf1.error ?? "").slice(0, 160) },
+        r2: { ok: rf2.ok, err: rf2.ok ? null : String(rf2._raw ?? rf2.error ?? "").slice(0, 160) },
+      },
+    );
+
+    // ---- WB-SRV-g：dispatch 同步段锁持时 <2000ms（grill#wake Q5 lock-hold-time 断言；
+    //      黑盒量测面=dispatch 响应 lock_hold_ms；stub CLI+隔离 rollout 零模型事务）----
+    const lockBase = path.join(BASE.root, "wb-lock");
+    const lockRoot = path.join(lockBase, "troot");
+    const lockRollout = path.join(lockBase, "rollout");
+    fs.mkdirSync(lockRoot, { recursive: true });
+    fs.mkdirSync(lockRollout, { recursive: true });
+    const lockStub = path.join(lockBase, "stub-cli.mjs");
+    fs.writeFileSync(
+      lockStub,
+      [
+        'import fs from "node:fs";',
+        'import path from "node:path";',
+        'const dir = process.env.ORCH_ROLLOUT_DIR || ".";',
+        'fs.mkdirSync(dir, { recursive: true });',
+        'fs.writeFileSync(path.join(dir, "model-io-sess_wb_lock.jsonl"), JSON.stringify({ t: 1 }) + "\\n");',
+        'console.log(JSON.stringify({ type: "result", sessionId: "sess_wb_lock", response: "stub-ok", usage: {} }));',
+      ].join("\n") + "\n",
+    );
+    const lockPack = path.join(lockBase, "pack.md");
+    fs.writeFileSync(
+      lockPack,
+      "# 任务包：lock-hold 量测\n\n## CONTRACT（三行契约）\n\n[channel] m-wb-lock\n[worker] gp-lock#1\n[token] 0123456789abcdef0123456789abcdef\n\n## TASK\n量测 dispatch 同步段锁持时。\n",
+    );
+    const s2 = startServer({
+      root: lockRoot,
+      cwd: lockRoot,
+      env: { ZCODE_CLI_PATH: lockStub, ORCH_ROLLOUT_DIR: lockRollout },
+    });
+    try {
+      await s2.call("board", {
+        action: "upsert",
+        mission: {
+          id: "m-wb-lock",
+          title: "lock-hold 量测",
+          status: "drafted",
+          agent_type: "agent-orchestrator:orch-worker",
+          scope_paths: ["src/"],
+        },
+      });
+      const dr = resultText(
+        await s2.call("dispatch", {
+          mission_id: "m-wb-lock",
+          pack_path: lockPack,
+          persona_path: path.join(PLUGIN_DIR, "agents", "orch-worker.md"),
+        }),
+      );
+      ck.ok(
+        "WB-SRV-g dispatch 同步段（withRootLock 内 gates+board+spawn）持时 <2000ms（2s 锁预算；" +
+          "响应 lock_hold_ms 黑盒量测；detached spawn 非阻塞构造性质=dispatch 出货先例）",
+        dr.ok === true && Number.isFinite(dr.lock_hold_ms) && dr.lock_hold_ms >= 0 && dr.lock_hold_ms < 2000,
+        { lock_hold_ms: dr.lock_hold_ms, ok: dr.ok, session_id: dr.session_id },
+      );
+    } finally {
+      s2.close();
+    }
   }
   await sleep(0); // 事件落盘窗口兜底（与既有 suite 惯例一致）
 } finally {

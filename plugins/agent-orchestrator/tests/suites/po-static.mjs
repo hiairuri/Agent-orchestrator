@@ -20,6 +20,10 @@
  *     免开声明/调研可行性结论行/主控提炼披露/grill 格式纪律/组包 checklist〕+ §1 场景表行
  *     + frontmatter description 增行。权威 = 任务包 CONTEXT v2.1 逐字（用户 2026-10-23
  *     裁定 + 2026-10-25 编码裁定；豁免语义精确版 = 任务包 RULES））
+ *   A-v111-W21（v1.1.1 文档波）：W4-01/02/08 按新 SKILL 重钉（v2 双标签/启动器自动注入/
+ *     粘贴·共享头·逐字复用语汇零残留）；W4-05/05b/09/10 按 DESIGN §2 契约名预写日志化锚
+ *     （日志文件名/封顶 10/coordTailLogLastFull/三遗留清理/dispatch 注册+runner 文件/
+ *     coord-tail.md 零残留）——实现由 W20 并行车道落地，本套的绿验证在收尾波。
  *   字节台账（informational，非门禁）：server.mjs/SKILL.md/orch-worker.md 现行字节；
  *     缺省包字节正确性由 crv2/crv6/crv8 三字节锁承载（W4-02），数值记录入
  *     tests/assertions/v0.11.x.md 与策划档 §4。
@@ -150,22 +154,32 @@ try {
   // ---------- A-v110-W4-A1：v1.1 W4 尾部契约块/三段派发静态回潮防钉（DESIGN §1/§2） ----------
   // 行为面 = sentinel-teardown T12（stop-check 黑盒）+ crv2-pack W4-PREFIX（跨派发前缀字节）。
   ck.ok(
-    "W4-01 SKILL PL-10 在位：ORT 标记对/两形制帽值/STALE_T=24h/coord-tail 恢复源",
+    "W4-01 SKILL PL-10 在位（v1.1.1 W21，v2 双标签形制）：ORT 标记对三规则/两形制帽值/STALE_T=24h/coord-tail 日志落点/dispatch 启动器",
     count(SKILL_LF, /^PL-10 /gm) === 1 &&
-      count(SKILL, "<!-- orch-tail v1") === 3 &&
+      count(SKILL, "<!-- orch-tail v2") === 3 &&
+      count(SKILL, "<!-- orch-tail-end -->") === 3 &&
+      count(SKILL, "成对闭合、只取消息最后一组完整对、尾锚定") === 1 &&
       count(SKILL, "≤10 行/900B") === 2 &&
       count(SKILL, "≤6 行/400B") === 2 &&
       count(SKILL, "STALE_T=24h") === 1 &&
-      count(SKILL, "context/coord-tail.md") === 2 &&
+      count(SKILL, "context/coord-tail-log.md") === 3 &&
+      count(SKILL, "dispatch(mission_id)") >= 1 &&
       count(SKILL, "persona 原型正文") >= 1,
     {
       pl10: count(SKILL_LF, /^PL-10 /gm),
-      blocks: count(SKILL, "<!-- orch-tail v1"),
+      open: count(SKILL, "<!-- orch-tail v2"),
+      close: count(SKILL, "<!-- orch-tail-end -->"),
+      v2Rules: count(SKILL, "成对闭合、只取消息最后一组完整对、尾锚定"),
       fullCap: count(SKILL, "≤10 行/900B"),
       shortCap: count(SKILL, "≤6 行/400B"),
       stale: count(SKILL, "STALE_T=24h"),
-      path: count(SKILL, "context/coord-tail.md"),
+      logPath: count(SKILL, "context/coord-tail-log.md"),
     },
+  );
+  ck.ok(
+    "W4-06 PL-10 派发条件式（v1.1.1）：尾块仅在派发轮写，无派发轮零消费不写",
+    count(SKILL, "无派发轮不写") === 1 && count(SKILL, "①派发轮收工的最后一条") === 1 && count(SKILL, "①每轮收工的最后一条") === 0,
+    { cond: count(SKILL, "无派发轮不写"), newHead: count(SKILL, "①派发轮收工的最后一条"), oldHead: count(SKILL, "①每轮收工的最后一条") },
   );
   {
     const head = "**派发 prompt 尾块**";
@@ -176,14 +190,15 @@ try {
     const iWk = block.indexOf("[worker] {worker-name}");
     const iTk = block.indexOf("[token] {token}");
     ck.ok(
-      "W4-02 SKILL §1 场景表行 + §3 尾块模板（指针句先行，[channel]→[worker]→[token] 收尾）",
-      count(SKILL, "| 跨派发前缀稳定（persona+共享头+尾块，coord-tail 契约块） | 第 16 章 PL-10 |") === 1 &&
+      "W4-02 SKILL §1 场景表行 + §3 尾块模板（启动器组装形状；指针句先行，[channel]→[worker]→[token] 收尾）",
+      count(SKILL, "| 跨派发尾块轨迹自动注入（headless 启动器，coord-tail 日志） | 第 16 章 PL-10 |") === 1 &&
         count(SKILL, "## CONTRACT（三行契约，也出现在派发 prompt 尾块）") === 1 &&
+        count(SKILL, "启动器组装形状") === 1 &&
         iPtr >= 0 &&
         iPtr < iCh &&
         iCh < iWk &&
         iWk < iTk,
-      { scene: count(SKILL, "跨派发前缀稳定"), iPtr, iCh, iWk, iTk },
+      { scene: count(SKILL, "跨派发尾块轨迹自动注入"), iPtr, iCh, iWk, iTk },
     );
   }
   ck.ok(
@@ -216,23 +231,136 @@ try {
       { regex: count(BGGATE, regexLine), hit: hit && hit[1] },
     );
   }
+  // W4-05/09 v1.1.1 W21 预写：按 DESIGN §2 契约名钉日志化锚；实现由 W20 并行车道落地，
+  // 本套此刻不要求其绿——绿验证在收尾波（实现与契约名不符只记 Return，不自行改锚）。
   ck.ok(
-    "W4-05 stop-check 抽取静态锚：标记对/两形制帽/字段白名单/subagent 守卫/coord-tail 落点",
-    count(STOP_CHECK, 'const COORD_TAIL_MARK = "<!-- orch-tail v1";') === 1 &&
+    "W4-05 stop-check 抽取/日志契约静态锚（W21 预写，绿验证在收尾波）：v2 标记对/两形制帽/字段白名单/subagent 守卫/日志文件名+封顶",
+    count(STOP_CHECK, "<!-- orch-tail v2") >= 1 &&
+      count(STOP_CHECK, "<!-- orch-tail-end -->") >= 1 &&
       count(STOP_CHECK, "full: { lines: 10, bytes: 900 }") === 1 &&
       count(STOP_CHECK, "short: { lines: 6, bytes: 400 }") === 1 &&
       count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];') === 1 &&
-      count(STOP_CHECK, '"context", "coord-tail.md"') === 1 &&
-      count(STOP_CHECK, '"sess_subagent_"') === 1,
+      count(STOP_CHECK, '"sess_subagent_"') === 1 &&
+      count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";') === 1 &&
+      count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;") === 1,
     {
-      mark: count(STOP_CHECK, "<!-- orch-tail v1"),
+      mark: count(STOP_CHECK, "<!-- orch-tail v2"),
+      close: count(STOP_CHECK, "<!-- orch-tail-end -->"),
       full: count(STOP_CHECK, "full: { lines: 10, bytes: 900 }"),
       short: count(STOP_CHECK, "short: { lines: 6, bytes: 400 }"),
       fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];'),
-      path: count(STOP_CHECK, '"context", "coord-tail.md"'),
       guard: count(STOP_CHECK, '"sess_subagent_"'),
+      logFile: count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";'),
+      logCap: count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;"),
     },
   );
+  ck.ok(
+    "W4-05b dispatch 工具注册锚（server）+ buildDispatchPrompt + runner 文件在位（W21 预写，绿验证在收尾波）",
+    count(SERVER, '[PREFIX + "dispatch"]: toolDispatch') === 1 &&
+      count(SERVER, 'name: PREFIX + "dispatch"') === 1 &&
+      count(SERVER, "function buildDispatchPrompt(") === 1 &&
+      fs.existsSync(path.join(PLUGIN_DIR, "hooks", "dispatch-runner.mjs")),
+    {
+      handler: count(SERVER, '[PREFIX + "dispatch"]: toolDispatch'),
+      def: count(SERVER, 'name: PREFIX + "dispatch"'),
+      build: count(SERVER, "function buildDispatchPrompt("),
+      runner: fs.existsSync(path.join(PLUGIN_DIR, "hooks", "dispatch-runner.mjs")),
+    },
+  );
+  ck.ok(
+    "W4-07 stop-check 撤译零残留（v1.1.1 W8）：精简态标识符/函数名全零（COORD_TAIL_COMPACT|coordTailCompact|coordTailClip|coordTailVersionNewer|coordTailStale）",
+    count(STOP_CHECK, "COORD_TAIL_COMPACT") === 0 &&
+      count(STOP_CHECK, "coordTailCompact") === 0 &&
+      count(STOP_CHECK, "coordTailClip") === 0 &&
+      count(STOP_CHECK, "coordTailVersionNewer") === 0 &&
+      count(STOP_CHECK, "coordTailStale") === 0,
+    {
+      constants: count(STOP_CHECK, "COORD_TAIL_COMPACT"),
+      compact: count(STOP_CHECK, "coordTailCompact"),
+      clip: count(STOP_CHECK, "coordTailClip"),
+      versionNewer: count(STOP_CHECK, "coordTailVersionNewer"),
+      stale: count(STOP_CHECK, "coordTailStale"),
+    },
+  );
+  // W21 注入面语义锁：PL-10 注入=启动器自动（轨迹置顶→digest 条件节→persona→指针+CONTRACT），
+  // 日志存全量尾块（含协议行）/注入面去协议行；粘贴/共享头/逐字复用语汇零残留。
+  const PL10 = SKILL.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
+  ck.ok(
+    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21）：轨迹置顶≤10 块去 ts/seq 旧→新/digest 条件节机器组装/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
+    PL10.includes("注入=启动器自动") &&
+      PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新，置顶最前）") &&
+      PL10.includes("digest 条件节（机器组装，Q8=a") &&
+      PL10.includes("persona 原型正文") &&
+      PL10.includes("指针句+CONTRACT 三行") &&
+      PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）") &&
+      PL10.includes("注入面去协议行裸块（Q6）") &&
+      PL10.includes("主控零组装、零转译") &&
+      count(SKILL, "派发首条消息尾块轨迹节") >= 1 &&
+      count(SKILL, "粘贴") === 0 &&
+      count(SKILL, "共享头") === 0 &&
+      count(SKILL, "逐字复用") === 0 &&
+      count(SKILL, "精简态") === 0 &&
+      count(SKILL, "compact") === 0 &&
+      count(SKILL, "stale") === 0,
+    {
+      autoInject: PL10.includes("注入=启动器自动"),
+      trajectory: PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新，置顶最前）"),
+      digest: PL10.includes("digest 条件节（机器组装，Q8=a"),
+      fullLog: PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）"),
+      bareInject: PL10.includes("注入面去协议行裸块（Q6）"),
+      zeroAssembly: PL10.includes("主控零组装、零转译"),
+      fence: count(SKILL, "派发首条消息尾块轨迹节"),
+      residue: { paste: count(SKILL, "粘贴"), sharedHead: count(SKILL, "共享头"), verbatimReuse: count(SKILL, "逐字复用"), jingjian: count(SKILL, "精简态"), compact: count(SKILL, "compact"), stale: count(SKILL, "stale") },
+    },
+  );
+  // W21 日志保留链：抽取/解析/渲染/原子写/日志末条全形基线；判旧守卫（(ts,seq)/coordTailRead）
+  // 随 append 无判旧结构性删除；三遗留清理 helper 在位。绿验证在收尾波（W20 并行车道）。
+  // cleanup helper 函数体 = 三遗留文件名的唯一合法字面量持有者（seed 借 dryRun 同源解析）。
+  const cleanupAt = STOP_CHECK.indexOf("function coordTailCleanupLegacy(");
+  const cleanupEnd = cleanupAt >= 0 ? STOP_CHECK.indexOf("\n}", cleanupAt) : -1;
+  const CLEANUP_BODY = cleanupAt >= 0 ? STOP_CHECK.slice(cleanupAt, cleanupEnd >= 0 ? cleanupEnd + 2 : STOP_CHECK.length) : "";
+  const STOP_NO_CLEANUP = cleanupAt >= 0 ? STOP_CHECK.slice(0, cleanupAt) + STOP_CHECK.slice(cleanupEnd >= 0 ? cleanupEnd + 2 : STOP_CHECK.length) : STOP_CHECK;
+  ck.ok(
+    "W4-09 日志保留链与三遗留清理（W21 预写，绿验证在收尾波）：LastBlock/Parse/Render/Write/LogLastFull/Merge 六函数 + 判旧守卫与旧读函数零残留 + 三遗留于 cleanup helper 内各 1 处",
+    count(STOP_CHECK, "function coordTailLastBlock(") === 1 &&
+      count(STOP_CHECK, "function coordTailParse(") === 1 &&
+      count(STOP_CHECK, "function coordTailRender(") === 1 &&
+      count(STOP_CHECK, "function coordTailWrite(") === 1 &&
+      count(STOP_CHECK, "function coordTailLogLastFull(") === 1 &&
+      count(STOP_CHECK, "function coordTailMerge(") === 1 &&
+      count(STOP_CHECK, "function coordTailCleanupLegacy(") === 1 &&
+      count(STOP_CHECK, "function coordTailRead(") === 0 &&
+      count(STOP_CHECK, "const tsAdvanced =") === 0 &&
+      count(STOP_CHECK, "seq 非递增（${parsed.seq} ≤ ${prevSeq}）且 ts 未更新，本轮丢弃") === 0 &&
+      count(CLEANUP_BODY, "coord-tail.compact.md") === 1 &&
+      count(CLEANUP_BODY, "coord-tail.compact.stale") === 1 &&
+      count(CLEANUP_BODY, "coord-tail.md") === 1,
+    {
+      funcs: ["coordTailLastBlock", "coordTailParse", "coordTailRender", "coordTailWrite", "coordTailLogLastFull", "coordTailMerge"].map((f) => [f, count(STOP_CHECK, "function " + f + "(")]),
+      oldRead: count(STOP_CHECK, "function coordTailRead("),
+      composite: count(STOP_CHECK, "const tsAdvanced ="),
+      stderr: count(STOP_CHECK, "seq 非递增（${parsed.seq} ≤ ${prevSeq}）且 ts 未更新，本轮丢弃"),
+      cleanup: count(STOP_CHECK, "function coordTailCleanupLegacy("),
+      legacyNames: { compact: count(CLEANUP_BODY, "coord-tail.compact.md"), stale: count(CLEANUP_BODY, "coord-tail.compact.stale"), old: count(CLEANUP_BODY, "coord-tail.md") },
+    },
+  );
+  {
+    // coord-tail.md 零残留（SKILL 全域；stop-check 排除 cleanup helper 函数体——三遗留删除的唯一合法字面量）。
+    ck.ok(
+      "W4-10 coord-tail.md 零残留（W21 预写，绿验证在收尾波）：SKILL 全域 0 ∧ stop-check 除 cleanup helper 外 0 ∧ coord-tail-log.md 为正名",
+      count(SKILL, "coord-tail.md") === 0 &&
+        count(STOP_NO_CLEANUP, "coord-tail.md") === 0 &&
+        count(CLEANUP_BODY, "coord-tail.md") === 1 &&
+        count(SKILL, "coord-tail-log.md") >= 1 &&
+        count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";') === 1,
+      {
+        skillOld: count(SKILL, "coord-tail.md"),
+        skillNew: count(SKILL, "coord-tail-log.md"),
+        stopOutsideCleanup: count(STOP_NO_CLEANUP, "coord-tail.md"),
+        cleanupBody: count(CLEANUP_BODY, "coord-tail.md"),
+      },
+    );
+  }
 
   // ---------- A-v0110-W3：v1.1 A5/digest 静态回潮防钉（v1.1 W3 施工面） ----------
   // 回执/list/get/mailbox 行为锁在 crv2/crv3（N1-N7）；本组只钉 server 源码字面量

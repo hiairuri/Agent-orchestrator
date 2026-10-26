@@ -57,15 +57,15 @@ export const RECYCLE_LIST = [
   {
     id: "R-1",
     file: FILES.skill,
-    anchor: "宿主快照缺陷期间一律走第 8 章主形态",
-    recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记",
+    anchor: "宿主快照缺陷期间插件角色 typed 派发不可用",
+    recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记（headless 主形态不变，RP-1 联动）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
   {
     id: "R-2",
     file: FILES.skill,
-    anchor: "宿主快照缺陷存在期间所有插件角色派发一律用它",
+    anchor: "宿主侧一律走 GP+persona 注入",
     recycleAction: "改写为「快照缺陷已修复（<宿主版本>），typed 与 GP 双形态并存」；「report 全名保留不删」为永久不变量条款，不在回收范围",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",

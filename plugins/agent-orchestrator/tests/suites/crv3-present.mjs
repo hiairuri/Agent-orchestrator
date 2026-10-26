@@ -250,7 +250,7 @@ try {
 
   // ---------- 不变量 ----------
   const tl = await s.tools();
-  ck.ok("invariant tools/list = 11（v0.6 A6 probe 转正口径）", Array.isArray(tl.tools) && tl.tools.length === 11, tl.tools && tl.tools.length);
+  ck.ok("invariant tools/list = 12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch 口径）", Array.isArray(tl.tools) && tl.tools.length === 12, tl.tools && tl.tools.length);
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));
 } finally {
