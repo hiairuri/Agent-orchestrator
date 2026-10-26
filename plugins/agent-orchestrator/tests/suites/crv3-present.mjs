@@ -18,7 +18,6 @@ import { postures } from "../harness/fixture-board.mjs";
 
 const ck = new Checker("crv3-present");
 const T = makeTempRoot({ prefix: "orch-crv3-", root: parseRootArg() || undefined });
-const HINT = "details 已截断（帽 2000 字）：长文应写文件走 artifacts，邮箱只传摘要";
 
 // ---- 0.4.x 旧板种子（无 scope/manifest/t1_head 键）
 fs.writeFileSync(path.join(T.root, "board.json"), JSON.stringify({
@@ -95,7 +94,8 @@ try {
   ck.ok("M-05 转串行后同空（upsert 亦静默）", !("scope_warnings" in upM2b), upM2b.scope_warnings);
   // CRV3-02：sweep 自动解锁
   await board({ action: "upsert", mission: { id: "m1", status: "done" } });
-  const g2 = await board({ action: "get", mission_id: "m2" });
+  // v1.1 W3（A5-D）：get 默认 compact 裁 timeline/original_prompt——考古面走 view:"full"。
+  const g2 = await board({ action: "get", mission_id: "m2", view: "full" });
   ck.ok("CRV3-02 sweep 解锁 → ready", g2.status === "ready", g2.status);
   ck.ok("CRV3-02 timeline 含 unlock", Array.isArray(g2.timeline) && g2.timeline.some((e) => e.event === "unlock"));
   // CRV3-03：哨兵口径回归（引用 A-v040-D08）
@@ -138,21 +138,38 @@ try {
   const cl = await board({ action: "claim", mission_id: "m-c", worker: "wc" });
   ck.ok("V27 claim 小对象无 t1_head", cl && !("t1_head" in cl), Object.keys(cl));
 
-  // ---------- CR-V28 mailbox 帽 ----------
+  // ---------- CR-V28 mailbox details 指针化（v1.1 W3 A5-E；2000 字呈现帽退役） ----------
   seedMission({ id: "m8", status: "running" });
   const D = "x".repeat(2000) + "y".repeat(3000);
   const rp8 = await report({ mission_id: "m8", worker: "w8", kind: "done", summary: "done m8", details: D });
+  // N6 三旗标（list 紧凑行）：question / unacked / unread
+  const ls8 = await board({ action: "list" });
+  const r8 = ls8.missions.find((r) => r.id === "m8");
+  ck.ok("N6 list 三旗标派生（question=false / unacked=true / unread=1）",
+    !!r8 && r8.question === false && r8.unacked === true && r8.unread === 1,
+    r8 && { q: r8.question, ua: r8.unacked, un: r8.unread });
   const pk = await mailbox({ action: "peek", mission_id: "m8" });
   ck.ok("V28 peek 不含 details", pk.events.length === 1 && !("details" in pk.events[0]), pk.events[0] && Object.keys(pk.events[0]));
   const rd = await mailbox({ action: "read", mission_id: "m8" });
   const ev = rd.events[0];
-  // v0.6 (V6-18, INJ-04)：details 帽 DETAILS_MAX_CHARS=4000 正落 spool 写入点——
-  // 存储面 5000→截 4000，read 呈现标记随之 [截断于4000字]（主控 2026-10-15 批复授权适配）
-  ck.ok("V28 read details=头 2000+标记+提示句逐字", ev.details === D.slice(0, 2000) + "…[截断于4000字]" + HINT, ev.details.slice(1990) + "...");
-  const spoolEv = JSON.parse(fs.readFileSync(path.join(T.root, "spool", "m8", "read", rp8.event_id + ".json"), "utf8"));
-  ck.ok("V28 spool 事件保存储帽 4000 字（V6-18）", spoolEv.details === D.slice(0, 4000) && spoolEv.details.length === 4000, spoolEv.details.length);
+  // v1.1 W3（A5-E, DESIGN §4.5）：details_head ≤160 + details_path 指针 + 指针化 HINT；
+  // 长文正文不再进主控面（spool 存证不动）。
+  const HINT_POINTER = "details 全文见 details_path（长文应写文件走 artifacts，邮箱只传摘要）";
+  ck.ok("V28 read details 指针化（details_head 头160 + details_path + 指针 HINT，无正文键）",
+    !!ev && !("details" in ev) && ev.details_head === D.slice(0, 160) &&
+      typeof ev.details_path === "string" && ev.details_path.includes("spool") &&
+      ev.details_hint === HINT_POINTER,
+    ev && { keys: Object.keys(ev), headLen: ev.details_head && ev.details_head.length, path: ev.details_path, hint: ev.details_hint });
+  const spoolAbs = path.isAbsolute(ev.details_path) ? ev.details_path : path.join(T.root, ev.details_path);
+  const spoolEv = JSON.parse(fs.readFileSync(spoolAbs, "utf8"));
+  ck.ok("V28 spool 事件保存储帽 4000 字（V6-18 不动）", spoolEv.details === D.slice(0, 4000) && spoolEv.details.length === 4000, spoolEv.details.length);
+  // details_path 必须指向消费后的 read/ 存证（非 unread 或悬空）
+  ck.ok("V28 details_path 指向已消费 spool read 存证", spoolAbs.includes(path.sep + "read" + path.sep) && (spoolEv.id ?? spoolEv.event_id) === rp8.event_id, { path: spoolAbs, id: spoolEv.id ?? spoolEv.event_id, want: rp8.event_id });
   const rd2 = await mailbox({ action: "read", mission_id: "m8" });
   ck.ok("V28 二次 read consumed=0", rd2.consumed === 0, rd2.consumed);
+  const ls8b = await board({ action: "list" });
+  const r8b = ls8b.missions.find((r) => r.id === "m8");
+  ck.ok("N6 read 后 list 行 unread 归零", !!r8b && r8b.unread === 0, r8b && r8b.unread);
 
   // ---------- M-06 warn_scope 分键 ----------
   seedMission({ id: "m6", status: "running", scope_paths: ["C:/proj/src/"] });
@@ -163,9 +180,77 @@ try {
   const g6v = await board({ action: "get", mission_id: "m6" });
   ck.ok("E6 scope_violations 自然透出", JSON.stringify(g6v.scope_violations) === JSON.stringify(["C:/other/rogue.ts"]), g6v.scope_violations);
 
+  // ---------- v1.1 W3 A5 新锁 N1/N2/N3/N7（DESIGN §4.6；先加新锁再收旧面） ----------
+  {
+    // N1：list 紧凑行白名单恰含 §4.1 字段集，且剔除面键全缺席
+    const lsW = await board({ action: "list" });
+    const rW = lsW.missions.find((r) => r.id === "m7");
+    const WANT = ["artifacts_n", "id", "output_files_n", "question", "scope_paths", "status", "strict_scope", "t1_head", "title", "unacked", "unread"].sort();
+    ck.ok("N1 list 紧凑行白名单恰含 §4.1 字段集（含三旗标/计数/scope 摘要）",
+      !!rW && JSON.stringify(Object.keys(rW).sort()) === JSON.stringify(WANT), rW && Object.keys(rW).sort());
+    const BANNED = ["timeline", "original_prompt", "claim", "dispatch", "pack", "manifest", "wake_failure", "ack", "blocked", "has_question", "owner", "updated_at"];
+    ck.ok("N1 list 行无内部态/考古面键（字段不删，仅默认面剔除）",
+      !!rW && BANNED.every((k) => !(k in rW)), rW && BANNED.filter((k) => k in rW));
+    ck.ok("N1 title 原样带出（裁的是字段非字符）", !!rW && rW.title === "untitled", rW && rW.title);
+    // N2：upsert 最小回执 + 条件告警键保留（本调用无告警 → 恰三键）
+    const upMin = await board({ action: "upsert", mission: { id: "m-receipt", title: "回执探针" } });
+    ck.ok("N2 upsert 回执恰 {ok,id,status}（无 mission 整对象）",
+      JSON.stringify(Object.keys(upMin).sort()) === JSON.stringify(["id", "ok", "status"]) && upMin.ok === true && upMin.id === "m-receipt" && upMin.status === "drafted",
+      upMin);
+    // N2 告警键保留腿：未知键 ignored_keys+note 仍在最小回执上
+    const upIgn2 = await board({ action: "upsert", mission: { id: "m-receipt2", title: "x", bogus: 1 } });
+    ck.ok("N2 条件告警键保留（ignored_keys+note 同回执）",
+      Array.isArray(upIgn2.ignored_keys) && upIgn2.ignored_keys.includes("bogus") && typeof upIgn2.note === "string" && !("mission" in upIgn2),
+      upIgn2);
+    // N3：ack 回执 {ok,id,status}
+    const ackR = await board({ action: "ack", mission_id: "m7", note: "seen again" });
+    ck.ok("N3 ack 回执恰 {ok,id,status}（无 mission 整对象）",
+      JSON.stringify(Object.keys(ackR).sort()) === JSON.stringify(["id", "ok", "status"]) && ackR.ok === true && ackR.id === "m7" && ackR.status === "done",
+      ackR);
+    // N7：get 默认 compact 裁 timeline/original_prompt（内部态保留）+ view:"full" 逐字回放 + 非法 view 拒绝
+    const storedM2 = rawBoard().missions.find((m) => m.id === "m2");
+    const gC = await board({ action: "get", mission_id: "m2" });
+    ck.ok("N7 get 默认 compact 裁 timeline/original_prompt",
+      !("timeline" in gC) && !("original_prompt" in gC) && gC.status === "ready", Object.keys(gC));
+    ck.ok("N7 get compact 保留内部态（claim/dispatch/manifest/wake_failure/ack 键面）",
+      ["claim", "dispatch", "wake_failure", "ack"].every((k) => k in gC), Object.keys(gC));
+    const gF = await board({ action: "get", mission_id: "m2", view: "full" });
+    ck.ok("N7 view:\"full\" 逐字回放 timeline/original_prompt（与板内一致）",
+      JSON.stringify(gF.timeline) === JSON.stringify(storedM2.timeline) && (gF.original_prompt ?? "") === (storedM2.original_prompt ?? ""),
+      { n: gF.timeline && gF.timeline.length });
+    const badView = await s.call("board", { action: "get", mission_id: "m2", view: "bogus" });
+    ck.ok("N7 非法 view → isError（报错拒绝不静默回落）", badView.isError === true, badView.text.slice(0, 120));
+  }
+
+  // ---------- v1.1 W6 QA P2-b：坏 id 行不得使 board list 整体失败（1.0.0 回归） ----------
+  {
+    const BAD_IDS = ["bad/id", "legacy big id", "con", "m-" + "x".repeat(196)];
+    const goodBefore = (await board({ action: "list" })).missions.find((r) => r.id === "m7");
+    for (const id of BAD_IDS) seedMission({ id, status: "drafted" });
+    let lsBad = null;
+    let badErr = null;
+    try {
+      lsBad = await board({ action: "list" });
+    } catch (e) {
+      badErr = e;
+    }
+    const badRows = lsBad && Array.isArray(lsBad.missions) ? lsBad.missions : [];
+    ck.ok("W6-P2b 坏 id 行存在时 board list 仍 ok（不整表失败，坏行 unread 缺省 0）",
+      Boolean(lsBad) && Array.isArray(lsBad.missions) &&
+        BAD_IDS.every((id) => {
+          const r = badRows.find((x) => x.id === id);
+          return Boolean(r) && r.unread === 0;
+        }),
+      badErr ? String(badErr).slice(0, 160) : BAD_IDS.map((id) => { const r = badRows.find((x) => x.id === id); return r && r.unread; }));
+    const rGood = badRows.find((r) => r.id === "m7");
+    ck.ok("W6-P2b 坏 id 行在位时好行数据逐字不变（m7 行与坏行落地前一致）",
+      Boolean(rGood) && Boolean(goodBefore) && JSON.stringify(rGood) === JSON.stringify(goodBefore),
+      rGood && { status: rGood.status, title: rGood.title, unread: rGood.unread });
+  }
+
   // ---------- 不变量 ----------
   const tl = await s.tools();
-  ck.ok("invariant tools/list = 11（v0.6 A6 probe 转正口径）", Array.isArray(tl.tools) && tl.tools.length === 11, tl.tools && tl.tools.length);
+  ck.ok("invariant tools/list = 12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch 口径）", Array.isArray(tl.tools) && tl.tools.length === 12, tl.tools && tl.tools.length);
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));
 } finally {

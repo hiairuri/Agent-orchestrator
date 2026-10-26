@@ -39,6 +39,10 @@ const FILES = {
   agentScout: path.join(PLUGIN_DIR, "agents", "orch-scout.md"),
   agentReviewer: path.join(PLUGIN_DIR, "agents", "orch-reviewer.md"),
   agentGleaner: path.join(PLUGIN_DIR, "agents", "orch-gleaner.md"),
+  // v1.1.2 I1 双新模板入扫（D2 §6 断言处置表：A-COMPAT-1/A-ROLE-DISALLOWED 扩域——策划/计划
+  // frontmatter 形状与四角色同锁：tools 含 report 全名、disallowedTools 含三沙箱面全名）。
+  agentPlanner: path.join(PLUGIN_DIR, "agents", "orch-planner.md"),
+  agentPlan: path.join(PLUGIN_DIR, "agents", "orch-plan.md"),
   pluginJson: path.join(PLUGIN_DIR, ".zcode-plugin", "plugin.json"),
   agentsMd: path.join(REPO_ROOT, "AGENTS.md"),
   c6Findings: path.join(REPO_ROOT, "designs", "agent-orchestrator-v0.9-C6-findings.md"),
@@ -57,15 +61,15 @@ export const RECYCLE_LIST = [
   {
     id: "R-1",
     file: FILES.skill,
-    anchor: "宿主快照缺陷期间一律走第 8 章主形态",
-    recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记",
+    anchor: "宿主快照缺陷期间插件角色 typed 派发不可用",
+    recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记（headless 主形态不变，RP-1 联动）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
   {
     id: "R-2",
     file: FILES.skill,
-    anchor: "宿主快照缺陷存在期间所有插件角色派发一律用它",
+    anchor: "宿主侧一律走 GP+persona 注入",
     recycleAction: "改写为「快照缺陷已修复（<宿主版本>），typed 与 GP 双形态并存」；「report 全名保留不删」为永久不变量条款，不在回收范围",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
@@ -134,6 +138,8 @@ function main() {
     ["orch-worker.md", FILES.agentWorker],
     ["orch-scout.md", FILES.agentScout],
     ["orch-reviewer.md", FILES.agentReviewer],
+    ["orch-planner.md", FILES.agentPlanner],
+    ["orch-plan.md", FILES.agentPlan],
   ];
   const agentTexts = agentFiles.map(([name, p]) => [name, readFile(p)]);
   const pj = JSON.parse(readFile(FILES.pluginJson));
@@ -153,7 +159,15 @@ function main() {
   subGroup(ck, "A-SKILL-3", "SKILL.md §9（坑位清单）", skill9, { need: [SNAPSHOT_ERR, "校验面", "执行面", "回退", "勿重试"] }, "E-05");
   // A-SKILL-4 语义更新（W2 重排裁决，策划档 §4.2）：原钉 §3 模板内「## REPORT（双通道）」示例节；
   // buildPackMarkdown 实际不产出该节（Stage A §0 实测），W2 删幻影示例并改钉「模板同构 + 无幻影节」。
-  subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, { need: ["## CONTRACT（三行契约", "prompt_template"], ban: ["## REPORT（双通道）"] }, "E-06");
+  // v1.1 W3（C 面）：`prompt_template` 回显已从 context_pack 返回删除（回执=包 CONTRACT 单源；
+  // N4 白名单锁在 crv2-pack）。本锚改为「包 CONTRACT 三行结构」——不依赖派发模板正文措辞；
+  // SKILL §2/§3 的 prompt_template 文案改写需 SKILL.md（W3 写面外，主控复核项）随波同步。
+  // v1.1 W4（A1/Q5a）：CONTRACT 三行自派发 prompt 头移尾块——§3 增钉「尾块」措辞与尾块模板，
+  // §1 场景表 PL-10 行 + §16 PL-10 本体由 po-static W4-01/02 锁。
+  subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, {
+    need: ["## CONTRACT（三行契约", "也出现在派发 prompt 尾块", "**派发 prompt 尾块**", "三行契约唯一权威=包 CONTRACT", "[channel] {mission_id}", "[worker] {worker 名，如 orch-worker#1}", "[token] {token}"],
+    ban: ["## REPORT（双通道）"],
+  }, "E-06");
   subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona"] }, "E-07");
   subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
   subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");
@@ -164,7 +178,7 @@ function main() {
   subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
   subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
 
-  { // A-COMPAT-1：三角色 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护）
+  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
     const bad = [];
     for (const [name, text] of agentTexts) {
       const line = frontmatterLine(text, "tools");
@@ -175,7 +189,7 @@ function main() {
       bad.length ? `A-COMPAT-1 不变量受损: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-15` : "");
   }
 
-  { // A-ROLE-DISALLOWED：三角色 disallowedTools 行均含 sandbox_apply/sandbox_discard/agent_harvest 全名（E-16）
+  { // A-ROLE-DISALLOWED：角色模板 disallowedTools 行均含 sandbox_apply/sandbox_discard/agent_harvest 全名（E-16；v1.1.2 I1 起五文件）
     const tails = ["sandbox_apply", "sandbox_discard", "agent_harvest"].map((t) => `mcp__plugin_agent-orchestrator_orch__${t}`);
     const bad = [];
     for (const [name, text] of agentTexts) {
@@ -183,7 +197,7 @@ function main() {
       const miss = firstMissing(line, tails);
       if (miss) bad.push(`${name} disallowedTools 缺 ${miss}`);
     }
-    ck.ok("A-ROLE-DISALLOWED @ agents/*.md disallowedTools ×3", bad.length === 0,
+    ck.ok("A-ROLE-DISALLOWED @ agents/*.md disallowedTools ×5", bad.length === 0,
       bad.length ? `A-ROLE-DISALLOWED 缺失子串: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-16` : "");
   }
 

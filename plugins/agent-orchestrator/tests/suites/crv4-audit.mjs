@@ -49,7 +49,7 @@ try {
   // ---- invariants
   {
     const tools = (await s.tools()).tools || [];
-    ck.ok("INV tools-list=11（v0.6 A6 probe 转正口径）", tools.length === 11, String(tools.length));
+    ck.ok("INV tools-list=12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch 口径）", tools.length === 12, String(tools.length));
     const rep = tools.find((t) => t.name.endsWith("report"));
     ck.ok("INV schema files_touched（maxItems=50+description 逐字）", rep.inputSchema.properties.files_touched?.maxItems === 50 &&
       rep.inputSchema.properties.files_touched?.description === "Changed paths; audited against the mission scope for milestone/done only");
@@ -73,7 +73,7 @@ try {
   }
   // ---- CRV4-03
   {
-    const mm = resultText(await get("m3"));
+    const mm = resultText(await s.call("board", { action: "get", mission_id: "m3", view: "full" }));
     ck.ok("CRV4-03 scope_violations 恰 [README.md]", JSON.stringify(mm.scope_violations) === JSON.stringify(["README.md"]), mm.scope_violations);
     ck.ok("CRV4-03 timeline 审计事件", (mm.timeline || []).some((t) => t.event === "scope_violation" && String(t.summary).includes("README.md")));
     const list = resultText(await s.call("board", { action: "list" }));

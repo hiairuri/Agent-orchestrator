@@ -4,6 +4,7 @@
  * 被测六处实现（五脚本 verbatim twin + stop-check 镜像路径，行为锁定、零代码共享）：
  *   bg-gate / bg-sentinel / journal / session-start 各自 locateRoot
  *   + stop-check 主清点与镜像记录两条路径（第六处原内联副本已收敛至同文件 locateRoot）
+ *   v1.1.1 W22 增祖先回退矩阵端口；W24 ③a/③b 增五处 twin 一致性锁与 stop-check 祖先回退腿。
  * 另含 server 发布/自愈侧行（V6-12 归簇 A）：行为探测后才启用——A1 并行施工未落地时
  *   该组整体挂起为一条非阻塞断言，落地后自动转为真实断言（impl-plan §5.3 G 门前回扫）。
  *
@@ -25,6 +26,7 @@
  * 运行方式：node tests/suites/root-contract.mjs（run-all 注册行由主控 G 卡统一收口）
  * 前置：node >= 20；无 git/网络依赖；总时长 ~15s；Windows/linux 均可。
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -107,13 +109,50 @@ const cleanArtifacts = () => {
   }
 };
 
+/* ---- v1.1.1 W22 祖先回退夹具（cwd 漂移防护；独立树，不扰动 P1..P10 的 DEF/CUSTOM） ----
+ *   ANC_PROJ：合法祖先项目根（board.json + root-id）；ANC_SUB：被宿主同步进子目录后的 cwd；
+ *   ANC_TOP：子目录默认根（无板无 root-id → 触发祖先回退）。
+ *   ANC_NOID：仅 board.json 无 root-id 的祖先（不命中条件的反证）；ANC_NOID_SUB：其深层子目录。 */
+const ANC_PROJ = path.join(BASE.root, "anc", "proj");
+const ANC_ROOT = path.join(ANC_PROJ, ".zcode", "orchestrator");
+const ANC_SUB = path.join(ANC_PROJ, "plugins", "x");
+const ANC_TOP = path.join(ANC_SUB, ".zcode", "orchestrator");
+const ANC_NOID = path.join(BASE.root, "anc-noid");
+const ANC_NOID_ROOT = path.join(ANC_NOID, ".zcode", "orchestrator");
+const ANC_NOID_SUB = path.join(ANC_NOID, "proj", "deep", "sub");
+const ANC_NOID_TOP = path.join(ANC_NOID_SUB, ".zcode", "orchestrator");
+const ENV_ANC = { ZCODE_PROJECT_DIR: ANC_SUB }; // env 态（宿主注入子目录）
+const ENV_ANC_CWD = { ZCODE_PROJECT_DIR: "" }; // 仅 cwd 态（遮蔽外部 env，走 process.cwd()）
+fs.mkdirSync(ANC_ROOT, { recursive: true });
+fs.mkdirSync(ANC_SUB, { recursive: true });
+fs.writeFileSync(path.join(ANC_ROOT, "root-id"), RID + "\n");
+fs.writeFileSync(
+  path.join(ANC_ROOT, "board.json"),
+  JSON.stringify({
+    version: 2,
+    updated_at: new Date().toISOString(),
+    missions: [{ id: "m-anc", title: "ancestor-root", status: "running", original_prompt: "anc-prompt", dispatch: {} }],
+  }) + "\n",
+);
+fs.mkdirSync(ANC_NOID_ROOT, { recursive: true });
+fs.writeFileSync(path.join(ANC_NOID_ROOT, "board.json"), JSON.stringify({ version: 2, missions: [] }) + "\n");
+fs.mkdirSync(ANC_NOID_SUB, { recursive: true });
+/** 祖先树观测产物清理（root-id/board.json 不动） */
+const cleanAnc = () => {
+  for (const root of [ANC_ROOT, ANC_TOP, ANC_NOID_ROOT, ANC_NOID_TOP]) {
+    rmrf(path.join(root, "context"));
+    rmrf(path.join(root, "sentinel"));
+    rmrf(path.join(root, "sentinel-hint-stamp"));
+  }
+};
+
 /* ---------------- runners（hook 黑盒） ---------------- */
 const journalAt = (root) => fs.existsSync(path.join(root, "context", "journal-s-j.jsonl"));
 const mirrorAt = (root) => fs.existsSync(path.join(root, "context", "journal-s-m.jsonl"));
 const stampAt = (root) => fs.existsSync(path.join(root, "sentinel-hint-stamp"));
-const runJournal = (env) =>
+const runJournal = (env, cwd = PROJ) =>
   runNode(path.join(HOOKS, "journal.mjs"), [], {
-    cwd: PROJ,
+    cwd,
     env,
     input: { hook_event_name: "UserPromptSubmit", session_id: "s-j", prompt: "contract-probe" },
   });
@@ -127,30 +166,30 @@ const runGate = (env) =>
       input: { tool_name: "Agent", tool_input: { prompt: "x".repeat(700), run_in_background: true } },
     },
   );
-const runSession = (env) =>
+const runSession = (env, cwd = PROJ) =>
   runNode(path.join(HOOKS, "session-start.mjs"), [], {
-    cwd: PROJ,
+    cwd,
     env,
     input: { hook_event_name: "SessionStart", session_id: "s-ss" },
   });
-const runStopMirror = (env) =>
+const runStopMirror = (env, cwd = PROJ) =>
   runNode(path.join(HOOKS, "stop-check.mjs"), ["--mirror", "on"], {
-    cwd: PROJ,
+    cwd,
     env,
     input: { hook_event_name: "Stop", session_id: "s-m", stop_hook_active: true, last_assistant_message: "mirror-probe" },
   });
-const runStopMain = (env) =>
+const runStopMain = (env, cwd = PROJ) =>
   runNode(path.join(HOOKS, "stop-check.mjs"), ["--mirror", "off"], {
-    cwd: PROJ,
+    cwd,
     env,
     input: { hook_event_name: "Stop", session_id: "s-x", stop_hook_active: false },
   });
 /** 拉起哨兵（无 --root，走 locateRoot）→ 等待预期根出现槽位 → 读槽位 doc → 收尸 */
-async function runSentinel(env, waitRoot) {
+async function runSentinel(env, waitRoot, cwd = PROJ) {
   const bg = captureBackground({
     script: process.execPath,
     args: [path.join(HOOKS, "bg-sentinel.mjs"), "--poll-sec", "1", "--stagger-sec", "0"],
-    cwd: PROJ,
+    cwd,
     env,
   });
   try {
@@ -314,6 +353,127 @@ async function runSentinel(env, waitRoot) {
   cleanArtifacts();
   const bad = runStopMain(ENV_FAKETMP);
   ck.ok("P10b v2 失配：stop-check 主清点回退后静默（默认根无板）", bad.stdout.trim() === "" && bad.stderr.includes("已回退默认根"), { stderr: bad.stderr.slice(0, 160) });
+}
+
+/* ================================================================== */
+/* W22 祖先回退（v1.1.1）：默认根无板无 root-id → 取最近合法祖先根        */
+/* 覆盖：env 态 / cwd 态双态命中、journal/session-start/bg-sentinel 三处、 */
+/*      祖先缺 root-id 不命中、默认根有 root-id 不回退、空指针回退同走祖先 */
+/* ================================================================== */
+{
+  // RC1 env 态（ZCODE_PROJECT_DIR 指向子目录 + cwd=子目录）：journal 落祖先根
+  cleanAnc();
+  const r1 = runJournal(ENV_ANC, ANC_SUB);
+  ck.ok("W22-RC1a env 态：祖先回退命中（journal 落祖先根，子目录默认根零写）", journalAt(ANC_ROOT) && !journalAt(ANC_TOP), { stderr: r1.stderr.slice(0, 160) });
+  ck.ok("W22-RC1b 祖先回退 stderr 一行告警且携解析根路径", r1.stderr.includes("定根回退") && r1.stderr.includes(ANC_ROOT), r1.stderr.slice(0, 200));
+  // RC2 仅 cwd 态（ZCODE_PROJECT_DIR 未注入 → process.cwd() = 子目录）
+  cleanAnc();
+  const r2 = runJournal(ENV_ANC_CWD, ANC_SUB);
+  ck.ok("W22-RC2a cwd 态：祖先回退命中（journal 落祖先根）", journalAt(ANC_ROOT) && !journalAt(ANC_TOP), { stderr: r2.stderr.slice(0, 160) });
+  // RC3 session-start 同规范
+  cleanAnc();
+  const s3 = runSession(ENV_ANC, ANC_SUB);
+  ck.ok("W22-RC3a session-start：读祖先根板（简报含 m-anc）", s3.stdout.includes("m-anc"), { out: s3.stdout.slice(0, 120), stderr: s3.stderr.slice(0, 160) });
+  // RC3b（v1.1.1 W24 ③c）：工作区锚提升——祖先回退命中后 coord-workspace.txt=祖先项目根，
+  // 不再是 cwd 子目录（否则 watcher 精确匹配 workspace-list 时 bridge-anchor-mismatch）
+  const ws3 = fs.readFileSync(path.join(ANC_ROOT, "sentinel", "coord-workspace.txt"), "utf8");
+  ck.ok("W24-RC3b session-start 工作区锚提升：祖先回退命中后 coord-workspace.txt=祖先项目根（非 cwd 子目录）",
+    ws3 === path.resolve(ANC_PROJ) + "\n" && ws3 !== path.resolve(ANC_SUB) + "\n",
+    { ws: ws3, stderr: s3.stderr.slice(0, 160) });
+  // RC4 bg-sentinel 同规范（无 --root 走 locateRoot）
+  cleanAnc();
+  const doc = await runSentinel(ENV_ANC, ANC_ROOT, ANC_SUB);
+  ck.ok("W22-RC4a bg-sentinel：槽位落祖先根且 root 字段=祖先根", doc && doc.root === ANC_ROOT && doc.slot === 0, { doc });
+  // RC5（v1.1.1 W24 ③b）stop-check 两条路径同规范祖先回退：主清点（env/cwd 双态）+ 镜像记录
+  cleanAnc();
+  const r5a = runStopMain(ENV_ANC, ANC_SUB);
+  ck.ok("W24-RC5a stop-check 主清点 env 态：祖先回退命中（读祖先根板 m-anc，子目录默认根零写）",
+    r5a.stdout.includes("收工前清点") && r5a.stdout.includes("m-anc") && !fs.existsSync(ANC_TOP),
+    { out: r5a.stdout.slice(0, 160), stderr: r5a.stderr.slice(0, 160) });
+  cleanAnc();
+  const r5b = runStopMain(ENV_ANC_CWD, ANC_SUB);
+  ck.ok("W24-RC5b stop-check 主清点 cwd 态：祖先回退命中（读祖先根板 m-anc）",
+    r5b.stdout.includes("m-anc") && !fs.existsSync(ANC_TOP), { out: r5b.stdout.slice(0, 160), stderr: r5b.stderr.slice(0, 160) });
+  cleanAnc();
+  const r5c = runStopMirror(ENV_ANC, ANC_SUB);
+  ck.ok("W24-RC5c stop-check 镜像记录路径：祖先回退命中（journal 落祖先根，子目录零写）",
+    mirrorAt(ANC_ROOT) && !mirrorAt(ANC_TOP), { stderr: r5c.stderr.slice(0, 160) });
+  // RC6 祖先缺 root-id → 不命中（防误判条件实证；静默默认根）
+  const r6 = runJournal({ ZCODE_PROJECT_DIR: ANC_NOID_SUB }, ANC_NOID_SUB);
+  ck.ok("W22-RC6a 祖先缺 root-id：不命中（journal 落子目录默认根）", journalAt(ANC_NOID_TOP) && !journalAt(ANC_NOID_ROOT), { stderr: r6.stderr.slice(0, 160) });
+  ck.ok("W22-RC6b 祖先缺 root-id：无回退告警（静默默认根）", !r6.stderr.includes("定根回退"), r6.stderr.slice(0, 160));
+  // RC7 默认根有 root-id（新项目还没板）→ 不回退（防把新项目误判到父项目）
+  fs.mkdirSync(ANC_TOP, { recursive: true });
+  fs.writeFileSync(path.join(ANC_TOP, "root-id"), RID + "\n");
+  cleanAnc();
+  const r7 = runJournal(ENV_ANC, ANC_SUB);
+  ck.ok("W22-RC7a 默认根有 root-id（无板）：不回退（journal 落默认根）", journalAt(ANC_TOP) && !journalAt(ANC_ROOT), { stderr: r7.stderr.slice(0, 160) });
+  rmrf(ANC_TOP);
+  // RC8 空指针（≈无指针）回退同样走祖先回退
+  fs.mkdirSync(ANC_TOP, { recursive: true });
+  fs.writeFileSync(path.join(ANC_TOP, "root.txt"), "");
+  cleanAnc();
+  const r8 = runJournal(ENV_ANC, ANC_SUB);
+  ck.ok("W22-RC8a 空指针回退：亦采用祖先根（journal 落祖先根 + 告警）", journalAt(ANC_ROOT) && !journalAt(ANC_TOP) && r8.stderr.includes("定根回退"), { stderr: r8.stderr.slice(0, 160) });
+  rmrf(ANC_TOP);
+  cleanAnc();
+}
+
+/* ================================================================== */
+/* W24 ③a 五处 root 块 twin 一致性（v1.1.1 CONS 收尾波）                */
+/* 硬标准=可执行代码逐字一致；注释面同波统一（祖先回退块整段同文）        */
+/* ================================================================== */
+{
+  const HOOK_NAMES = ["bg-gate", "bg-sentinel", "journal", "session-start", "stop-check"];
+  const extractRootBlock = (src) => {
+    const start = src.indexOf("/* --- root-id 契约校验定根");
+    const lr = src.indexOf("function locateRoot(", start);
+    if (start < 0 || lr < 0) return null;
+    let i = src.indexOf("{", lr);
+    let depth = 0;
+    let end = -1;
+    for (; i >= 0 && i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    return end > 0 ? src.slice(start, end) : null;
+  };
+  // 可执行代码口径：去块注释/行注释 + 行首尾空白与空行归一（CRLF 已在读入时归一）
+  const execOnly = (s) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join("\n");
+  const rawByHook = {};
+  const execHash = {};
+  for (const name of HOOK_NAMES) {
+    const src = fs.readFileSync(path.join(HOOKS, name + ".mjs"), "utf8").replace(/\r\n/g, "\n");
+    const block = extractRootBlock(src);
+    rawByHook[name] = block;
+    execHash[name] =
+      block == null ? "MISSING" : crypto.createHash("sha256").update(execOnly(block)).digest("hex");
+  }
+  const execUniq = new Set(Object.values(execHash));
+  ck.ok(
+    "W24-TWIN-01 五处 root 块可执行代码逐字一致（去注释+去空行归一后 sha256 全同）",
+    execUniq.size === 1 && !Object.values(execHash).includes("MISSING"),
+    execHash,
+  );
+  const rawUniq = new Set(Object.values(rawByHook));
+  ck.ok(
+    "W24-TWIN-02 五处 twin 注释统一：祖先回退块整段（注释+代码）逐字同文，CRLF 归一后逐字节相等",
+    rawUniq.size === 1 && !Object.values(rawByHook).includes(null),
+    { sizes: Object.fromEntries(HOOK_NAMES.map((n) => [n, rawByHook[n] == null ? "MISSING" : Buffer.byteLength(rawByHook[n])])) },
+  );
 }
 
 /* ================================================================== */

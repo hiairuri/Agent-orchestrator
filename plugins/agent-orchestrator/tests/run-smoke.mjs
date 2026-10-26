@@ -2,7 +2,7 @@
 /*!
  * tests/run-smoke.mjs —— 骨架冒烟入口（=日常）。≤60s 全绿才放行日常迭代。
  *
- * 覆盖断言组：L0 骨架全套（l0-skeleton：node --check/tools=11〔v0.6 A6 probe 转正〕/BOARD_VERSION=2/hooks.json
+ * 覆盖断言组：L0 骨架全套（l0-skeleton：node --check/tools=12〔v0.6 A6 probe 转正 + v1.1.1 W20 dispatch〕/BOARD_VERSION=2/hooks.json
  *   4 事件+bg-gate args 含 --contract/SB09+M07 静态红线/sentinel_health 形状/B07 fail-open）
  *   + 板面回环（board upsert/get/list/claim 快速冒烟，CRV1 首步口径）。
  *

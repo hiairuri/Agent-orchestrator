@@ -39,10 +39,10 @@ import path from "node:path";
 import { TxnGate, HOLD_MAX_MS, SIGN_CONNECT_MAX_MS, signAndConnect } from "./txn.mjs";
 import * as creds from "./credentials.mjs";
 import { connectRelay, buildWs2Url } from "./relay.mjs";
-import { buildTemplateShell, wakeCoordSession } from "./inject.mjs";
+import { buildTemplateShell, wakeCoordSession, isSubagentSessionId, subagentRefusal } from "./inject.mjs";
 import { classifyAccept, finalVerdict, observeRevival, rolloutRevivedProbe, VERDICT_WINDOW_MS } from "./verdict.mjs";
 import { DegradeState, classifyFailure, failureFromClose, CLASSES, loopbackD2Hint } from "./degrade.mjs";
-import { classifyForWatcher, pickNext, readBoardSafe, boardMtimeMs, RESULT_STATUSES } from "./poller.mjs";
+import { classifyForWatcher, pickNext, readBoardSafe, boardMtimeMs, latestUnreadEventId, RESULT_STATUSES } from "./poller.mjs";
 import { redact } from "./credentials.mjs";
 
 /* --- 参数解析 twins（bg-sentinel 同款三链：CLI > cfg > 默认） --- */
@@ -233,6 +233,15 @@ export function createWatcher({
       // 目标会话（W-W §4：coord-session.txt 缺失 → D3）
       const targetSession = sessionTarget();
       if (!targetSession) return applyFailure(missionId, { kind: "session-target-missing" });
+      // v1.1 W2 (B1②) 唤醒前存活性核验（DESIGN §5.4②）：只做形状判别——sess_subagent 前缀
+      // =子代理短寿命 rollout（G14 实证类），判非主控→与 inject ① 同款拒用路径（不建桥/
+      // 不发帧/不刷新锚，D3 配置告警）；主控形状 sess_<uuid> 不做额外探活（rollout 探测面
+      // 已由 G11 resolveRolloutDir 承担，勿重复建设）。检查先于设备发现/下签/建连。
+      if (isSubagentSessionId(targetSession)) {
+        const refusal = subagentRefusal(targetSession, { source: "sentinel/coord-session.txt" });
+        emit(`[watcher] mission=${missionId} ${refusal.message}`);
+        return applyFailure(missionId, { kind: refusal.code });
+      }
 
       // CREDS S2：设备发现（API 主链 + setting.json 备链）
       const dev = await loadDevice({ jwt });
@@ -282,7 +291,11 @@ export function createWatcher({
       // 应答回读（RESP_TIMEOUT_MS 冷启覆盖）→工作区守卫通过才原子刷新 coord-session.txt，
       // 全在其内部完成（禁改内部行为）；sendPrompt 导出面保留（mock/离线断言引用）。
       seqRef.n += 1;
-      const shell = buildTemplateShell({ missionId, state: cond.status, summary: cond.title, eventId: "latest" });
+      // v1.1 W2 (C3-rider)：事件解析上移调用面——取真实最新未读事件 id（文件名降序，正文
+      // 不读）；无未读事件（question 待答等）→ null → 壳渲染显式「无未读事件」句，不再产
+      // spool/<id>/unread/latest.json 悬空指针（W1 已落 poller/inject 两面，此处补生产接线）。
+      const eventId = latestUnreadEventId(rootDir, missionId, fsImpl);
+      const shell = buildTemplateShell({ missionId, state: cond.status, summary: cond.title, eventId });
       const workspaceKeyHint = sessionWorkspaceKey();
       // 潜伏面修复（v0.10 G，W3s 遗留注记）+ G4 分工：V1 session-send-response legacy 面仍先
       // 挂起再发（防丢帧竞态）并经 guardPendingResponse 挂消费 catch（失败路径无裸挂起
@@ -307,6 +320,8 @@ export function createWatcher({
         if (holdBreached) return applyFailure(missionId, { kind: "hold-timeout" });
         if (session.closeInfo) return applyFailure(missionId, failureFromClose(session.closeInfo));
         const code = String((err && err.code) || "");
+        // v1.1 W2 (B1①/②)：inject 侧锚形状闸（早检竞态/其它调用面兜底）→ 同款 D3 拒用路径
+        if (code === "coord-anchor-subagent") return applyFailure(missionId, { kind: "coord-anchor-subagent" });
         if (code === "bridge-list-empty") return applyFailure(missionId, { kind: "bridge-list-empty" });
         if (code === "workspace-anchor-missing" || code === "bridge-anchor-missing") {
           return applyFailure(missionId, { kind: "workspace-anchor-missing" });
@@ -385,7 +400,11 @@ export function createWatcher({
           const prev = gate.per.get(missionId);
           if (prev && prev.attempts >= 2) kind = "ttl-exhausted";
         }
-        const cls = classifyFailure({ kind });
+        // v1.1 W2 (B1②)：锚劫持拒用=配置告警面（D3 终态，与 workspace-anchor-missing 同族）。
+        // classifyFailure 的 kind 表在 degrade.mjs（本波写面外），故在 watcher 侧把分类输入
+        // 映射到 D3 同族，同时保留真实 kind 于 signals/degrade/返回值（可定因、可断言）。
+        const classifyKind = kind === "coord-anchor-subagent" ? "workspace-anchor-missing" : kind;
+        const cls = classifyFailure({ kind: classifyKind });
         gate.recordOutcome(missionId, cls.cls === "D2" ? "d2" : cls.cls === "kicked" ? "kicked" : "d1");
         const hint = cls.cls === CLASSES.D2 && transport === "loopback" ? loopbackD2Hint({ origin: loopbackOrigin }) : null; // W-DGR2-01：loopback 断连提示必含桌面双 env 名
         degrade.record({ cls: cls.cls, missionId, reason: kind, hint });

@@ -2,7 +2,7 @@
  * suites/probe-caps.mjs —— v0.6 A6 probe 帽 suite（第 11 号工具，上下文经济第二支柱）
  *
  * 覆盖断言组：A-v060-PROBE-01..10（DESIGN §5.1 / SKILL §15.4 帽语义机制化，施工 ID 定稿）——
- *   PROBE-01 工具面 11 与注册形态（tools/list 含 probe、schema 四 action 枚举、双面可用不入 MCP_DISALLOWED）
+ *   PROBE-01 工具面 12 与注册形态（tools/list 含 probe、schema 四 action 枚举、双面可用不入 MCP_DISALLOWED）
  *   PROBE-02 envelope 统一形态（rows_truncated/bytes/hash/page_token/caps；bytes ≤10KB；hash=返回内容 sha256）
  *   PROBE-03 行帽 ≤50 + 分页续传（file.head 200 行 → 50 行/页 + page_token 走到 eof；行数超帽收敛）
  *   PROBE-04 字节帽 ≤10KB 与单行截断（big.log 字节帽先绑；minified 行截断标记）
@@ -82,13 +82,13 @@ const sha256 = (t) => crypto.createHash("sha256").update(t).digest("hex");
 const ENVELOPE_KEYS = ["rows_truncated", "bytes", "hash", "page_token", "caps"];
 
 try {
-  // ---- PROBE-01 工具面 11 与注册形态
+  // ---- PROBE-01 工具面 12 与注册形态
   {
     const tl = await s.tools();
     const names = (tl.tools || []).map((t) => t.name);
     const pr = (tl.tools || []).find((t) => t.name === PRE + "probe");
-    ck.ok("PROBE-01a tools/list = 11 且含 probe（v0.6 口径）",
-      names.length === 11 && !!pr, { n: names.length, has: !!pr });
+    ck.ok("PROBE-01a tools/list = 12 且含 probe（v0.6 A6 + v1.1.1 W20 dispatch 口径）",
+      names.length === 12 && !!pr, { n: names.length, has: !!pr });
     const acts = pr?.inputSchema?.properties?.action?.enum;
     ck.ok("PROBE-01b probe schema 四 action 枚举 + required",
       JSON.stringify(acts) === JSON.stringify(["db.query", "file.head", "file.grep", "bin.inspect"]) &&

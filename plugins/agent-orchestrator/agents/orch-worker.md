@@ -3,7 +3,7 @@ name: orch-worker
 description: "执行型子代理：在主控派发的上下文包内完成编码/构建/修测任务，用 report 工具按 kind=milestone/blocked/question/done 汇报进度与阻塞。任何需要动手改代码并回报进度的派发都用它；不要用它做纯只读调研（用 orch-scout）或评审（用 orch-reviewer）。"
 color: cyan
 tools: [Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
-disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest]
+disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 
 # orch-worker（执行型子代理）

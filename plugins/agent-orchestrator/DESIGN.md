@@ -331,7 +331,7 @@ inputSchema：
 }
 ```
 
-行为：按 §7.3 模板合成 pack.md（variants>1 → pack-v1..vN，每份多一节 VARIANT）；原子写入 `packs/<mission_id>/`；board.upsert 记录 `pack.path/variants`；生成 8hex token 写入 `dispatch.token`（已有则沿用）。返回 `{pack_paths, token, channel: mission_id, prompt_template}`——prompt_template 即三行契约派发头（§7.3），主控逐字粘贴进 Agent prompt。
+行为：按 §7.3 模板合成 pack.md（variants>1 → pack-v1..vN，每份多一节 VARIANT）；原子写入 `packs/<mission_id>/`；board.upsert 记录 `pack.path/variants`；生成 8hex token 写入 `dispatch.token`（已有则沿用）。返回 `{pack_paths, token, channel: mission_id}`（prompt_template 不再回显）——三行契约以包 CONTRACT（含 [token]）为唯一权威（§7.3）；派发 prompt 尾块 = 一行指针句 + 三行契约（供 bg-gate presence 检测），主控从包内逐字粘贴。
 
 ### 4.8 resume（恢复简报）
 
@@ -470,7 +470,7 @@ description: "主控操作手册：把主控 agent 变成任务指挥官。当�
 ### 7.2 章节大纲与每章要点
 
 1. **何时用 + 概念图**：主控/任务板(board.json)/邮箱(spool)/三行契约一图流；"主控是唯一轮询者与答题者"。
-2. **标准派发七步**：① `board(upsert)` 建 mission（original_prompt 必填）→ ② `context_pack` 生成包+token → ③ `Agent(subagent_type="agent-orchestrator:orch-worker", prompt=prompt_template+任务原文, run_in_background=true)` → ④ `board(upsert, dispatch={agent_id,task_id,session_id})` → ⑤ **不等**：继续别的活（同消息多条 Agent=并发，≤8）→ ⑥ 完成通知到达后：读输出文件路径（兜底）+ `mailbox(read)` 消费事件 → ⑦ 聚合落盘（结果写文件，只摘要进上下文）+ `board(upsert, status="closed")`。
+2. **标准派发七步**：① `board(upsert)` 建 mission（original_prompt 必填）→ ② `context_pack` 生成包+token → ③ `Agent(subagent_type="agent-orchestrator:orch-worker", prompt=包 CONTRACT 三行+一行指针句+任务原文, run_in_background=true)` → ④ `board(upsert, dispatch={agent_id,task_id,session_id})` → ⑤ **不等**：继续别的活（同消息多条 Agent=并发，≤8）→ ⑥ 完成通知到达后：读输出文件路径（兜底）+ `mailbox(read)` 消费事件 → ⑦ 聚合落盘（结果写文件，只摘要进上下文）+ `board(upsert, status="closed")`。
 3. **派发包模板**：§7.3 原文照录（三行契约 + CONTEXT 逐字注入 + READ FIRST + TASK + RULES + VARIANT + RETURN + ESCALATION）。
 4. **状态→动作决策表**：§7.4 全表。
 5. **提问-回答-恢复闭环**：常规 `report(blocked)` → 主控 `mailbox(peek/read)` → **可先派 orch-scout 查证再答** → `mailbox(answer)` 拿 recommended_call → `SendMessage(to, summary, message)`（运行中=steer 注入；已终态=后台恢复，可反复）；紧急四情形走 `RespondToCoordinator` 直达；workflow：子代理 `escalate` → dwfq-id 通知 → `ResolveWorkflowQuestion(question_id, answer)`（答题期间 run 其余照常；dwfq 无超时，**不能放着不答**）；通知丢失兜底 `GetWorkflowRun` 看 `pendingQuestions`；脚本本身坏了 → 改 script 文件 + `AmendWorkflow(path)`。
@@ -488,7 +488,7 @@ description: "主控操作手册：把主控 agent 变成任务指挥官。当�
 ````markdown
 # 任务包：{title}（{mission_id}）
 
-## CONTRACT（三行契约，也出现在派发 prompt 头部）
+## CONTRACT（三行契约，也出现在派发 prompt 尾块）
 [channel] {mission_id}
 [worker] {worker 名，如 orch-worker#1}
 [token] {token}
@@ -520,13 +520,13 @@ kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必�
 - 验证/测试结果（如适用）
 ````
 
-派发 prompt 头（context_pack 返回的 prompt_template）：
+派发 prompt 尾块（`context_pack` 回执给出 `pack_paths`/`token`/`channel`，`prompt_template` 不再回显；三行契约唯一权威 = 包 CONTRACT（含 [token]），尾块 = 一行指针句 + 三行契约，三行供 bg-gate presence 检测）：
 
 ```
+先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。
 [channel] {mission_id}
 [worker] {worker-name}
 [token] {token}
-You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（kind ∈ milestone/blocked/question/done）。Return：做了什么+产物路径+遗留问题。
 ```
 
 ### 7.4 状态→动作决策表（SKILL 全文收录）
@@ -642,7 +642,7 @@ You are working on: {title}. 先 Read 任务包 {pack_path}，按包内 TASK/RUL
 1. **静态**：`node -e "JSON.parse(...)"` 校验 plugin.json / .mcp.json / hooks.json（marketplace.json 由脚本生成后同样校验）；`node --check mcp/server.mjs hooks/session-start.mjs hooks/stop-check.mjs`。
 2. **MCP 握手**（临时脚本，不入库）：子进程 `node server.mjs --root <临时目录>`，按行发：
    `initialize` → 断言回 protocolVersion/capabilities/serverInfo；`notifications/initialized` → 断言无输出；`tools/list` → 断言 6 个工具与全名前缀 `mcp__plugin_agent-orchestrator_orch__`；`ping` → 断言 `{}`；`{"method":"nope"}` → 断言 -32601；坏行 → 断言 -32700。
-3. **tools/call 往返**（同一临时根）：`board(upsert)` → `board(get)` 字段一致；`report(kind=blocked)` → unread 出现事件文件且 board.status=blocked；`mailbox(read)` → 文件移入 read/ 且返回 payload；`mailbox(answer)` → answers 留痕 + board.answered=true + 返回 recommended_call；`context_pack(variants=3)` → 3 个 pack 文件 + prompt_template 含三行契约；`spawn_agent(name=demo-scout)` → `.zcode/agents/demo-scout.md` 生成且 frontmatter 可解析；`resume` → 返回 missions 与 actions_top3。
+3. **tools/call 往返**（同一临时根）：`board(upsert)` → `board(get)` 字段一致；`report(kind=blocked)` → unread 出现事件文件且 board.status=blocked；`mailbox(read)` → 文件移入 read/ 且返回 payload；`mailbox(answer)` → answers 留痕 + board.answered=true + 返回 recommended_call；`context_pack(variants=3)` → 3 个 pack 文件 + 回执 `{pack_paths,token,channel}`（包 CONTRACT 含三行契约）；`spawn_agent(name=demo-scout)` → `.zcode/agents/demo-scout.md` 生成且 frontmatter 可解析；`resume` → 返回 missions 与 actions_top3。
 4. **hooks**：`echo '{"hook_event_name":"SessionStart","session_id":"s1"}' | node hooks/session-start.mjs`（有/无 board 两态断言）；Stop 两态 + `stop_hook_active:true` 静默断言；stdout 必须是单行合法 JSON。
 5. **Windows 专项**：rename 目标已存在不抛；路径包含校验拒绝 `..` 逃逸；无网断言（代码评审：无 fetch/http import）。
 6. **端到端（人工）**：在测试项目装插件，跑验收示例 1 与 5 各一遍。

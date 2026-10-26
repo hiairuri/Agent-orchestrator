@@ -4,6 +4,8 @@
  *
  * 模板壳固定（W-W §4 原案）：`[orch-watch] mission=<id> state=<state> summary=<≤200字>
  * 指引=请消费 spool/<mission_id>/unread/<event_id>.json（路径指针，非正文）`
+ * v1.1 W1 (C3) 增补：eventId 必填；无未读事件（eventId=null）→
+ * `指引=(无未读事件：question 待答，走 mailbox read)`（悬空指针显式化替代）。
  *
  * 隐私最小化纪律（W-W §4）：禁内联 worker 原文（提示注入放大器）；正文永远留在 spool 走
  * 既有闸门；watcher 只发 id+状态+指针。中继非零知识（data payload 中继可读明文）——
@@ -64,6 +66,34 @@ import { openBridge, bridgeOf, workspaceKeyMatches } from "./bridge.mjs";
 
 export const SHELL_PREFIX = "[orch-watch]";
 export const SUMMARY_MAX = 200; // 与 report summary ≤200 字口径一致
+/** v1.1 W1 (C3)：无未读事件时的显式状态句（不产悬空指针，指向 mailbox read 动作面）。 */
+export const NO_EVENT_GUIDANCE = "指引=(无未读事件：question 待答，走 mailbox read)";
+
+/* --- v1.1 W2 (B1)：子代理会话形状守卫（EXP10-findings R6 / DESIGN §5.4 ①） ----------
+ * 子代理会话 id 形状 = sess_subagent_agent_<agentId>（bg-sentinel/server agent_harvest 同源；
+ * 主控=sess_<uuid> 无 subagent 段）。G14 已堵「写锚」面；本波补「消费锚」面——唤醒链绝不
+ * 把子代理短寿命会话当主控目标（劫持窗内注入落子代理会话=最坏形，R6-4）。前缀形匹配覆盖
+ * 未来 sess_subagent_* 变体；谓词与 hooks/session-start.mjs G14 守卫同语义（不引共享模块，
+ * hooks 零依赖纪律不破——watcher 侧模块内共享本实现）。 */
+export const SUBAGENT_SESSION_PREFIX = "sess_subagent";
+
+/** 子代理会话 id 判别（前缀形；非字符串/空值=false，主控形状不误伤）。 */
+export function isSubagentSessionId(value) {
+  return typeof value === "string" && value.trim().startsWith(SUBAGENT_SESSION_PREFIX);
+}
+
+/** 锚/session_id 消费面的 fail-loud 拒用错误（source=消费面坐标，便于日志定因）。 */
+export function subagentRefusal(value, { source = "session_id" } = {}) {
+  const shown = String(value ?? "").replace(/[\r\n]+/g, " ").slice(0, 200); // 单行纪律（日志注入面）
+  return Object.assign(
+    new Error(
+      `coord-anchor-subagent: ${source}="${shown}" 命中 sess_subagent 前缀（子代理短寿命会话，` +
+        "EXP10-findings R6 锚劫持形态）——拒绝消费该值（fail-loud：不建桥、不发帧、不写锚；劫持态宁可不唤醒）；" +
+        "锚只由主控会话（sess_<uuid>）经 SessionStart/toolResume 写入，子代理侧走 report/mailbox 通道",
+    ),
+    { code: "coord-anchor-subagent" },
+  );
+}
 
 /** 单行化 + 夹紧：换行/回车压空格（壳必须单行），summary ≤200 字符。 */
 export function sanitizeSummary(summary) {
@@ -76,27 +106,39 @@ export function sanitizeSummary(summary) {
 
 /**
  * 模板壳构造。state ∈ done|failed|blocked|question（RESULT_STATUSES）。
- * eventId 缺省用 "latest"（消费侧取 unread/ 最新一条）。
+ * v1.1 W1 (C3)：eventId **必填**（撤「latest」缺省——R5-4 实证 question 态无 unread
+ * 事件时 spool/<id>/unread/latest.json 为悬空指针）。调用面用
+ * poller.latestUnreadEventId 取真实 id；无未读事件 → 传 null → 渲染
+ * NO_EVENT_GUIDANCE 显式句。本函数保持纯函数（不做 IO）。
  */
-export function buildTemplateShell({ missionId, state, summary, eventId = "latest" } = {}) {
+export function buildTemplateShell({ missionId, state, summary, eventId } = {}) {
   const id = String(missionId ?? "");
   const st = String(state ?? "");
   if (!id || !["done", "failed", "blocked", "question"].includes(st)) {
     throw Object.assign(new Error("shell-bad-args"), { code: "shell-bad-args" });
   }
+  if (eventId === undefined) {
+    throw Object.assign(new Error("shell-bad-args"), { code: "shell-bad-args" });
+  }
   const s = sanitizeSummary(summary);
-  const ptr = `spool/${id}/unread/${eventId}.json`;
+  if (eventId === null) {
+    return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(无摘要)"} ${NO_EVENT_GUIDANCE}`;
+  }
+  const ev = String(eventId);
+  if (!ev.trim()) throw Object.assign(new Error("shell-bad-args"), { code: "shell-bad-args" });
+  const ptr = `spool/${id}/unread/${ev}.json`;
   return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(无摘要)"} 指引=请消费 ${ptr}（路径指针，非正文）`;
 }
 
-/** 壳纪律自检：单行、含前缀、含指针、不含反引号/花括号注入面。 */
+/** 壳纪律自检：单行、含前缀、含指针或显式无事件句、不含反引号/花括号注入面。 */
 export function shellCompliant(shell) {
   const s = String(shell ?? "");
+  const pointerForm = s.includes("指引=请消费 spool/") && s.includes("（路径指针，非正文）");
+  const noEventForm = s.includes(NO_EVENT_GUIDANCE);
   return (
     s.startsWith(SHELL_PREFIX) &&
     !/[\r\n]/.test(s) &&
-    s.includes("指引=请消费 spool/") &&
-    s.includes("（路径指针，非正文）") &&
+    (pointerForm || noEventForm) &&
     !/[`{}$]/.test(s) &&
     s.length <= 1000
   );
@@ -504,6 +546,9 @@ export async function sendPrompt({
   // 规范化：openBridge 返回面（{...,rpc}）与 RpcBridge 本体双形态都收
   const b = bRaw && typeof bRaw.send === "function" ? bRaw : bRaw && bRaw.rpc ? bRaw.rpc : bRaw;
   if (!b) throw Object.assign(new Error("bridge-not-open（时序闸：ready 前不发任何 rpc-frame）"), { code: "bridge-not-open" });
+  // v1.1 W2 (B1①)：session_id 消费面形状校验（直接调用面防绕过 wakeCoordSession 的锚校验；
+  // 命令帧发出前拒绝，零线上帧）。createSession 分支 sessionId=null，不受影响。
+  if (isSubagentSessionId(sessionId)) throw subagentRefusal(sessionId, { source: "session_id" });
   const client = attachChannelClient(b);
   // G8 连接握手（W3s）：任何 zcode-agent 命令前 hello→initialize 两步，每桥恰一次（重连/重桥=
   // 新客户端=握手随新连接重来）；握手请求过 Initialize 闸排队，闸开方上槽（两层闸勿混淆）。
@@ -632,6 +677,15 @@ export async function wakeCoordSession({
   }
   let target = null;
   try { target = fsImpl.readFileSync(coordSessionPath, "utf8").trim() || null; } catch { target = null; }
+  // v1.1 W2 (B1①) 消费面前置形状校验（DESIGN §5.4①，fail-loud 沿 G5 先例）：锚被劫持为
+  // 子代理会话（EXP10 R6 实证 03:14:07 双锚改写）时拒绝消费——不建桥、不发帧、不刷新锚，
+  // 宁可不唤醒也不把注入打进子代理短寿命会话。告警先行（warn=stderr/调用方日志面）再抛错；
+  // 不静默回退到任何其它目标。allowLegacyFirst 只免工作区锚缺失面，不豁免本形状闸。
+  if (isSubagentSessionId(target)) {
+    const refusal = subagentRefusal(target, { source: "sentinel/coord-session.txt" });
+    try { warn(refusal.message); } catch { /* 告警面失败不阻断拒用 */ }
+    throw refusal;
+  }
   let attempts = 0;
   let sent = null;
   let selfHealed = false;
@@ -684,14 +738,17 @@ export async function wakeCoordSession({
     const respOk = !respWs || workspaceKeyMatches(respWs, anchor) ||
       Boolean(lastBridge && lastBridge.workspace && [lastBridge.workspace.workspacePath, lastBridge.workspace.workspaceIdentity]
         .some((v) => workspaceKeyMatches(v, respWs)));
-    if (!anchor) warnings.push("b2-refresh-blocked:no-workspace-anchor");
+    // v1.1 W2 (B1①)：b2 回读的活体 id 若仍是子代理形状，绝不写进锚（写面同型防御；
+    // 与 G14 写锚过滤/G4-04 工作区守卫并列，三者任一不过即拦截刷新）。
+    if (isSubagentSessionId(liveId)) warnings.push(`b2-refresh-blocked:subagent-session-target(${liveId})`);
+    else if (!anchor) warnings.push("b2-refresh-blocked:no-workspace-anchor");
     else if (!respOk) warnings.push(`b2-refresh-blocked:response-workspace-mismatch(${respWs}!=${anchor})`);
     else if (!bridgeOk) warnings.push(`b2-refresh-blocked:bridge-workspace-mismatch(${bridgeWs || "(none)"}!=${anchor})`);
     else workspaceVerified = true;
     for (const w of warnings) { try { warn(w); } catch { /* 告警面失败不阻断 */ } }
   }
   let refreshed = false;
-  if (selfHealed && liveId && coordSessionPath && workspaceVerified) {
+  if (selfHealed && liveId && coordSessionPath && workspaceVerified && !isSubagentSessionId(liveId)) {
     try {
       fsImpl.mkdirSync(path.dirname(coordSessionPath), { recursive: true });
       atomicWriteFile(coordSessionPath, liveId + "\n", fsImpl);

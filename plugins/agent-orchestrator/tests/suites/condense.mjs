@@ -135,17 +135,18 @@ try {
   // ---------- 不变量 ----------
   const tl = await cur.tools();
   const names = tl.tools.map((t) => t.name);
-  ck.ok("tools/list = 11（v0.6 A6 probe 转正口径）", names.length === 11, names.length);
+  ck.ok("tools/list = 12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch 口径）", names.length === 12, names.length);
   if (old) {
     const tlOld = await old.tools();
     const legacy = tlOld.tools.map((t) => t.name);
-    // v0.6 A6：兼容不变量同步——0.4.1 旧十名依序保留为前缀，唯一新增 probe 尾接
-    //（既有工具名与顺序零漂移的语义不变，仅为设计内第 11 号工具放行）。
-    ck.ok("工具名集合与 0.4.1 兼容：旧十名依序为前缀 + probe 尾接",
-      names.length === legacy.length + 1 &&
+    // v0.6 A6 + v1.1.1 W20：兼容不变量同步——0.4.1 旧十名依序保留为前缀，probe 第 11、
+    // dispatch 第 12 依次尾接（既有工具名与顺序零漂移的语义不变）。
+    ck.ok("工具名集合与 0.4.1 兼容：旧十名依序为前缀 + probe/dispatch 依次尾接",
+      names.length === legacy.length + 2 &&
       JSON.stringify(names.slice(0, legacy.length)) === JSON.stringify(legacy) &&
-      names[names.length - 1].endsWith("__probe"),
-      { last: names[names.length - 1] });
+      names[legacy.length].endsWith("__probe") &&
+      names[names.length - 1].endsWith("__dispatch"),
+      { probe: names[legacy.length], last: names[names.length - 1] });
   }
 } catch (e) {
   ck.ok("driver error", false, (e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : String(e)));

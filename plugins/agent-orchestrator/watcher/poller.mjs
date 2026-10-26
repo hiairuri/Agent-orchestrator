@@ -69,6 +69,36 @@ export function resultTimeMs(m, boardMtimeMs) {
   return null;
 }
 
+/* --- v1.1 W1 (C3): shell title 截断闭合化 --- */
+
+/** 全角半开括号 → 对应闭合字符（R5-4：「（direct」截断悬空实证）。 */
+const TITLE_BRACKET_PAIRS = { "（": "）", "〔": "〕", "【": "】", "「": "」", "『": "』", "〈": "〉" };
+
+/**
+ * 码点安全截断 + 未闭合括号剥离（v1.1 W1 C3，DESIGN §5.3）：
+ *   - Array.from 取 max 个码点（不切破代理对；旧 slice(0,30) 码元切片可切破）；
+ *   - 栈扫描半开括号对，尾部未闭合时从最早未闭合开括号处起截（闭合化，不给悬空「（direct」）；
+ *   - 不加省略号（壳是指针不是散文）；结果空串由调用方回落「(未命名)」。
+ */
+export function truncateTitleClosed(value, max = 30) {
+  const s = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  let chars = Array.from(s);
+  if (chars.length > max) chars = chars.slice(0, max);
+  const stack = [];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (TITLE_BRACKET_PAIRS[ch]) {
+      stack.push({ ch, i });
+      continue;
+    }
+    const top = stack.length ? stack[stack.length - 1] : null;
+    if (top && TITLE_BRACKET_PAIRS[top.ch] === ch) stack.pop();
+  }
+  const cut = stack.length ? stack[0].i : chars.length;
+  return chars.slice(0, cut).join("").trim();
+}
+
 /**
  * watcher 版分类（C1 精简：只保留未签收终态两族，无 C2/C3/双空闲门）。
  * 返回 matured 条件按优先级排序：answer 族优先（主控等人应答），族内 anchor 最旧优先。
@@ -93,7 +123,7 @@ export function classifyForWatcher(board, { boardMtimeMs = NaN, answerGraceMs = 
       key: String(m.id),
       mission: m,
       missionId: String(m.id),
-      title: String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30),
+      title: truncateTitleClosed(m.title || "(未命名)") || "(未命名)",
       status: m.status,
       category: isAnswer ? "unclaimed_answer" : "unclaimed_terminal",
       priority: isAnswer ? 0 : 1,
@@ -120,6 +150,22 @@ export function spoolUnreadCount(rootDir, missionId, fsImpl = fs) {
     return fsImpl.readdirSync(dir).filter((n) => n.endsWith(".json")).length;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * v1.1 W1 (C3): 解析真实最新未读事件 id（事件解析上移调用面；buildTemplateShell 保持纯函数）。
+ * 事件文件名 = <15 位零填充 epochMs>-<8hex>.json（server.mjs 头注），故文件名降序=时间降序；
+ * 只读文件名不读正文（隐私最小化沿 spoolUnreadCount）。无未读事件/IO 失败 → null
+ * （调用方传 eventId:null → 壳渲染显式「无未读事件」句，不再给 unread/latest.json 悬空指针）。
+ */
+export function latestUnreadEventId(rootDir, missionId, fsImpl = fs) {
+  try {
+    const dir = path.join(rootDir, "spool", String(missionId), "unread");
+    const names = fsImpl.readdirSync(dir).filter((n) => n.endsWith(".json")).sort();
+    return names.length ? names[names.length - 1].slice(0, -".json".length) : null;
+  } catch {
+    return null;
   }
 }
 

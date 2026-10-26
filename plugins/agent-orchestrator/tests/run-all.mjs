@@ -2,7 +2,7 @@
 /*!
  * tests/run-all.mjs —— 全量回归入口（=发版门）。按 CR-15 分层跑断言 ID 子集对应的 suites。
  *
- * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=11〔v0.6 A6 probe 转正〕/BOARD_VERSION/hooks.json/SB09+M07/B07
+ * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=12〔v0.6 A6 probe 转正 + v1.1.1 W20 dispatch〕/BOARD_VERSION/hooks.json/SB09+M07/B07
  *   + lint-manifest：V7-12 发版 lint LM-01 约定路径防复发〔W-F4 钉〕/LM-02 manifest 引用存在/LM-03 版本三方一致）
  *   + L1 直接层全跑（sb-normalize=SB01/02/05+M01/02；crv1-scope=CRV1-01..08+E4+M04；
  *   crv2-pack=CRV2-01..08+CR-V22/23/24/25；crv4-audit=CRV4-01..05+CR-V18..V21/V29；
@@ -53,6 +53,7 @@ const REGISTRY = [
   { name: "probe-caps", layer: "L1" },
   { name: "watcher-core", layer: "L1" },
   { name: "crv8-memory", layer: "L1" },
+  { name: "glean-launch", layer: "L1" },
   { name: "watcher-shim", layer: "L1" },
   // v0.11 M10 新增一套（P3-2，PO 不变量静态锁）：po-static=v0.11.x.md §2.10 手工 grep 收编
   //   （W4-01 固定文案钉 14 条/旧措辞+M2 残句 ban/W4-04 SKILL 同步钉+M10 文案钉）。
