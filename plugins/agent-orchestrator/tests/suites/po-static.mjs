@@ -88,11 +88,11 @@ try {
   // 「会坏什么/好不好」旧口语句已规则化（ARCHETYPES.reviewer），v0.11 期豁免注记撤销——
   // W1-03 扫描域扩 server.mjs，且旧句开场串在产品面全仓 grep=0（回潮防钉）。
   ck.ok("M10-04 ban 不硬扛/不造假（server，⑤ 残句清零）", count(SERVER, "不硬扛") === 0 && count(SERVER, "不造假") === 0, { ying: count(SERVER, "不硬扛"), zaojia: count(SERVER, "不造假") });
-  // W1-03 族（commands/ 5 + agents/ 4 正文 + v1.1 B3 扩域 server.mjs）
+  // W1-03 族（commands/ + agents/ 全部正文文件〔v1.1.1-C1 起 commands 6 个，动态 readdir 不钉数〕+ v1.1 B3 扩域 server.mjs）
   const W1_FILES = [...list("commands"), ...list("agents"), path.join(PLUGIN_DIR, "mcp", "server.mjs")];
   const W1_RE = /不硬扛|不造假|不编造|不算违约|带病硬写|成败即分叉|宁缺勿滥|能答的答|会坏什么|好不好|证据说话/;
   const w1Hits = W1_FILES.map((p) => [p, countRe(fs.readFileSync(p, "utf8"), W1_RE)]).filter(([, n]) => n > 0);
-  ck.ok("M10-04 W1-03 态度句族零残留（commands+agents 九文件+server.mjs〔v1.1 W1 B3 扩域〕）", w1Hits.length === 0, w1Hits);
+  ck.ok("M10-04 W1-03 态度句族零残留（commands+agents 全文件+server.mjs〔v1.1 W1 B3 扩域〕）", w1Hits.length === 0, w1Hits);
   // B3 专项：旧评审判据口语串在产品面全仓零残留（tests/ 断言文件自身承载 ban 字面量，不在扫描域）
   const PRODUCT_DIRS = ["commands", "agents", "hooks", "watcher", "mcp", "skills"];
   const walkProduct = (dir) =>
@@ -282,13 +282,14 @@ try {
       stale: count(STOP_CHECK, "coordTailStale"),
     },
   );
-  // W21 注入面语义锁：PL-10 注入=启动器自动（轨迹置顶→digest 条件节→persona→指针+CONTRACT），
+  // W21 注入面语义锁（v1.1.2 I1 四段式随行改写）：PL-10 注入=启动器自动（纪律段→轨迹→digest→persona→指针+CONTRACT），
   // 日志存全量尾块（含协议行）/注入面去协议行；粘贴/共享头/逐字复用语汇零残留。
   const PL10 = SKILL.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
   ck.ok(
-    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21）：轨迹置顶≤10 块去 ts/seq 旧→新/digest 条件节机器组装/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
+    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.1.2 I1 四段式）：纪律段恒在 offset 0/轨迹 ≤10 块去 ts/seq 旧→新/digest 条件节机器组装/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
     PL10.includes("注入=启动器自动") &&
-      PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新，置顶最前）") &&
+      PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）") &&
+      PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）") &&
       PL10.includes("digest 条件节（机器组装，Q8=a") &&
       PL10.includes("persona 原型正文") &&
       PL10.includes("指针句+CONTRACT 三行") &&
@@ -304,7 +305,8 @@ try {
       count(SKILL, "stale") === 0,
     {
       autoInject: PL10.includes("注入=启动器自动"),
-      trajectory: PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新，置顶最前）"),
+      discipline: PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）"),
+      trajectory: PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）"),
       digest: PL10.includes("digest 条件节（机器组装，Q8=a"),
       fullLog: PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）"),
       bareInject: PL10.includes("注入面去协议行裸块（Q6）"),
@@ -396,6 +398,45 @@ try {
   ck.ok("W6-03 list 行 unread 容忍式计数（bad id 不阻整表，1.0.0 兼容）",
     count(SERVER, "function countUnreadSafe") === 1 && count(SERVER, "unread: countUnreadSafe(m.id)") === 1,
     { def: count(SERVER, "function countUnreadSafe"), use: count(SERVER, "unread: countUnreadSafe(m.id)") });
+
+  // ---------- A-v1111-C1：/orch-manual 强提示词命令静态锁（v1.1.1-C1 波，任务包 m-20261026-040100-c1；
+  //   2026-10-26 主控强化口径：内联铁律速览+阻塞式读取+可证阅读确认+固定末行，覆盖任务包「强提示词」力度定义） ----------
+  // §0 偏差留痕（l-20261022-8fa733 口径）：
+  //   (a) 现存 5 命令 frontmatter 均无 name 字段（name 由文件名派生）；本波按任务包要求新增
+  //       name: orch-manual——增量字段，宿主忽略未知 frontmatter，无行为回退面。
+  //   (b) 任务包原稿「任何偏离须先 report(kind=blocked)」与主控实况（report 仅子代理，SKILL §14
+  //       面向列）相悖；已按主控强化口径裁决落定：固定末行保留 report(blocked) 措辞（承诺痕迹），
+  //       命令正文注明主控侧实现=向用户显式提问待裁。偏差已消解，非悬空。
+  //   (c) SKILL 同步：SKILL 全文无命令清单（仅 OV-3 泛指 commands/*.md 命令入口、CL-9 提及
+  //       /orch-resume），按任务包条件分支「若无则只在 frontmatter 层面存在」执行，零 SKILL 改动。
+  //   (d) 铁律速览 8 条为 SKILL 原文提炼内联（非逐字抄录），每条带真实章号引用（C1-05/09 锁）；
+  //       SKILL 演进时命令内速览须同步，本组锁条数与章号防漂移（主控强化口径第 4 点）。
+  const MANUAL = read(path.join("commands", "orch-manual.md"));
+  {
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(MANUAL);
+    const fmLines = fm ? fm[1].split(/\r?\n/) : [];
+    ck.ok("C1-01 commands/orch-manual.md 存在且 frontmatter name=orch-manual", fmLines.some((l) => l.trim() === "name: orch-manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
+  }
+  ck.ok("C1-02 强措辞·全文读取句（立即完整读取＋不节选、不跳读）", count(MANUAL, "立即完整读取") >= 1 && count(MANUAL, "不节选、不跳读") >= 1, { read: count(MANUAL, "立即完整读取"), noSkip: count(MANUAL, "不节选、不跳读") });
+  ck.ok("C1-03 强措辞·偏离=任务失败句（静默偏离=任务失败）", count(MANUAL, "静默偏离=任务失败") >= 1, count(MANUAL, "静默偏离=任务失败"));
+  ck.ok("C1-04 强措辞·确认复述句（手册已读，X 章 Y 条规则生效）", count(MANUAL, "手册已读，X 章 Y 条规则生效") === 1, count(MANUAL, "手册已读，X 章 Y 条规则生效"));
+  ck.ok("C1-06 阻塞读取句（除 Read SKILL.md 外不得调用任何工具）", count(MANUAL, "除 Read SKILL.md 外不得调用任何工具") === 1, count(MANUAL, "除 Read SKILL.md 外不得调用任何工具"));
+  ck.ok("C1-07 可证引述句（逐字抄录＋不算引述）", count(MANUAL, "逐字抄录") >= 1 && count(MANUAL, "不算引述") >= 1, { quote: count(MANUAL, "逐字抄录"), noFake: count(MANUAL, "不算引述") });
+  ck.ok("C1-08 固定末行（本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁）", count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁") === 1, count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁"));
+  {
+    // 铁律速览锁（强化口径第 4 点）：8 条表格行、每条带章号引用，防 SKILL 演进漂移。
+    const ironRows = MANUAL.match(/^\| \d+ \|.*\|$/gm) || [];
+    const ironOk = ironRows.length === 8 && ironRows.every((r) => /第 \d+ 章/.test(r));
+    ck.ok("C1-09 铁律速览 8 条且每条带章号引用", ironOk, { rows: ironRows.length, withChap: ironRows.filter((r) => /第 \d+ 章/.test(r)).length });
+  }
+  {
+    // 章节引用一致性：命令文引用的「第 N 章」必须全部是 SKILL 真实章号；自检清单 ≥7 章（派发七步/
+    // 上报协议/yolo 红线/哨兵唤醒/report 用法/成本纪律/grill 门）。
+    const chapRefs = [...new Set([...MANUAL.matchAll(/第 (\d+) 章/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+    const real = new Set((SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1"))));
+    const missing = chapRefs.filter((n) => !real.has(n));
+    ck.ok("C1-05 章节引用与 SKILL 一致（自检清单 ≥7 章且引用章号均真实存在）", chapRefs.length >= 7 && missing.length === 0, { refs: chapRefs, missing });
+  }
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------
   const bytesOf = (rel) => Buffer.byteLength(read(rel), "utf8");

@@ -39,6 +39,10 @@ const FILES = {
   agentScout: path.join(PLUGIN_DIR, "agents", "orch-scout.md"),
   agentReviewer: path.join(PLUGIN_DIR, "agents", "orch-reviewer.md"),
   agentGleaner: path.join(PLUGIN_DIR, "agents", "orch-gleaner.md"),
+  // v1.1.2 I1 双新模板入扫（D2 §6 断言处置表：A-COMPAT-1/A-ROLE-DISALLOWED 扩域——策划/计划
+  // frontmatter 形状与四角色同锁：tools 含 report 全名、disallowedTools 含三沙箱面全名）。
+  agentPlanner: path.join(PLUGIN_DIR, "agents", "orch-planner.md"),
+  agentPlan: path.join(PLUGIN_DIR, "agents", "orch-plan.md"),
   pluginJson: path.join(PLUGIN_DIR, ".zcode-plugin", "plugin.json"),
   agentsMd: path.join(REPO_ROOT, "AGENTS.md"),
   c6Findings: path.join(REPO_ROOT, "designs", "agent-orchestrator-v0.9-C6-findings.md"),
@@ -134,6 +138,8 @@ function main() {
     ["orch-worker.md", FILES.agentWorker],
     ["orch-scout.md", FILES.agentScout],
     ["orch-reviewer.md", FILES.agentReviewer],
+    ["orch-planner.md", FILES.agentPlanner],
+    ["orch-plan.md", FILES.agentPlan],
   ];
   const agentTexts = agentFiles.map(([name, p]) => [name, readFile(p)]);
   const pj = JSON.parse(readFile(FILES.pluginJson));
@@ -172,7 +178,7 @@ function main() {
   subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
   subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
 
-  { // A-COMPAT-1：三角色 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护）
+  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
     const bad = [];
     for (const [name, text] of agentTexts) {
       const line = frontmatterLine(text, "tools");
@@ -183,7 +189,7 @@ function main() {
       bad.length ? `A-COMPAT-1 不变量受损: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-15` : "");
   }
 
-  { // A-ROLE-DISALLOWED：三角色 disallowedTools 行均含 sandbox_apply/sandbox_discard/agent_harvest 全名（E-16）
+  { // A-ROLE-DISALLOWED：角色模板 disallowedTools 行均含 sandbox_apply/sandbox_discard/agent_harvest 全名（E-16；v1.1.2 I1 起五文件）
     const tails = ["sandbox_apply", "sandbox_discard", "agent_harvest"].map((t) => `mcp__plugin_agent-orchestrator_orch__${t}`);
     const bad = [];
     for (const [name, text] of agentTexts) {
@@ -191,7 +197,7 @@ function main() {
       const miss = firstMissing(line, tails);
       if (miss) bad.push(`${name} disallowedTools 缺 ${miss}`);
     }
-    ck.ok("A-ROLE-DISALLOWED @ agents/*.md disallowedTools ×3", bad.length === 0,
+    ck.ok("A-ROLE-DISALLOWED @ agents/*.md disallowedTools ×5", bad.length === 0,
       bad.length ? `A-ROLE-DISALLOWED 缺失子串: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-16` : "");
   }
 

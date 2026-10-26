@@ -6,6 +6,11 @@
  * Contract:
  *   in : --mission-id <id> --prompt <promptFile> --cwd <worktree|project>
  *        --result-dir <dir> --log <runnerLog> [--timeout-min N] [--cli <bundle>]
+ *        [--provider-config-seed <file>] (v1.1.1-FA: env-redirected provider
+ *        config copy — the CLI child gets ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
+ *        pointed at it so headless -p resolves a model selection; the real
+ *        config is never touched. Only set when the server saw the
+ *        ZCODE_BUILTIN/PERSONAL env pair — H1r requires both or neither.)
  *   out: <result-dir>/<sessionId>.json            (envelope + mission/exit meta)
  *        <result-dir>/<mission_id>-<ms>.index.json (mission → result sidecar)
  *        <result-dir>/<mission_id>-<ts>.error.json (envelope unparsable: log tail)
@@ -180,6 +185,7 @@ function main() {
   const resultDir = argOf(argv, "--result-dir");
   const logFile = argOf(argv, "--log");
   const cliPath = argOf(argv, "--cli") || process.env.ZCODE_CLI_PATH || DEFAULT_CLI;
+  const providerConfigSeed = argOf(argv, "--provider-config-seed");
   const timeoutMinRaw = Number(argOf(argv, "--timeout-min"));
   const timeoutMin =
     Number.isFinite(timeoutMinRaw) && timeoutMinRaw > 0 ? timeoutMinRaw : DEFAULT_TIMEOUT_MIN;
@@ -243,7 +249,14 @@ function main() {
         windowsHide: true,
         // v1.1.1 W-A0 统一身份原语：-p worker 会话的 SessionStart 见之跳过
         // publishWakeAnchor（headless 托管 worker 不抢主控锚；其余环境透传）。
-        env: { ...process.env, ORCH_MANAGED_WORKER: missionId },
+        // v1.1.1-FA：模型供给播种——CLI 子进程的 personal provider config 重定向到
+        // 使命戳副本（bundle 锚：DAt@14470771→H1r@1154821 env 对→config.defaultModelSelection
+        // @619452；真实配置零触碰）。server 只在 env 对齐时才传本参数。
+        env: {
+          ...process.env,
+          ORCH_MANAGED_WORKER: missionId,
+          ...(providerConfigSeed ? { ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: providerConfigSeed } : {}),
+        },
       },
     );
   } catch (err) {

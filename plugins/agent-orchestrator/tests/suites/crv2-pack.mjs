@@ -392,7 +392,11 @@ try {
       const dir = path.join(BASE.root, "dispatch-pure");
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, "pure.mjs");
-      fs.writeFileSync(file, src.slice(i, j + endMark.length) + "\nexport { buildDispatchPrompt };\n");
+      fs.writeFileSync(
+        file,
+        src.slice(i, j + endMark.length) +
+          "\nexport { buildDispatchPrompt, DISPATCH_DISCIPLINE_FENCE, DISPATCH_DISCIPLINE_BODY };\n",
+      );
       dispatchPure = await import(pathToFileURL(file).href + "?v=" + Date.now());
     }
     ck.ok(
@@ -444,16 +448,18 @@ try {
       digestFixture,
     );
     const text = built.ok ? built.text : "";
+    const disciplineStart = text.indexOf("【纪律（");
     const traceStart = text.indexOf("【主控尾块轨迹");
     const digestStart = text.indexOf("【项目 digest");
     const personaStart = text.indexOf("# persona 原型");
     const pointerStart = text.indexOf("先 Read 任务包 packs/mD/pack.md");
     const traceSection = traceStart >= 0 && digestStart > traceStart ? text.slice(traceStart, digestStart) : "";
     ck.ok(
-      "W4-DISPATCH-01 组装序：轨迹节置顶最前 → digest 条件节 → persona 正文 → 指针句+CONTRACT 三行",
+      "W4-DISPATCH-01 组装序（v1.1.2 四段式，用户裁定终序）：纪律段置顶（offset 0）→ 轨迹节 → digest 条件节 → persona 正文 → 指针句+CONTRACT 三行（五锚 discipline<trace<digest<persona<pointer）",
       built.ok === true &&
         built.blocks === 2 &&
-        traceStart === 0 &&
+        disciplineStart === 0 &&
+        disciplineStart < traceStart &&
         traceStart < digestStart &&
         digestStart < personaStart &&
         personaStart < pointerStart &&
@@ -462,7 +468,7 @@ try {
         ) &&
         built.worker === "orch-worker#1" &&
         built.channel === "mD",
-      { order: [traceStart, digestStart, personaStart, pointerStart], blocks: built.blocks },
+      { order: [disciplineStart, traceStart, digestStart, personaStart, pointerStart], blocks: built.blocks },
     );
     ck.ok(
       "W4-DISPATCH-02 去协议行：轨迹节无 ts:/seq: 行，五业务字段逐字在位",
@@ -506,7 +512,7 @@ try {
       digestFixture,
     );
     ck.ok(
-      "W4-DISPATCH-05 字节确定性：同输入两次组装逐字节相等；digest 缺失整节省略；空日志=persona 单段起头",
+      "W4-DISPATCH-05 字节确定性：同输入两次组装逐字节相等；digest 缺失整节省略；空日志=纪律段→persona 衔接起头（纪律恒在 offset 0，v1.1.2 四段式）",
       built.ok === true &&
         again.ok === true &&
         built.text === again.text &&
@@ -518,7 +524,14 @@ try {
             personaFixture,
             null,
           );
-          return empty.ok === true && empty.text.startsWith(personaFixture) && !empty.text.includes("【主控尾块轨迹");
+          return (
+            empty.ok === true &&
+            empty.text.startsWith("【纪律（") &&
+            !empty.text.includes("【主控尾块轨迹") &&
+            !empty.text.includes("【项目 digest") &&
+            empty.text.indexOf(personaFixture) > 0 &&
+            empty.text.slice(empty.text.indexOf(personaFixture)).startsWith(personaFixture)
+          );
         })(),
       { deterministic: built.ok && again.ok && built.text === again.text, digestSections: text.split("【项目 digest").length - 1 },
     );
@@ -534,9 +547,9 @@ try {
       oversized.ok === false && /超预算/.test(oversized.error) && /30000/.test(oversized.error),
       oversized.error,
     );
-    // ---- W4-PREFIX（v1.1.1 W21 重写）：fallback 前缀=persona 单段 + 组装确定性（夹具 v2 形） ----
-    // 宿主 Agent 降级通道（RP-3）不再有共享头/粘贴面：无日志无 digest 时首条消息=persona 单段 +
-    // 指针句 + CONTRACT 三行；同窗口内只看 persona 前缀，任务面随 pack/worker 变化。
+    // ---- W4-PREFIX（v1.1.1 W21 重写→v1.1.2 I1 四段式改写）：fallback 前缀锚=纪律段 + 组装确定性（夹具 v2 形） ----
+    // 宿主 Agent 降级通道（RP-3）不再有共享头/粘贴面：无日志无 digest 时首条消息=纪律段（offset 0 恒同）+
+    // persona 段 + 指针句 + CONTRACT 三行；同窗口内纪律段恒同，任务面随 pack/worker 变化。
     const personaReal = fs
       .readFileSync(path.join(PLUGIN_DIR, "agents", "orch-worker.md"), "utf8")
       .replace(/\r\n/g, "\n")
@@ -555,22 +568,28 @@ try {
       personaReal,
       null,
     );
-    const headLen = personaReal.length;
+    // v1.1.2 I1（四段式重组）：恒同面前移——fallback 前缀锚=纪律段（offset 0 恒在，全角色同文），
+    // persona 起为职责段；无日志无 digest 时首条消息=纪律段 + persona + 指针句 + CONTRACT 三行。
+    const personaAt1 = pf1.ok ? pf1.text.indexOf(personaReal) : -1;
+    const head1 = pf1.ok ? pf1.text.slice(0, personaAt1) : "";
+    const head2 = pf2.ok ? pf2.text.slice(0, pf2.text.indexOf(personaReal)) : "";
     const tailRegex = /^先 Read 任务包 [^\n]+\n\[channel\] mB2\n\[worker\] [^\n]+\n\[token\] [0-9a-f]{32}$/;
     ck.ok(
-      "W4-PREFIX-01 fallback 前缀=persona 单段：两派发（不同 pack/worker）persona 前缀逐字节相等，任务面尾部各异",
+      "W4-PREFIX-01 fallback 前缀锚=纪律段（v1.1.2 offset 0 恒同面前移）：两派发（不同 pack/worker）纪律段前缀逐字节相等，任务面尾部各异",
       pf1.ok === true &&
         pf2.ok === true &&
-        pf1.text.slice(0, headLen) === personaReal &&
-        pf2.text.slice(0, headLen) === personaReal &&
-        pf1.text.slice(0, headLen) === pf2.text.slice(0, headLen) &&
-        pf1.text.slice(headLen + 2) !== pf2.text.slice(headLen + 2),
-      { headLen, t1: pf1.ok ? pf1.text.slice(headLen, headLen + 40) : pf1.error },
+        head1.startsWith("【纪律（") &&
+        head1 === head2 &&
+        pf1.text.slice(personaAt1).startsWith(personaReal) &&
+        pf1.text !== pf2.text,
+      { headLen: head1.length, t1: pf1.ok ? pf1.text.slice(0, 40) : pf1.error },
     );
     ck.ok(
-      "W4-PREFIX-02 fallback 尾块形制：指针句先行、[channel] 紧随、[worker]/[token] 收尾（CONTRACT 三行自包解析）",
-      pf1.ok === true && tailRegex.test(pf1.text.slice(headLen + 2)),
-      { tail: pf1.ok ? pf1.text.slice(headLen + 2).split("\n").slice(0, 2) : pf1.error },
+      "W4-PREFIX-02 fallback 尾块形制：指针句先行、[channel] 紧随、[worker]/[token] 收尾（CONTRACT 三行自包解析；persona 段后随行，形制不变）",
+      pf1.ok === true &&
+        personaAt1 >= 0 &&
+        tailRegex.test(pf1.text.slice(personaAt1 + personaReal.length + 2)),
+      { tail: pf1.ok ? pf1.text.slice(personaAt1 + personaReal.length + 2).split("\n").slice(0, 2) : pf1.error },
     );
     const logNext = v2(7, { ts: "2026-10-26T04:00:00.000Z", next: "跑三基线+run-all 收口" });
     const logPrev = v2(6, { ts: "2026-10-25T04:00:00.000Z", next: "跑三基线+run-all 收口" });
@@ -588,13 +607,15 @@ try {
       personaReal,
       null,
     );
+    const discFace = (s) => s.indexOf("【主控尾块轨迹");
     ck.ok(
-      "W4-PREFIX-03b 跨窗口（业务字段 next 变）：轨迹节失配=预期 cache miss 非错误，persona 前缀与尾块仍恒同",
+      "W4-PREFIX-03b 跨窗口（业务字段 next 变）：恒同面=纪律段前缀（v1.1.2 offset 0，轨迹起各派发分叉属预期非错误）",
       w3.ok === true &&
         w3.text !== w1.text &&
-        w3.text.slice(0, w3.text.indexOf(personaReal)) !== w1.text.slice(0, w1.text.indexOf(personaReal)) &&
-        w3.text.slice(w3.text.indexOf(personaReal)) === w1.text.slice(w1.text.indexOf(personaReal)),
-      { diff: w3.ok && w3.text !== w1.text },
+        w1.text.slice(0, discFace(w1.text)) === w3.text.slice(0, discFace(w3.text)) &&
+        w1.text.slice(0, discFace(w1.text)).startsWith("【纪律（") &&
+        w3.text.slice(discFace(w3.text)) !== w1.text.slice(discFace(w1.text)),
+      { diff: w3.ok && w3.text !== w1.text, discLen: discFace(w1.text) },
     );
     {
       const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
@@ -605,6 +626,59 @@ try {
         "W4-PREFIX-04 组装确定性静态锁：纯区内零 Date/Date.now/随机源（同输入必同字节；W21 SKILL 静态面归 po-static）",
         region.length > 0 && !/new Date\(|Date\.now\(|Math\.random\(/.test(region),
         { regionBytes: region.length, hasDate: /new Date\(|Date\.now\(/.test(region) },
+      );
+    }
+    // ---- v1.1.2 I1 新增三腿（D2 §6 断言处置表 v2：新增-1/2/3，防漂移锁） ----
+    {
+      const fence = dispatchPure.DISPATCH_DISCIPLINE_FENCE || "";
+      const body = dispatchPure.DISPATCH_DISCIPLINE_BODY || "";
+      const rows = body.match(/^\| [1-9] \| /gm) || [];
+      const row10 = body.includes("\n| 10 | ");
+      ck.ok(
+        "W4-DISPATCH-10 纪律段章号锁（新增-1，沿 C1-09 型制）：fence 置顶常量在位，表格 10 行齐（| 1 |..| 10 |），每行携 SKILL 章号权威，第 9 条=P2P 配对交互",
+        fence.startsWith("【纪律（") &&
+          fence.includes("与包 RULES 冲突时以包 RULES 为准") &&
+          rows.length === 9 &&
+          row10 &&
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every((n) => body.includes(`\n| ${n} | `)) &&
+          (body.match(/SKILL 第 \d+/g) || []).length >= 10 &&
+          body.includes("| 9 | P2P 配对交互"),
+        { rows: rows.length, row10, fenceHead: fence.slice(0, 20) },
+      );
+      const noDigest = buildDispatchPrompt(
+        mkMission("mD", "packs/mD/pack.md"),
+        packFixture,
+        logFixture,
+        personaFixture,
+        null,
+      );
+      const nd = noDigest.ok ? noDigest.text : "";
+      ck.ok(
+        "W4-DISPATCH-11 衔接序锁（新增-2）：digest 缺省且日志在=纪律→轨迹两段衔接（offset 0=纪律 fence，无 digest 节）",
+        noDigest.ok === true &&
+          nd.startsWith(fence) &&
+          nd.indexOf("【主控尾块轨迹") > 0 &&
+          nd.indexOf("【主控尾块轨迹") < nd.indexOf("# persona 原型") &&
+          !nd.includes("【项目 digest"),
+        { discipline: nd.startsWith(fence), traceAt: nd.indexOf("【主控尾块轨迹") },
+      );
+      ck.ok(
+        "W4-DISPATCH-12 P2P 条字面锁（新增-3，裁定 4 防漂移）：纪律段含「p2p_ask/p2p_answer」与「blocked/question」字面+补注回退句",
+        body.includes("p2p_ask/p2p_answer") &&
+          body.includes("blocked/question") &&
+          body.includes("P2P 补注：") &&
+          body.includes("stdio 直连"),
+        { hasAsk: body.includes("p2p_ask/p2p_answer"), hasBq: body.includes("blocked/question") },
+      );
+      ck.ok(
+        "W4-DISPATCH-13 迭代闭环条字面锁（追加裁定 2026-10-26 MaimaiBOT R3）：第 10 条在位——迭代轮不 done/milestone 保持 running/无人应答/回落开新轮",
+        body.includes("以下 10 条纪律") &&
+          body.includes("迭代轮中不 report(kind=done)") &&
+          body.includes("以 milestone 上报保持 running") &&
+          body.includes("后续 p2p 将无人应答") &&
+          body.includes("回落=等主控开新轮 mission") &&
+          body.includes("2026-10-26 MaimaiBOT"),
+        { has10: body.includes("以下 10 条纪律"), hasIter: body.includes("迭代轮中不 report(kind=done)") },
       );
     }
   }
@@ -714,8 +788,9 @@ try {
     const ptxt = promptFile && fs.existsSync(promptFile) ? fs.readFileSync(promptFile, "utf8") : "";
     const pTrace = ptxt.slice(0, ptxt.indexOf("# orch-worker"));
     ck.ok(
-      "W4-DISPATCH-09c 审计 prompt 落盘：轨迹节置顶（v2 块去协议行、旧→新）→ persona 正文 → 指针句+CONTRACT（digest 缺省整节省略）",
-      ptxt.startsWith("【主控尾块轨迹（启动器自动注入") &&
+      "W4-DISPATCH-09c 审计 prompt 落盘（v1.1.2 四段式）：纪律段置顶 → 轨迹节（v2 块去协议行、旧→新）→ persona 正文 → 指针句+CONTRACT（digest 缺省整节省略）",
+      ptxt.startsWith("【纪律（") &&
+        ptxt.indexOf("【纪律（") < ptxt.indexOf("【主控尾块轨迹（启动器自动注入") &&
         pTrace.includes("next: trace-旧") &&
         pTrace.indexOf("next: trace-旧") < pTrace.indexOf("next: trace-新") &&
         !/^(ts|seq): /m.test(pTrace) &&
