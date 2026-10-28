@@ -9,6 +9,14 @@
  *
  * 运行方式：node tests/suites/crv2-pack.mjs [--root <临时根>]
  * 前置：node >= 20；PATH 上有 git（d00f94c 基线导出 + worktree 物化）；无网。
+ *
+ * §0 v1.2.2 施工留痕（design v1.2.2 §4；偏差按行为并集处置，l-20261022-8fa733）：
+ *   新增 LSN-01..04（教训转投节）+ TRC-01/02/03/04/05（滞回读侧+边界+文案）；改写
+ *   W4-DISPATCH-01（五锚→六锚：+scoping 恒在行；lessons 位次由 LSN-03 七锚钉——本断言
+ *   夹具 mkPack 无 LESSONS 节，为 W4-PREFIX-01 head 恒同面免查项（QA-R1 L-3）不加节，
+ *   design「五锚→七锚序」按行为并集由 -01 六锚+LSN-03 七锚共同承载）、W4-DISPATCH-04
+ *   （「12 块取尾 10」→「12 块 ≤20 全量」滞回语义）。LSN fixture 节头自 server.mjs
+ *   源码提取 buildPackMarkdown 真实渲染字面（CT 契约纵深，QA-R1 M-5）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -396,7 +404,7 @@ try {
       fs.writeFileSync(
         file,
         src.slice(i, j + endMark.length) +
-          "\nexport { buildDispatchPrompt, DISPATCH_DISCIPLINE_FENCE, DISPATCH_DISCIPLINE_BODY };\n",
+          "\nexport { buildDispatchPrompt, DISPATCH_DISCIPLINE_FENCE, DISPATCH_DISCIPLINE_BODY, DISPATCH_LESSONS_FENCE };\n",
       );
       dispatchPure = await import(pathToFileURL(file).href + "?v=" + Date.now());
     }
@@ -452,24 +460,28 @@ try {
     const disciplineStart = text.indexOf("【纪律（");
     const traceStart = text.indexOf("【主控尾块轨迹");
     const digestStart = text.indexOf("【项目 digest");
+    const lessonsStart = text.indexOf("【相关教训（");
+    const scopingStart = text.indexOf("【哨兵 scoping");
     const personaStart = text.indexOf("# persona 原型");
     const pointerStart = text.indexOf("先 Read 任务包 packs/mD/pack.md");
     const traceSection = traceStart >= 0 && digestStart > traceStart ? text.slice(traceStart, digestStart) : "";
     ck.ok(
-      "W4-DISPATCH-01 组装序（v1.1.2 四段式，用户裁定终序）：纪律段置顶（offset 0）→ 轨迹节 → digest 条件节 → persona 正文 → 指针句+CONTRACT 三行（五锚 discipline<trace<digest<persona<pointer）",
+      "W4-DISPATCH-01 组装序（v1.1.2 四段式+v1.2.2 教训节；本夹具无 LESSONS 节=六锚）：纪律段置顶（offset 0）→ 轨迹节 → digest 条件节 → scoping 恒在行 → persona 正文 → 指针句+CONTRACT 三行（六锚 discipline<trace<digest<scoping<persona<pointer；lessons 位次由 LSN-03 七锚钉）",
       built.ok === true &&
         built.blocks === 2 &&
         disciplineStart === 0 &&
         disciplineStart < traceStart &&
         traceStart < digestStart &&
-        digestStart < personaStart &&
+        digestStart < scopingStart &&
+        scopingStart < personaStart &&
         personaStart < pointerStart &&
+        lessonsStart === -1 &&
         text.slice(pointerStart).startsWith(
           "先 Read 任务包 packs/mD/pack.md，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。\n[channel] mD\n[worker] orch-worker#1\n[token] 0123456789abcdef0123456789abcdef",
         ) &&
         built.worker === "orch-worker#1" &&
         built.channel === "mD",
-      { order: [disciplineStart, traceStart, digestStart, personaStart, pointerStart], blocks: built.blocks },
+      { order: [disciplineStart, traceStart, digestStart, scopingStart, personaStart, pointerStart], blocks: built.blocks },
     );
     ck.ok(
       "W4-DISPATCH-02 去协议行：轨迹节无 ts:/seq: 行，五业务字段逐字在位",
@@ -494,13 +506,12 @@ try {
     const cappedTrace = capped.ok ? capped.text.slice(0, capped.text.indexOf("# persona 原型")) : "";
     const openCount = (cappedTrace.match(/<!-- orch-tail v2/g) || []).length;
     ck.ok(
-      "W4-DISPATCH-04 轨迹 ≤10 块：12 块日志只取最新 10 块（最旧两块出队，置顶节恒 10 块）",
+      "W4-DISPATCH-04 轨迹滞回（v1.2.2 自「12 块取尾 10」改写）：12 块日志 ≤20 → 全量 12 块注入（无出队，最旧两块在位；>20 尾 10 腿由 TRC-02/05 钉）",
       capped.ok === true &&
-        capped.blocks === 10 &&
-        openCount === 10 &&
-        !cappedTrace.includes("next: next-01") &&
-        !cappedTrace.includes("next: next-02") &&
-        cappedTrace.includes("next: next-03") &&
+        capped.blocks === 12 &&
+        openCount === 12 &&
+        cappedTrace.includes("next: next-01") &&
+        cappedTrace.includes("next: next-02") &&
         cappedTrace.includes("next: next-12") &&
         !cappedTrace.includes("【项目 digest"),
       { blocks: capped.blocks, openCount },
@@ -548,6 +559,115 @@ try {
       oversized.ok === false && /超预算/.test(oversized.error) && /30000/.test(oversized.error),
       oversized.error,
     );
+    // ---- v1.2.2 LSN（教训转投节）+ TRC（滞回读侧）：design v2 §4。LSN fixture 节头
+    // 自 server.mjs 源码提取 buildPackMarkdown 真实渲染字面（CT 契约纵深，QA-R1 M-5）；
+    // mkPack 本体不加节（W4-PREFIX-01 head 恒同面免查项，QA-R1 L-3）。
+    {
+      const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8").replace(/\r\n/g, "\n");
+      const lessonsHeaderReal = (srvSrc.match(/"(## LESSONS（[^"]*)"/) || [])[1] || "";
+      const lessonsBody = [
+        "- [pitfall·l-lsn] 触发：教训条目一（LSN-01 fixture）",
+        "  修正：缩进续行逐字保留",
+        "- [error-fix·l-lsn2] 触发：教训条目二",
+        "  修正：条目二修正行",
+        "ts: 教训内协议形状行不被剥离（LSN-04 纯度）",
+      ].join("\n");
+      const lessonsPackText = packFixture + "\n\n" + lessonsHeaderReal + "\n" + lessonsBody + "\n";
+      const lessonsFence = dispatchPure.DISPATCH_LESSONS_FENCE || "【相关教训（";
+      const builtL = buildDispatchPrompt(
+        mkMission("mD", "packs/mD/pack.md"),
+        lessonsPackText,
+        logFixture,
+        personaFixture,
+        digestFixture,
+      );
+      const tL = builtL.ok ? builtL.text : "";
+      const expectedLessons = [lessonsFence, ...lessonsBody.split("\n"), ""].join("\n");
+      ck.ok(
+        "LSN-01 有节包：教训转投 fence 在位，节体与包 LESSONS 节逐字等值（含 id 行+缩进续行）；fixture 节头=buildPackMarkdown 真实渲染字面（CT 纵深）",
+        builtL.ok === true &&
+          lessonsHeaderReal.startsWith("## LESSONS（") &&
+          tL.includes(lessonsFence) &&
+          tL.includes(expectedLessons),
+        { headerFromServer: lessonsHeaderReal.slice(0, 24), fenceHit: tL.includes(lessonsFence) },
+      );
+      {
+        const none = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, logFixture, personaFixture, null);
+        const blank = buildDispatchPrompt(
+          mkMission("mD", "packs/mD/pack.md"),
+          packFixture + "\n\n" + lessonsHeaderReal + "\n\n",
+          logFixture,
+          personaFixture,
+          null,
+        );
+        ck.ok(
+          "LSN-02 无节/空节包：整节省略（CR-04）——无节包与「节头+空行」空节包均不渲染教训节",
+          none.ok === true &&
+            !none.text.includes(lessonsFence) &&
+            blank.ok === true &&
+            !blank.text.includes(lessonsFence),
+          { noneOk: none.ok, blankOk: blank.ok },
+        );
+      }
+      const oL = ["【纪律（", "【主控尾块轨迹", "【项目 digest", "【相关教训（", "【哨兵 scoping", "# persona 原型", "先 Read 任务包 packs/mD/pack.md"].map((s) => tL.indexOf(s));
+      ck.ok(
+        "LSN-03 位次锚（七锚序）：纪律<trace<digest<lessons<scoping<persona<pointer（教训节=digest 后、scoping 恒在行前，design §2-②）",
+        builtL.ok === true &&
+          oL[0] === 0 &&
+          oL.every((v) => v >= 0) &&
+          oL.every((v, k) => k === 0 || v > oL[k - 1]),
+        { order: oL },
+      );
+      ck.ok(
+        "LSN-04 转投纯度：节体零加工——协议形状行（ts: …）原样保留+缩进续行逐字在位（字节等值由 LSN-01 expectedLessons 承载）",
+        tL.includes("ts: 教训内协议形状行不被剥离（LSN-04 纯度）") &&
+          tL.includes("  修正：缩进续行逐字保留"),
+        { tsShaped: tL.includes("ts: 教训内协议形状行不被剥离（LSN-04 纯度）") },
+      );
+      const mkMany = (n) => Array.from({ length: n }, (_, k) => v2(k + 1)).join("\n\n");
+      const t15 = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, mkMany(15), personaFixture, null);
+      ck.ok(
+        "TRC-01 15 块日志 → 全量 15（≤20 全量腿）",
+        t15.ok === true && t15.blocks === 15 && t15.text.includes("next: next-01") && t15.text.includes("next: next-15"),
+        { blocks: t15.blocks },
+      );
+      const t25 = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, mkMany(25), personaFixture, null);
+      const tr25 = t25.ok ? t25.text.slice(0, t25.text.indexOf("# persona 原型")) : "";
+      ck.ok(
+        "TRC-02 25 块日志 → 尾 10 且第 16 块在位（防 slice(-9) 假绿）",
+        t25.ok === true &&
+          t25.blocks === 10 &&
+          tr25.includes("next: next-16") &&
+          tr25.includes("next: next-25") &&
+          !tr25.includes("next: next-15") &&
+          !tr25.includes("next: next-01"),
+        { blocks: t25.blocks },
+      );
+      const t20 = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, mkMany(20), personaFixture, null);
+      ck.ok(
+        "TRC-04 恰 20 块 → 全量 20（≤ 边界腿，严格大于语义）",
+        t20.ok === true && t20.blocks === 20 && t20.text.includes("next: next-01") && t20.text.includes("next: next-20"),
+        { blocks: t20.blocks },
+      );
+      const t21 = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, mkMany(21), personaFixture, null);
+      const tr21 = t21.ok ? t21.text.slice(0, t21.text.indexOf("# persona 原型")) : "";
+      ck.ok(
+        "TRC-05 恰 21 块 → 尾 10（> 边界+尾部保真腿：第 12 块在位、第 11 块不现）",
+        t21.ok === true &&
+          t21.blocks === 10 &&
+          tr21.includes("next: next-12") &&
+          tr21.includes("next: next-21") &&
+          !tr21.includes("next: next-11") &&
+          !tr21.includes("next: next-01"),
+        { blocks: t21.blocks },
+      );
+      const oversizedT = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, logFixture, "x".repeat(30000), null);
+      ck.ok(
+        "TRC-03 超预算错误文案含滞回新措辞「滞回 20/裁 10」（编号全稿唯一，QA-R1 L-1）",
+        oversizedT.ok === false && /滞回 20\/裁 10/.test(oversizedT.error),
+        oversizedT.error,
+      );
+    }
     // ---- W4-PREFIX（v1.1.1 W21 重写→v1.1.2 I1 四段式改写）：fallback 前缀锚=纪律段 + 组装确定性（夹具 v2 形） ----
     // 宿主 Agent 降级通道（RP-3）不再有共享头/粘贴面：无日志无 digest 时首条消息=纪律段（offset 0 恒同）+
     // persona 段 + 指针句 + CONTRACT 三行；同窗口内纪律段恒同，任务面随 pack/worker 变化。

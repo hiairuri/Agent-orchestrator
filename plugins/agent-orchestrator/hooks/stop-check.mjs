@@ -212,13 +212,18 @@ function recordMirrorIfEnabled(input, argv) {
    without a marker are a zero-write no-op (ORT-7). The legacy v1 file is only a
    seed source: when the log is absent and the old full state parses, it is
    re-rendered as the first v2 entry (idempotent; never re-seeded while the log
-   exists) and all three legacy artifacts are swept after a successful write. */
+   exists) and all three legacy artifacts are swept after a successful write.
+   Block-count lifecycle (v1.2.2 hysteresis): TRIM_AT=20 / TRIM_TO=10 — blocks
+   accumulate without sliding up to 20 (nothing dropped at the top); the 21st
+   append triggers one atomic rewrite keeping the newest 10 incl. the new
+   block; sawtooth 10→20→10, one concentrated trim every 10 dispatch turns. */
 const COORD_TAIL_MARK = "<!-- orch-tail v2";
 const COORD_TAIL_CLOSE = "<!-- orch-tail-end -->";
 const COORD_TAIL_MARK_V1 = "<!-- orch-tail v1";
 const COORD_TAIL_CLOSE_V1 = "-->";
 const COORD_TAIL_LOG_FILE = "coord-tail-log.md";
-const COORD_TAIL_LOG_MAX_BLOCKS = 10;
+const COORD_TAIL_LOG_TRIM_AT = 20; // v1.2.2 滞回上限（累积至此不滑动，最上不丢；与 server DISPATCH_TRACE_TRIM_AT 值 twin）
+const COORD_TAIL_LOG_TRIM_TO = 10; // v1.2.2 裁剪目标（触发时原子重写保留的最新块数，含新块；与 server DISPATCH_TRACE_TRIM_TO 值 twin）
 const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];
 const COORD_TAIL_FIELD_SET = new Set(COORD_TAIL_FIELDS);
 const COORD_TAIL_CAPS = {
@@ -490,12 +495,14 @@ function coordTailSeedV1Text(contextDir) {
   });
 }
 
-/** Append one full entry; >K entries → read-trim-keep-newest-K atomic rewrite. */
+/** Append one full entry; v1.2.2 hysteresis: past TRIM_AT (the 21st block) →
+ *  one atomic rewrite keeping the newest TRIM_TO blocks incl. the new one;
+ *  otherwise plain append at EOF (nothing dropped at the top). */
 function coordTailAppendLog(file, blockText, blocks) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (blocks.length + 1 > COORD_TAIL_LOG_MAX_BLOCKS) {
+  if (blocks.length + 1 > COORD_TAIL_LOG_TRIM_AT) {
     const keep = blocks
-      .slice(blocks.length - (COORD_TAIL_LOG_MAX_BLOCKS - 1))
+      .slice(blocks.length - (COORD_TAIL_LOG_TRIM_TO - 1))
       .map((b) => b.lines.join("\n"));
     coordTailWrite(file, [...keep, blockText].join("\n\n") + "\n");
     return;

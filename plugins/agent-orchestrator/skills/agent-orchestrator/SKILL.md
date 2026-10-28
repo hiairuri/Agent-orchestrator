@@ -30,7 +30,7 @@ OV-1 读者：本文件只给**主控 agent** 读；子代理不加载本文件�
 主控（唯一轮询者与答题者）
  ├─ dispatch(mission_id, mode:"nested") → 组装出口（主形态）：不 spawn，返 {mission_id, token, prompt, pack_path}，
  │      主控把 prompt 交宿主 Agent 作首条消息嵌套发出（组包链复用，四段式同下）
- │      ↑ prompt = 启动器组装（四段式，两形态同链）：纪律段置顶 + 尾块轨迹（PL-10）+ digest 条件节 + persona 原型正文 + 指针句与 CONTRACT 三行
+ │      ↑ prompt = 启动器组装（四段式，两形态同链）：纪律段置顶 + 尾块轨迹（PL-10）+ digest 条件节 + 教训转投节（v1.2.2）+ 哨兵 scoping 恒在行 + persona 原型正文 + 指针句与 CONTRACT 三行
  │      ← 宿主 Agent 返回（主控在场直收）+ report 事件（尾块态，第 17 章）
  ├─ dispatch(mission_id)〔缺省 mode=headless〕→ -p 启动器（fire-and-forget 备选）：拉起 zcode -p 独立会话（--mode yolo）
  │      ← report 事件（主通道）/ 完成通知（含输出文件路径）
@@ -66,7 +66,7 @@ OV-8 协议契约卡指针：跨进程写读面（sentinel 文件族/spool/root.
 
 DP-1 建 mission：`board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})`；original_prompt 必填（跨会话恢复种子）。
 DP-2 组包：`context_pack(mission_id, title, task, read_first, rules, upstream_context)` → `{pack_paths, token, channel}`（`prompt_template` 不再回显；三行契约唯一权威=包 CONTRACT，模板见第 3 章）。
-DP-3 派发：`board upsert → context_pack → dispatch(mission_id, mode:"nested")` 三调用（零 prompt 组装）。nested 组装出口（主形态，v1.2 M5-1）不 spawn 进程，返 `{mission_id, token, prompt, pack_path}`——主控把 `prompt` 作为首条消息交宿主 Agent 嵌套发出（`run_in_background=true`）；组包链复用（`dispatch` 自取包与日志组装四段式=纪律段置顶〔全角色通用编排纪律，恒在〕→尾块轨迹〔≤10 块去 ts:/seq:，旧→新〕→digest 条件节→persona 原型正文→指针句+CONTRACT 三行），派发纪律靠工具面内嵌校验（CONTRACT 三行/token 鉴权/scope yolo 闸，RP-1 联动）。-p 形态（缺省 mode）=fire-and-forget 备选（主控上下文预算紧张或需脱离会话存续时用，RP-1）；宿主 GP 形态为降级备选（模型事务失败/需中途 steer，RP-3）。
+DP-3 派发：`board upsert → context_pack → dispatch(mission_id, mode:"nested")` 三调用（零 prompt 组装）。nested 组装出口（主形态，v1.2 M5-1）不 spawn 进程，返 `{mission_id, token, prompt, pack_path}`——主控把 `prompt` 作为首条消息交宿主 Agent 嵌套发出（`run_in_background=true`）；组包链复用（`dispatch` 自取包与日志组装四段式=纪律段置顶〔全角色通用编排纪律，恒在〕→尾块轨迹〔≤20 块全量，>20 取尾 10；去 ts:/seq:，旧→新〕→digest 条件节→教训转投节（v1.2.2）→哨兵 scoping 恒在行→persona 原型正文→指针句+CONTRACT 三行），派发纪律靠工具面内嵌校验（CONTRACT 三行/token 鉴权/scope yolo 闸，RP-1 联动）。-p 形态（缺省 mode）=fire-and-forget 备选（主控上下文预算紧张或需脱离会话存续时用，RP-1）；宿主 GP 形态为降级备选（模型事务失败/需中途 steer，RP-3）。
 DP-4 worker 名同源：Agent 后台任务名 = 包 CONTRACT 的 [worker] 行；`context_pack` 显式传 `worker_name="<实际任务名>"`（如 `orch-impl#9`），包 CONTRACT / result 两处取值一致；缺省 `orch-worker#N`。nested 同律：宿主 Agent 任务名取回执 `worker` 字段（包 CONTRACT 同源）。
 DP-5 记派发：`dispatch` 回执即记账（server 自动落 `dispatch={mode, spawned_by_session}` 并 drafted→dispatched，主控无需补 upsert 状态）——nested 记 `mode:"nested"`（agent_id 留空：主控在场直收、哨兵默认不盯；需哨兵兜底可后续 upsert 补 `agent_id`）；-p 记 `mode:"headless"`（`session_id`=回执快捕值，快捕失败由 result 侧车回填，TS-19）。宿主 GP 通道备选记 `dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}`。worker 首个 report 经内部旁路演进 running（外部 upsert 不达 running，第 13 章 DL-5）。
 DP-6 拉哨兵：本回合首次 -p/宿主后台派发后，同一条消息后台连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`；阈值与待命语义见第 11 章。纯 nested 派发可免本 ritual（主控在场直收结果，且 server 组装出口已探活补员——M9-1 触发面②）；混派时照发（-p 完成通知丢失防线）。
@@ -142,7 +142,7 @@ L 档附加（仅 L 档出现）：任务应已预拆阶段或转 workflow——
 - 验证/测试结果（如适用）
 ````
 
-**派发 prompt 尾块**（启动器组装形状，四段式：`dispatch(mission_id, mode?)` 自取包与日志，两形态〔nested 组装出口/-p 启动器〕同链同构，首条消息=纪律段（全角色通用编排纪律，恒在、offset 0）→尾块轨迹节（≤10 块去 ts:/seq:、旧→新）→digest 条件节→persona 原型正文→指针句+CONTRACT 三行；`context_pack` 回执给出 `pack_paths`/`token`/`channel`，`prompt_template` 不回显；三行契约唯一权威=包 CONTRACT，尾块三行供 bg-gate presence 检测〔-p 直发与 nested 宿主 Agent 调用同检〕。下列模板保留为启动器产物参照，主控不手写）：
+**派发 prompt 尾块**（启动器组装形状，四段式：`dispatch(mission_id, mode?)` 自取包与日志，两形态〔nested 组装出口/-p 启动器〕同链同构，首条消息=纪律段（全角色通用编排纪律，恒在、offset 0）→尾块轨迹节（≤20 块全量，>20 取尾 10；去 ts:/seq:、旧→新）→digest 条件节→教训转投节（条件，任务包 LESSONS 节逐字）→哨兵 scoping 恒在行→persona 原型正文→指针句+CONTRACT 三行；`context_pack` 回执给出 `pack_paths`/`token`/`channel`，`prompt_template` 不回显；三行契约唯一权威=包 CONTRACT，尾块三行供 bg-gate presence 检测〔-p 直发与 nested 宿主 Agent 调用同检〕。下列模板保留为启动器产物参照，主控不手写）：
 
 ```
 先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。
@@ -503,7 +503,7 @@ PL-6 grill#3 设计确认默认必开；豁免判据 = 改动面 ≤2 波 ∧ �
 PL-7 grill 格式纪律：一轮问全部前沿；每问带推荐答案；用户答「是」即采纳该问措辞；首行标注「grill#N：<主题>」；结果回填策划档 §grill 节。
 PL-8 提问分流：事实类问题派代理查证（orch-scout）；决策类问题问用户（第 4 章「需用户拍板」行）。
 PL-9 主控组包 checklist（每波派发前逐项过）：context_pack 必传 worker_name（DP-4 同源）；波前断言锁 grep 预检（先 grep tests/ 钉既有行为断言面再动手）；OPEN 项发版门逐条对账；播报只报增量。
-PL-10 尾部契约块（A1，v2 形制）：①派发轮收工的最后一条 assistant 消息尾部携 `<!-- orch-tail v2` … `<!-- orch-tail-end -->` 尾块（成对闭合、只取消息最后一组完整对、尾锚定：闭标签=消息末非空行）；stop-check 把全形条目追加进 `<存储根>/context/coord-tail-log.md`（日志唯一源，封顶 10 块；v1.1.1 派发条件式：无派发轮不写——尾块唯一消费者是子代理，无派发即零消费，既有材料态窗口内复用不重写），守 ORT-1..8：标记对逐字固定（改格式必须升版本并同步 stop-check 与全部消费端）；ts+seq 恒带（seq 从 1 起，0 当前也合法但主控勿用），日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）、注入面去协议行裸块（Q6）——append 无判旧，迟到陈旧块由 10 块帽老化；短形缺省字段=「不变」非「清空」，project/stage 变更轮必须以全形重述；flying 全形=整表替换（≤3 条），短形=`+id`/`-id` 增删（`-` 不存在的 id 忽略不报错）；ruled=最近 3 条裁决 FIFO（主控侧约定：stop-check 只做整表替换，不校验条数与淘汰；全形携最近 3 条整表）；帽=全形 ≤10 行/900B、短形 ≤6 行/400B，超帽或解析失败=该轮不更新（stop-check 拒写+stderr 一行，主控下轮补全形）；无标记轮次不更新；全形触发=project/stage 变更、flying 需整表重述（批量变化>2 或语义歧义）、材料态过龄（now−ts>STALE_T=24h）。②注入=启动器自动（`dispatch(mission_id)`）：首条消息（四段式）=纪律段（全角色通用编排纪律，恒在、offset 0）→尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）→digest 条件节（机器组装，Q8=a，存在时才渲染）→persona 原型正文→指针句+CONTRACT 三行；主控零组装、零转译，不触碰 prompt 文本。③主控恢复态势=Read `<存储根>/context/coord-tail-log.md` 尾部（`Read` 或 probe `file.head tail=true`，TS-10）；日志即唯一源，旧单文件不再存在。④三行契约唯一权威=包 CONTRACT 节；尾块三行由启动器自包 CONTRACT 解析注入，主控不另铸。
+PL-10 尾部契约块（A1，v2 形制）：①派发轮收工的最后一条 assistant 消息尾部携 `<!-- orch-tail v2` … `<!-- orch-tail-end -->` 尾块（成对闭合、只取消息最后一组完整对、尾锚定：闭标签=消息末非空行）；stop-check 把全形条目追加进 `<存储根>/context/coord-tail-log.md`（日志唯一源，滞回窗 20/10——累积至 20 块不滑动（最上不丢），第 21 块触发原子重写裁回最新 10，周期往复；v1.1.1 派发条件式：无派发轮不写——尾块唯一消费者是子代理，无派发即零消费，既有材料态窗口内复用不重写），守 ORT-1..8：标记对逐字固定（改格式必须升版本并同步 stop-check 与全部消费端）；ts+seq 恒带（seq 从 1 起，0 当前也合法但主控勿用），日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）、注入面去协议行裸块（Q6）——append 无判旧，迟到陈旧块由滞回帽老化；短形缺省字段=「不变」非「清空」，project/stage 变更轮必须以全形重述；flying 全形=整表替换（≤3 条），短形=`+id`/`-id` 增删（`-` 不存在的 id 忽略不报错）；ruled=最近 3 条裁决 FIFO（主控侧约定：stop-check 只做整表替换，不校验条数与淘汰；全形携最近 3 条整表）；帽=全形 ≤10 行/900B、短形 ≤6 行/400B，超帽或解析失败=该轮不更新（stop-check 拒写+stderr 一行，主控下轮补全形）；无标记轮次不更新；全形触发=project/stage 变更、flying 需整表重述（批量变化>2 或语义歧义）、材料态过龄（now−ts>STALE_T=24h）。②注入=启动器自动（`dispatch(mission_id)`）：首条消息（四段式）=纪律段（全角色通用编排纪律，恒在、offset 0）→尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）→digest 条件节（机器组装，Q8=a，存在时才渲染）→教训转投节（条件，任务包 LESSONS 节逐字）→哨兵 scoping 恒在行→persona 原型正文→指针句+CONTRACT 三行；主控零组装、零转译，不触碰 prompt 文本。③主控恢复态势=Read `<存储根>/context/coord-tail-log.md` 尾部（`Read` 或 probe `file.head tail=true`，TS-10）；日志即唯一源，旧单文件不再存在。④三行契约唯一权威=包 CONTRACT 节；尾块三行由启动器自包 CONTRACT 解析注入，主控不另铸。
 
 ```text
 先 Read 任务包 <pack_path>，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。

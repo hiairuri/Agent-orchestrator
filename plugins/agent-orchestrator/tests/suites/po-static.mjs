@@ -36,6 +36,13 @@
  *     （H-1 改写者自证耦合）。施工留痕：既有钉面 grep 盘点零 DESIGN.md 读取/断言——
  *     「DESIGN 重写连带改写既有钉面」=空操作；M10 固定文案钉 14 条不动（run-all.mjs
  *     REGISTRY 注释原文有据，QA R1 A.2 核））
+ *   A-v0122-L10（v1.2.2 滞回+教训节波）：W4-05 改写（COORD_TAIL_LOG_MAX_BLOCKS 字面钉 →
+ *     TRIM_AT=20/TRIM_TO=10 双常量钉+旧常量零残留）；W4-08 改写（PL-10 ② 轨迹子句滞回措辞
+ *     +教训转投节+scoping 恒在行）；新增 W4-11 字面等值锁（「≤20 块全量」==3/「教训转投」==4/
+ *     「哨兵 scoping 恒在行」==4/「滞回窗 20/10」==1+旧措辞零残留）。偏差留痕（l-20261022-8fa733）：
+ *     design §4「新增 W4-07」编号已被既有 W4-07（撤译零残留）占用 → 新钉改用空闲编号 W4-11；
+ *     SKILL 组装序四处 site（图行/DP-3/尾块模板/PL-10 ②）按 N-1 同源失真并集一次编辑一致化，
+ *     等值锁计数按并集后实测（design 预写「≤20 块全量」==1 系单 site 口径）。
  *   A-v111-W21（v1.1.1 文档波）：W4-01/02/08 按新 SKILL 重钉（v2 双标签/启动器自动注入/
  *     粘贴·共享头·逐字复用语汇零残留）；W4-05/05b/09/10 按 DESIGN §2 契约名预写日志化锚
  *     （日志文件名/封顶 10/coordTailLogLastFull/三遗留清理/dispatch 注册+runner 文件/
@@ -315,7 +322,7 @@ try {
   // W4-05/09 v1.1.1 W21 预写：按 DESIGN §2 契约名钉日志化锚；实现由 W20 并行车道落地，
   // 本套此刻不要求其绿——绿验证在收尾波（实现与契约名不符只记 Return，不自行改锚）。
   ck.ok(
-    "W4-05 stop-check 抽取/日志契约静态锚（W21 预写，绿验证在收尾波）：v2 标记对/两形制帽/字段白名单/subagent 守卫/日志文件名+封顶",
+    "W4-05 stop-check 抽取/日志契约静态锚（W21 预写→v1.2.2 滞回改写）：v2 标记对/两形制帽/字段白名单/subagent 守卫/日志文件名+滞回 20/10 双常量",
     count(STOP_CHECK, "<!-- orch-tail v2") >= 1 &&
       count(STOP_CHECK, "<!-- orch-tail-end -->") >= 1 &&
       count(STOP_CHECK, "full: { lines: 10, bytes: 900 }") === 1 &&
@@ -323,7 +330,9 @@ try {
       count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];') === 1 &&
       count(STOP_CHECK, '"sess_subagent_"') === 1 &&
       count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";') === 1 &&
-      count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;") === 1,
+      count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;") === 1 &&
+      count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_TO = 10;") === 1 &&
+      count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS") === 0,
     {
       mark: count(STOP_CHECK, "<!-- orch-tail v2"),
       close: count(STOP_CHECK, "<!-- orch-tail-end -->"),
@@ -332,7 +341,9 @@ try {
       fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];'),
       guard: count(STOP_CHECK, '"sess_subagent_"'),
       logFile: count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";'),
-      logCap: count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;"),
+      trimAt: count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;"),
+      trimTo: count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_TO = 10;"),
+      oldCap: count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS"),
     },
   );
   ck.ok(
@@ -363,15 +374,18 @@ try {
       stale: count(STOP_CHECK, "coordTailStale"),
     },
   );
-  // W21 注入面语义锁（v1.1.2 I1 四段式随行改写）：PL-10 注入=启动器自动（纪律段→轨迹→digest→persona→指针+CONTRACT），
+  // W21 注入面语义锁（v1.1.2 I1 四段式→v1.2.2 教训节随行改写）：PL-10 注入=启动器自动
+  // （纪律段→轨迹→digest→教训转投→scoping 恒在行→persona→指针+CONTRACT），
   // 日志存全量尾块（含协议行）/注入面去协议行；粘贴/共享头/逐字复用语汇零残留。
   const PL10 = SKILL.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
   ck.ok(
-    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.1.2 I1 四段式）：纪律段恒在 offset 0/轨迹 ≤10 块去 ts/seq 旧→新/digest 条件节机器组装/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
+    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.2.2 滞回+教训节改写）：纪律段恒在 offset 0/轨迹 ≤20 全量 >20 尾 10 去 ts/seq 旧→新/digest 条件节机器组装/教训转投节/scoping 恒在行/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
     PL10.includes("注入=启动器自动") &&
       PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）") &&
-      PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）") &&
+      PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）") &&
       PL10.includes("digest 条件节（机器组装，Q8=a") &&
+      PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）") &&
+      PL10.includes("哨兵 scoping 恒在行") &&
       PL10.includes("persona 原型正文") &&
       PL10.includes("指针句+CONTRACT 三行") &&
       PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）") &&
@@ -387,13 +401,40 @@ try {
     {
       autoInject: PL10.includes("注入=启动器自动"),
       discipline: PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）"),
-      trajectory: PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）"),
+      trajectory: PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）"),
       digest: PL10.includes("digest 条件节（机器组装，Q8=a"),
+      lessons: PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）"),
+      scoping: PL10.includes("哨兵 scoping 恒在行"),
       fullLog: PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）"),
       bareInject: PL10.includes("注入面去协议行裸块（Q6）"),
       zeroAssembly: PL10.includes("主控零组装、零转译"),
       fence: count(SKILL, "派发首条消息尾块轨迹节"),
       residue: { paste: count(SKILL, "粘贴"), sharedHead: count(SKILL, "共享头"), verbatimReuse: count(SKILL, "逐字复用"), jingjian: count(SKILL, "精简态"), compact: count(SKILL, "compact"), stale: count(SKILL, "stale") },
+    },
+  );
+  // A-v0122-L10（v1.2.2 滞回+教训节字面钉；design §4 PIN 行「新增 W4-07」编号与既有
+  // W4-07（撤译零残留）冲突——按行为并集改用空闲编号 W4-11，偏差留痕本注释与套件 §0，
+  // l-20261022-8fa733）。计数=等值锁：四处 site（第 3 章图行/DP-3/尾块模板/PL-10 ②）
+  // 同波一致化（QA-R2 N-1 同源失真并集处置），多 site 漂移即红。
+  ck.ok(
+    "W4-11 SKILL 滞回+教训节字面等值锁（v1.2.2）：「≤20 块全量」==3（DP-3/尾块模板/PL-10 ②）∧「教训转投」==4（图行+前三者）∧「哨兵 scoping 恒在行」==4 ∧「滞回窗 20/10」==1（PL-10 ①）∧「滞回帽老化」==1",
+    count(SKILL, "≤20 块全量") === 3 &&
+      count(SKILL, "教训转投") === 4 &&
+      count(SKILL, "哨兵 scoping 恒在行") === 4 &&
+      count(SKILL, "滞回窗 20/10") === 1 &&
+      count(SKILL, "滞回帽老化") === 1 &&
+      count(SKILL, "封顶 10 块") === 0 &&
+      count(SKILL, "10 块帽老化") === 0 &&
+      count(SKILL, "≤10 块去") === 0,
+    {
+      cap20: count(SKILL, "≤20 块全量"),
+      lessonsXfer: count(SKILL, "教训转投"),
+      scopingLine: count(SKILL, "哨兵 scoping 恒在行"),
+      hysWindow: count(SKILL, "滞回窗 20/10"),
+      hysCap: count(SKILL, "滞回帽老化"),
+      oldCap: count(SKILL, "封顶 10 块"),
+      oldAging: count(SKILL, "10 块帽老化"),
+      oldTraj: count(SKILL, "≤10 块去"),
     },
   );
   // W21 日志保留链：抽取/解析/渲染/原子写/日志末条全形基线；判旧守卫（(ts,seq)/coordTailRead）

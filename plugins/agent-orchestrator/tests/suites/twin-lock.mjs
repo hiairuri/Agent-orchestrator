@@ -12,6 +12,14 @@
  *   watcher/poller.mjs      RESULT_STATUSES:21(export) missionAck:25  lastResultAt:29(export)  wakeFailureInfo:40(export)
  * VALUE_TWINS 三 site（异名值 twin，均 90000）：mcp/server.mjs:3474 SENTINEL_HEARTBEAT_STALE_MS /
  *   hooks/bg-sentinel.mjs:105 HEARTBEAT_STALE_MS / hooks/bg-gate.mjs:37 HEARTBEAT_STALE_MS（B3：心跳龄 >90s 视为不在岗）。
+ * VALUE_TWINS v1.2.2 扩围 +4（尾块滞回 20/10 异名值 twin，design v1.2.2 §4 TWN 行）：
+ *   mcp/server.mjs DISPATCH_TRACE_TRIM_AT/TO × hooks/stop-check.mjs COORD_TAIL_LOG_TRIM_AT/TO
+ *   （读写两侧漂移即语义分叉：写侧 21 块裁回 10 ↔ 读侧 >20 取尾 10）。
+ * STRING_TWINS v1.2.2 首例非数值 twin（G-3 顺手项）：DISPATCH_TAIL_MARK/CLOSE（server）
+ *   × COORD_TAIL_MARK/CLOSE（stop-check）——协议行字符串字面，引号捕获转义留意（QA-R1 L-5）。
+ * TW-CT v1.2.2 转投契约腿（QA-R1 M-5/G-3）：buildPackMarkdown 包节头字面（## LESSONS（…）
+ *   × 解析器前缀（^## LESSONS）双 site 同文件在位锁——节头改名而无解析随改=转投静默吞教训，
+ *   CT 红即检出；负例腿（前缀盲改副本）红证内建。
  *
  * §0 偏差台账（l-20261022-8fa733：偏差留痕断言文件 §0）：
  *   D1 poller 无 fmtAge 副本（TWIN_SPEC 按文件声明，poller 只锁 3 函数 + 1 常量）。
@@ -48,6 +56,17 @@ const VALUE_TWINS = [
   { rel: "mcp/server.mjs", name: "SENTINEL_HEARTBEAT_STALE_MS", expect: "90000" },
   { rel: "hooks/bg-sentinel.mjs", name: "HEARTBEAT_STALE_MS", expect: "90000" },
   { rel: "hooks/bg-gate.mjs", name: "HEARTBEAT_STALE_MS", expect: "90000" },
+  // v1.2.2 尾块滞回 20/10 异名值 twin（写侧 stop-check × 读侧 server；漂移即读写语义分叉）
+  { rel: "mcp/server.mjs", name: "DISPATCH_TRACE_TRIM_AT", expect: "20" },
+  { rel: "mcp/server.mjs", name: "DISPATCH_TRACE_TRIM_TO", expect: "10" },
+  { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_LOG_TRIM_AT", expect: "20" },
+  { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_LOG_TRIM_TO", expect: "10" },
+];
+
+// ---- STRING_TWINS v1.2.2 首例非数值 twin（G-3 顺手项；引号字面捕获，值内无引号/反斜杠前提） ----
+const STRING_TWINS = [
+  { a: { rel: "mcp/server.mjs", name: "DISPATCH_TAIL_MARK" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_MARK" } },
+  { a: { rel: "mcp/server.mjs", name: "DISPATCH_TAIL_CLOSE" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_CLOSE" } },
 ];
 
 const RS_PIN = ["done", "failed", "blocked", "question"];
@@ -261,7 +280,7 @@ try {
   twinCase("TW-FA-06 fmtAge(null)/(NaN)/(Infinity) → 空串三连", FA_FILES,
     (mod) => [mod.fmtAge(null), mod.fmtAge(NaN), mod.fmtAge(Infinity)], ["", "", ""]);
 
-  // ---- VALUE_TWINS 三 site 值锁（逐 site 恰一定义 + 字面值 90000） ----
+  // ---- VALUE_TWINS 七 site 值锁（逐 site 恰一定义 + 字面值；v1.2.2 扩 +4 滞回 20/10） ----
   VALUE_TWINS.forEach((vt, i) => {
     const src = LF(fs.readFileSync(path.join(PLUGIN_DIR, vt.rel), "utf8"));
     const re = new RegExp("(?:^|\\n)const " + vt.name + " = (\\d+);", "g");
@@ -273,6 +292,54 @@ try {
       vals,
     );
   });
+
+  // ---- STRING_TWINS 历史字符串 twin（v1.2.2 首例非数值；G-3 顺手项，QA-R1 L-5） ----
+  /** 引号字符串字面捕获：行首锚恰一 + "([^"]*)"（值内无引号/反斜杠前提，mark/close 满足）。 */
+  function captureString(srcLF, name) {
+    const re = new RegExp('(?:^|\\n)const ' + name + ' = "([^"]*)";', "g");
+    const hits = srcLF.match(re) || [];
+    if (hits.length !== 1) throw new Error("anchor const " + name + " x" + hits.length);
+    return hits[0].match(new RegExp('const ' + name + ' = "([^"]*)";'))[1];
+  }
+  STRING_TWINS.forEach((st, i) => {
+    let va = null;
+    let vb = null;
+    let detail = "";
+    try {
+      va = captureString(LF(fs.readFileSync(path.join(PLUGIN_DIR, st.a.rel), "utf8")), st.a.name);
+      vb = captureString(LF(fs.readFileSync(path.join(PLUGIN_DIR, st.b.rel), "utf8")), st.b.name);
+      detail = va + " vs " + vb;
+    } catch (e) {
+      detail = String((e && e.message) || e).slice(0, 120);
+    }
+    ck.ok(
+      "TW-STW-0" + (i + 1) + " 历史字符串 twin（v1.2.2 G-3）：" + st.a.rel + "#" + st.a.name + " ≡ " + st.b.rel + "#" + st.b.name,
+      va !== null && va === vb && va.length > 0,
+      detail,
+    );
+  });
+
+  // ---- TW-CT 转投契约腿（v1.2.2，QA-R1 M-5/G-3）：包节头字面 × 解析器前缀双 site 同文件在位——
+  // 节头改名而无解析随改=转投静默吞教训（RV-3 型），CT 红即检出。负例腿红证内建（零源触碰）。 ----
+  {
+    const serverLF = LF(fs.readFileSync(path.join(PLUGIN_DIR, "mcp/server.mjs"), "utf8"));
+    const ctPackHeader = (serverLF.match(/"## LESSONS（[^"]*"/g) || []).length;
+    const ctParserPrefix = (serverLF.match(/\^## LESSONS/g) || []).length;
+    ck.ok(
+      "TW-CT-01 转投契约双腿在位：buildPackMarkdown 包节头字面（## LESSONS（…）恰 1）× 解析器前缀（^## LESSONS 恰 1）同文件双 site",
+      ctPackHeader === 1 && ctParserPrefix === 1,
+      { ctPackHeader, ctParserPrefix },
+    );
+    const ctTam = serverLF.replace("/^## LESSONS/", "/^## LESSONZ/");
+    let ctNeg = false;
+    let ctNegDetail = "tamper not applied";
+    if (ctTam !== serverLF && ctTam.includes("/^## LESSONZ/")) {
+      const p2 = (ctTam.match(/\^## LESSONS/g) || []).length;
+      ctNeg = p2 === 0; // 解析器盲改后 CT-01 判据在副本上破 → 检出（静默吞教训面红证）
+      ctNegDetail = "parser prefix hits after tamper=" + p2;
+    }
+    ck.ok("TW-CT-NEG 负例腿：解析器前缀盲改副本（内存）被 CT 判据检出（红证成立）", ctNeg, ctNegDetail);
+  }
 
   // ---- 负例腿（M-4 内建红证：内存副本篡改 → 同一提取/断言链检出分叉；零源触碰零仓库写入） ----
   // NEG-1 fmtAge：min<60 分界篡改 → fmtAge(59) 偏离钉值。

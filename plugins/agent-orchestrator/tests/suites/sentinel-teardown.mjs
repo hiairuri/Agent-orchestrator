@@ -40,7 +40,8 @@
  *      尾锚定）→ `<存储根>/context/coord-tail-log.md` 逐字追加（含 ts:/seq:，块间空行，
  *      无文件头）。T12-a..k 改靶保留（无标记零写/全形追加/短形 delta/飞名单边界/超帽/
  *      未知字段/subagent 前缀/缺基线/多块取末）；T12-w/x 锁 v1 块零触发与尾锚定；
- *      T12-o/p 变化即追加+同内容幂等（stop_hook_active 重入）；T12-q 封顶 K=10 原子重写；
+ *      T12-o/p 变化即追加+同内容幂等（stop_hook_active 重入）；T12-q 封顶改写为滞回裁剪腿
+ *      （v1.2.2 20/10：第 21 块触发原子重写留最新 10）+ HYS-01 累积腿/HYS-02 单写触发腿；
  *      T12-r 旧 v1 seed 幂等+三遗留清理；T12-s 跨会话追加无冻结（append 无判旧正面锁）；
  *      T12-t 坏条目容错；T12-u 写失败 fail-safe；T12-v/v2 祖先回退命中与默认根合法性优先。
  *      （T12-h 判旧腿与 T12-n ts 时刻守卫腿随「append 无判旧」结构性删除；T12-l/m 改造并入
@@ -1045,9 +1046,9 @@ try {
      grill#3 G3-5 形制：开标签 `<!-- orch-tail v2` + 闭标签 `<!-- orch-tail-end -->`；
      成对闭合 / 只取消息最后一组完整对 / 尾锚定（闭标签=消息末非空行，尾随空白容忍）。
      日志 `<root>/context/coord-tail-log.md`：条目=发射全形块逐字（含 ts/seq 协议行），
-     块间空行、无文件头；变化即追加（剥协议行等值跳过）；封顶 K=10（第 11 块 → 读-裁
-     留最新 10-整文件原子重写）；坏条目跳过向前找基线。旧 v1 文件仅 seed 源（幂等），
-     日志本轮写成功后三遗留（compact/stale/v1）静默清理。 */
+     块间空行、无文件头；变化即追加（剥协议行等值跳过）；v1.2.2 滞回 20/10（累积至 20
+     不滑动最上不丢，第 21 块 → 读-裁留最新 10-整文件原子重写）；坏条目跳过向前找基线。
+     旧 v1 文件仅 seed 源（幂等），日志本轮写成功后三遗留（compact/stale/v1）静默清理。 */
   {
     const SCP = path.join(BASE.root, "stopcheck");
     const SCR = path.join(SCP, ".zcode", "orchestrator");
@@ -1273,9 +1274,10 @@ try {
       );
     }
     {
-      // 封顶 K=10：第 11 块 → 读-裁留最新 10-整文件原子重写。
+      // v1.2.2 滞回（原 T12-q「封顶 K=10 第 11 块触发」改写）：连续 21 轮 → 第 21 块
+      // 触发原子重写，保留最新 10（seq12..21），seq1..11 全出队。
       resetSC();
-      for (let i = 1; i <= 11; i++) {
+      for (let i = 1; i <= 21; i++) {
         runStop(
           fullBlock({
             seq: i,
@@ -1286,12 +1288,55 @@ try {
       }
       const got = logBlocks();
       ck.ok(
-        "T12-q 封顶 K=10：第 11 块触发原子重写（最旧 seq1 出队，恒 ≤10，末块最新）",
+        "T12-q 滞回裁剪腿（v1.2.2 自「封顶 K=10 第 11 块触发」改写）：第 21 块触发原子重写（seq1..11 出队，保留最新 10，末块最新）",
         got.length === 10 &&
-          got[0] === fullBlock({ seq: 2, ts: "2026-10-25T06:02:00.000Z", next: "n2" }) &&
-          got[9] === fullBlock({ seq: 11, ts: "2026-10-25T06:11:00.000Z", next: "n11" }) &&
-          !readLog().includes("seq: 1\n"),
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].every((n) => !readLog().includes(`seq: ${n}\n`)) &&
+          got[0] === fullBlock({ seq: 12, ts: "2026-10-25T06:12:00.000Z", next: "n12" }) &&
+          got[9] === fullBlock({ seq: 21, ts: "2026-10-25T06:21:00.000Z", next: "n21" }),
         { count: got.length, first: got[0] && got[0].split("\n")[2], last: got[9] && got[9].split("\n")[2] },
+      );
+      // HYS-01 累积腿：20 块 ≤ TRIM_AT → 全程 plain append，最上不丢（seq1 在位）。
+      resetSC();
+      for (let i = 1; i <= 20; i++) {
+        runStop(
+          fullBlock({
+            seq: i,
+            ts: `2026-10-25T07:${String(i).padStart(2, "0")}:00.000Z`,
+            next: "h" + i,
+          }),
+        );
+      }
+      const gotH1 = logBlocks();
+      ck.ok(
+        "HYS-01 累积腿（v1.2.2 滞回）：20 块不滑动（无裁剪，最上不丢）——恰 20 全在位，seq1..20 逐块等值",
+        gotH1.length === 20 &&
+          gotH1[0] === fullBlock({ seq: 1, ts: "2026-10-25T07:01:00.000Z", next: "h1" }) &&
+          gotH1[19] === fullBlock({ seq: 20, ts: "2026-10-25T07:20:00.000Z", next: "h20" }),
+        { count: gotH1.length, first: gotH1[0] && gotH1[0].split("\n")[2], last: gotH1[19] && gotH1[19].split("\n")[2] },
+      );
+      // HYS-02 单写触发腿：恰 20 块日志（直投种子）追加第 21 块 → 一步裁回 10
+      // （keep 末 9=seq12..20 + 新块 21；seq11 消失=被裁边界，seq12 在位=保住边界）。
+      resetSC();
+      fs.mkdirSync(CTX, { recursive: true });
+      const seed20 = Array.from({ length: 20 }, (_, k) =>
+        fullBlock({
+          seq: k + 1,
+          ts: `2026-10-25T08:${String(k + 1).padStart(2, "0")}:00.000Z`,
+          next: "s" + (k + 1),
+        }),
+      ).join("\n\n");
+      fs.writeFileSync(LOG, seed20 + "\n");
+      const rH2 = runStop(fullBlock({ seq: 21, ts: "2026-10-25T08:21:00.000Z", next: "s21" }));
+      const gotH2 = logBlocks();
+      ck.ok(
+        "HYS-02 裁剪腿（v1.2.2 滞回）：恰 20 块 + 第 21 块 → 原子重写保留最新 10（含新块，seq11 消失、seq12..21 在位）",
+        rH2.code === 0 &&
+          gotH2.length === 10 &&
+          !readLog().includes("seq: 11\n") &&
+          gotH2[0] === fullBlock({ seq: 12, ts: "2026-10-25T08:12:00.000Z", next: "s12" }) &&
+          gotH2[8] === fullBlock({ seq: 20, ts: "2026-10-25T08:20:00.000Z", next: "s20" }) &&
+          gotH2[9] === fullBlock({ seq: 21, ts: "2026-10-25T08:21:00.000Z", next: "s21" }),
+        { count: gotH2.length, first: gotH2[0] && gotH2[0].split("\n")[2], stderr: rH2.stderr },
       );
     }
     {
