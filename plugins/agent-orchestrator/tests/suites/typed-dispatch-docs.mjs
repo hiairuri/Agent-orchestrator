@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @module typed-dispatch-docs
 /*!
  * suites/typed-dispatch-docs.mjs —— v0.6 簇 C 断言套（V6-63 文档在位防回退 + V6-64 到期回收机制载体）
  *

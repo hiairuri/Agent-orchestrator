@@ -1,3 +1,4 @@
+// @module crv2-pack
 /*!
  * suites/crv2-pack.mjs —— CRV2-01…08（物化与合流）+ CR-V22（缺省逐字节回归对拍 0.4.1）
  *   + CR-V23（路由全链+沙箱改写）+ CR-V24（截断保序/去重/撞行）+ CR-V25（回退链）+ E1 门
@@ -634,16 +635,18 @@ try {
       const body = dispatchPure.DISPATCH_DISCIPLINE_BODY || "";
       const rows = body.match(/^\| [1-9] \| /gm) || [];
       const row10 = body.includes("\n| 10 | ");
+      const row11 = body.includes("\n| 11 | 尾块态上报");
       ck.ok(
-        "W4-DISPATCH-10 纪律段章号锁（新增-1，沿 C1-09 型制）：fence 置顶常量在位，表格 10 行齐（| 1 |..| 10 |），每行携 SKILL 章号权威，第 9 条=P2P 配对交互",
+        "W4-DISPATCH-10 纪律段章号锁（新增-1，沿 C1-09 型制；v1.2 M6-2 扩 11 行）：fence 置顶常量在位，表格 11 行齐（| 1 |..| 11 |），每行携 SKILL 章号权威，第 9 条=P2P 配对交互，第 11 条=尾块态上报",
         fence.startsWith("【纪律（") &&
           fence.includes("与包 RULES 冲突时以包 RULES 为准") &&
           rows.length === 9 &&
           row10 &&
-          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every((n) => body.includes(`\n| ${n} | `)) &&
-          (body.match(/SKILL 第 \d+/g) || []).length >= 10 &&
+          row11 &&
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].every((n) => body.includes(`\n| ${n} | `)) &&
+          (body.match(/SKILL 第 \d+/g) || []).length >= 11 &&
           body.includes("| 9 | P2P 配对交互"),
-        { rows: rows.length, row10, fenceHead: fence.slice(0, 20) },
+        { rows: rows.length, row10, row11, fenceHead: fence.slice(0, 20) },
       );
       const noDigest = buildDispatchPrompt(
         mkMission("mD", "packs/mD/pack.md"),
@@ -671,14 +674,31 @@ try {
         { hasAsk: body.includes("p2p_ask/p2p_answer"), hasBq: body.includes("blocked/question") },
       );
       ck.ok(
-        "W4-DISPATCH-13 迭代闭环条字面锁（追加裁定 2026-10-26 MaimaiBOT R3）：第 10 条在位——迭代轮不 done/milestone 保持 running/无人应答/回落开新轮",
-        body.includes("以下 10 条纪律") &&
+        "W4-DISPATCH-13 迭代闭环条字面锁（追加裁定 2026-10-26 MaimaiBOT R3；计数随 v1.2 M6-2 第 11 条增补同步 10→11）：第 10 条在位——迭代轮不 done/milestone 保持 running/无人应答/回落开新轮",
+        body.includes("以下 11 条纪律") &&
           body.includes("迭代轮中不 report(kind=done)") &&
           body.includes("以 milestone 上报保持 running") &&
           body.includes("后续 p2p 将无人应答") &&
           body.includes("回落=等主控开新轮 mission") &&
           body.includes("2026-10-26 MaimaiBOT"),
-        { has10: body.includes("以下 10 条纪律"), hasIter: body.includes("迭代轮中不 report(kind=done)") },
+        { has11: body.includes("以下 11 条纪律"), hasIter: body.includes("迭代轮中不 report(kind=done)") },
+      );
+      ck.ok(
+        "W4-DISPATCH-14 尾块态上报条字面锁（v1.2 M6-2，O13=a 执行面拷贝）：第 11 条携三要素（结论/计数/产物指针）+文件直投/邮箱两形态+不塞 details+主控只转指针+done 缺产物指针=无效上报，权威=SKILL 第 17 章（主控信息面）",
+        body.includes("尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针）") &&
+          body.includes("经文件直投（对接方按指针自取）或邮箱传递") &&
+          body.includes("不塞 details") &&
+          body.includes("主控 steer/转发只转指针") &&
+          body.includes("done 缺产物指针=无效上报") &&
+          body.includes("SKILL 第 17 章（主控信息面）"),
+        {
+          triad: body.includes("尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针）"),
+          direct: body.includes("经文件直投（对接方按指针自取）或邮箱传递"),
+          noDetails: body.includes("不塞 details"),
+          ptrOnly: body.includes("主控 steer/转发只转指针"),
+          noPtrInvalid: body.includes("done 缺产物指针=无效上报"),
+          auth: body.includes("SKILL 第 17 章（主控信息面）"),
+        },
       );
     }
   }

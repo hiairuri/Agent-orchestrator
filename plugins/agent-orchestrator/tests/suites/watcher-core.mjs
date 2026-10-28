@@ -1,3 +1,4 @@
+// @module watcher-core
 /*!
  * suites/watcher-core.mjs —— W1 watcher 守护进程核心套（mock relay + mock 凭据，零真实触达）
  *
@@ -2250,12 +2251,17 @@ try {
         okC && (() => { try { return fs.readdirSync(path.join(sc.sentDir, "wake-kick-alerts")).some((n) => n.includes("anchor-missing")); } catch { return false; } })(),
         { okC, claimGone: !fs.existsSync(path.join(qdirOf(sc.root), "claim.json")) });
       // d：W-E 腿 2——kick 失败遗留不破坏哨兵 C1 板面告警回落（同 tick 双效应）
+      // v1.2 M9-1（主控 2026-10-28 裁决 A 扩 scope，仅此夹具族两行对齐）：scoping 新契约下
+      // 无归因 mission=零开枪（空值三段第 3 段）——夹具补锚+归因（与 sentinel-teardown
+      // T2b/WS-5d 同形），被测行为面（kick 失败遗留不破坏 C1 回落）不变。
       const sd = mkSentRoot("sd");
+      fs.mkdirSync(sd.sentDir, { recursive: true });
+      fs.writeFileSync(path.join(sd.sentDir, "coord-session.txt"), "sess_wb_sent_d\n");
       ageEvent(sd.root, "m-sd", 10 * 1000);
       fs.writeFileSync(path.join(sd.root, "board.json"), JSON.stringify({
         version: 2,
         updated_at: new Date().toISOString(),
-        missions: [{ id: "m-sd", title: "sd-unclaimed", status: "done", dispatch: { agent_id: "a-sd", mode: "headless" }, updated_at: new Date(Date.now() - 10 * 1000).toISOString() }],
+        missions: [{ id: "m-sd", title: "sd-unclaimed", status: "done", dispatch: { agent_id: "a-sd", mode: "headless", session_id: "sess_wb_sent_d" }, updated_at: new Date(Date.now() - 10 * 1000).toISOString() }],
       }) + "\n");
       // --wake-grace-min 0.01：宽限 0.6s → 逃逸口（anchor 龄期 ≥2×宽限=1.2s）秒级开枪；
       //   缺省 5min 宽限会让 C1 等 5 分钟（suite 时长纪律：run-all 300s 帽内）

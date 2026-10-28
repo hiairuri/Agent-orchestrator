@@ -1,3 +1,4 @@
+// @module po-static
 /*!
  * suites/po-static.mjs —— PO 提示词工程不变量静态锁（P3-2，M10 收编 v0.11.x.md §2.10 手工 grep）
  *
@@ -15,11 +16,22 @@
  *   A-v0110-M10-05（W4-04 SKILL §3 样本同步钉 5 条 + M10 文案钉：⑥TS-10 布尔参数
  *     tail=true（ban mode:"tail" 旧形）/P3-3 WK-1 语义权威指针/⑦SKILL §3 样本
  *     RULES 新行形）
- *   A-v0110-PL1-01..03（PL1 波 v2.1 编排流水线产品面：SKILL §16 章在位 + 章号 1..16
- *     连续零重号 + PL 规则族 9 条 + v2.1 逐字关键句钉〔grill#1/grill#3 两豁免判据与
- *     免开声明/调研可行性结论行/主控提炼披露/grill 格式纪律/组包 checklist〕+ §1 场景表行
- *     + frontmatter description 增行。权威 = 任务包 CONTEXT v2.1 逐字（用户 2026-10-23
- *     裁定 + 2026-10-25 编码裁定；豁免语义精确版 = 任务包 RULES））
+ *   A-v0110-PL1-01..03（PL1 波 v2.1 编排流水线产品面：SKILL §16 章在位 + 章号 1..17
+ *     连续零重号〔v1.2 M6-2 增第 17 章主控信息面，前值 1..16〕 + PL 规则族 10 条 + v2.1 逐字关键句
+ *     钉〔grill#1/grill#3 两豁免判据与免开声明/调研可行性结论行/主控提炼披露/grill 格式纪律/
+ *     组包 checklist〕+ §1 场景表行 + frontmatter description 增行。权威 = 任务包 CONTEXT v2.1
+ *     逐字（用户 2026-10-23 裁定 + 2026-10-25 编码裁定；豁免语义精确版 = 任务包 RULES））
+ *   A-v0120-D11（v1.2 M6-2 主控信息面产品面：SKILL §17 章头在位 + G3 边界声明（落新章不落 §16）
+ *     + 尾块三要素/直投两形态/主控不读正文/p2p 分工钉 + 派发纪律第 11 条核心句双源逐字一致
+ *     （O13=a：SKILL 第 17 章=面向人权威 × server DISPATCH_DISCIPLINE_BODY=执行面拷贝）
+ *     + §1 场景表行 + 协议卡指针行（docs/protocols/）。权威 = aggregated.md §4.4①②（v1.2 M6-2））
+ *   A-v0120-DESBAN（v1.2 M7-1 DESIGN.md 机制总纲防失真钉组：三禁（①版本号字面零残留=钉自证
+ *     「DESIGN 零版本号字面」本验收 ②工具/角色/命令计数句法零残留 ③独占权威声明零残留）
+ *     + 协议卡索引双向覆盖（引用存在+在册卡必被索引）+ SKILL 章号引用真实性。权威 =
+ *     aggregated G2 终裁 + DP2c DESIGN 重写纲要节；DESBAN 与 DESIGN 重写同 mission 闭环
+ *     （H-1 改写者自证耦合）。施工留痕：既有钉面 grep 盘点零 DESIGN.md 读取/断言——
+ *     「DESIGN 重写连带改写既有钉面」=空操作；M10 固定文案钉 14 条不动（run-all.mjs
+ *     REGISTRY 注释原文有据，QA R1 A.2 核））
  *   A-v111-W21（v1.1.1 文档波）：W4-01/02/08 按新 SKILL 重钉（v2 双标签/启动器自动注入/
  *     粘贴·共享头·逐字复用语汇零残留）；W4-05/05b/09/10 按 DESIGN §2 契约名预写日志化锚
  *     （日志文件名/封顶 10/coordTailLogLastFull/三遗留清理/dispatch 注册+runner 文件/
@@ -134,11 +146,11 @@ try {
   //   权威 = 任务包 CONTEXT v2.1 逐字（用户 2026-10-23 裁定+2026-10-25 编码裁定）；
   //   豁免语义精确版 = 任务包 RULES：grill#1=完整规格（范围+验收+取舍）∧零新增疑点 /
   //   grill#3=改动面 ≤2 波∧零新权衡；两豁免均须显式声明「grill#N 免开：<理由>」供否决） ----------
-  // PL1-01 §16 在位 + 章号 1..16 连续零重号 + PL 规则族计数（零撞号：PL 前缀不在既有 15 族）
+  // PL1-01 §16 在位 + 章号 1..17 连续零重号（v1.2 M6-2 增第 17 章主控信息面）+ PL 规则族计数（零撞号：PL 前缀不在既有 15 族）
   ck.ok("PL1-01 SKILL §16 章头在位（## 16. 编排流水线）", count(SKILL_LF, "## 16. 编排流水线") === 1, count(SKILL_LF, "## 16. 编排流水线"));
   const chapNums = (SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1")));
-  const chapOk = chapNums.length === 16 && chapNums.every((n, i) => n === i + 1);
-  ck.ok("PL1-01 SKILL 章号 1..16 连续零重号", chapOk, chapNums.join(","));
+  const chapOk = chapNums.length === 17 && chapNums.every((n, i) => n === i + 1);
+  ck.ok("PL1-01 SKILL 章号 1..17 连续零重号（v1.2 M6-2 增第 17 章，前值 1..16）", chapOk, chapNums.join(","));
   ck.ok("PL1-01 PL 规则族 10 条（行首 PL-N 计数；v1.1 W4 增 PL-10）", countRe(SKILL_LF, /^PL-\d+ /gm) === 10, countRe(SKILL_LF, /^PL-\d+ /gm));
   // PL1-02 v2.1 逐字关键句钉（两豁免/可行性结论行/披露/格式纪律/组包 checklist）
   ck.ok("PL1-02 grill#1 豁免判据+免开声明在位", count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点") === 1 && count(SKILL, "grill#1 免开：") === 1, { spec: count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点"), decl: count(SKILL, "grill#1 免开：") });
@@ -150,6 +162,61 @@ try {
   // PL1-03 §1 场景表行 + frontmatter description 增行
   ck.ok("PL1-03 §1 场景表 PL 行在位", count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |") === 1, count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |"));
   ck.ok("PL1-03 frontmatter description 增行在位", count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。") === 1, count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。"));
+
+  // ---------- A-v0120-D11：v1.2 M6-2 主控信息面（SKILL 第 17 章 + 派发纪律第 11 条）静态钉；
+  //   权威 = aggregated.md §4.4①②（v1.2 波次实行稿 M6-2）；双源对拍（O13=a）：
+  //   SKILL 第 17 章「主控信息面（尾块契约）」=面向人权威，server DISPATCH_DISCIPLINE_BODY=
+  //   执行面拷贝，第 11 条核心句逐字一致由 D11-03 对拍（server+SKILL 同文件双面读，纯静态） ----------
+  // D11-01 新章标题钉 + G3 边界声明（新章=信息形态契约非 §16 流水线纪律，落新章不落 §16）
+  ck.ok("D11-01 SKILL §17 章头在位（## 17. 主控信息面（尾块契约））", count(SKILL_LF, "## 17. 主控信息面（尾块契约）") === 1, count(SKILL_LF, "## 17. 主控信息面（尾块契约）"));
+  ck.ok("D11-01 G3 边界声明在位（落新章不落 §16；§16 两条硬规则口径不动）", count(SKILL, "落新章不落 §16") === 1 && count(SKILL, "两不相扰") === 1 && count(SKILL, "grill 门默认必开＋豁免显式声明") === 1, { boundary: count(SKILL, "落新章不落 §16"), noMix: count(SKILL, "两不相扰"), twoRules: count(SKILL, "grill 门默认必开＋豁免显式声明") });
+  // D11-02 尾块三要素（结论/计数/产物指针，「结论」通用措辞 R2 低-5）+ 直投两形态 + 主控不读正文 + p2p 分工
+  ck.ok("D11-02 尾块三要素钉（场景表行+IF-5 引文两处；done 缺产物指针=无效上报 IF-1+引文两处）", count(SKILL, "结论/计数/产物指针") === 2 && count(SKILL, "done 缺产物指针=无效上报") === 2, { triad: count(SKILL, "结论/计数/产物指针"), noPtr: count(SKILL, "done 缺产物指针=无效上报") });
+  ck.ok("D11-02 直投通道两形态+主控不读正文原则在位（IF-2/IF-3）", count(SKILL, "主控不读正文") >= 1 && count(SKILL, "文件直投") >= 1 && count(SKILL, "按指针自取") >= 1, { noRead: count(SKILL, "主控不读正文"), direct: count(SKILL, "文件直投"), byPtr: count(SKILL, "按指针自取") });
+  ck.ok("D11-02 与 p2p 分工钉（仲裁中转面 vs 文件通道，正文不过主控；IF-4）", count(SKILL, "仲裁中转面") === 1 && count(SKILL, "正文不过主控") === 1, { p2p: count(SKILL, "仲裁中转面"), notViaCoord: count(SKILL, "正文不过主控") });
+  // D11-03 派发纪律第 11 条核心句双源逐字一致（O13=a 漂移兜底；协议卡指针行 O1① 同组）
+  const D11_CORE = "尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报";
+  ck.ok("D11-03 第 11 条核心句双源逐字一致（server DISPATCH_DISCIPLINE_BODY 恰 1 + SKILL §17 恰 1）", count(SERVER, D11_CORE) === 1 && count(SKILL, D11_CORE) === 1, { server: count(SERVER, D11_CORE), skill: count(SKILL, D11_CORE) });
+  ck.ok("D11-03 fence 引言行随第 11 条同步（11 条纪律）", count(SERVER, "以下 11 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 10 条纪律") === 0, { n11: count(SERVER, "以下 11 条纪律也已随本消息进入你的上下文"), n10: count(SERVER, "以下 10 条纪律") });
+  // D11-04 §1 场景表行 + 协议卡指针行（O1①：SKILL 只加指针行，卡本体在 docs/protocols/）
+  ck.ok("D11-04 §1 场景表尾块态行在位", count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |") === 1, count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |"));
+  ck.ok("D11-04 协议卡指针行在位（docs/protocols/ 恰 1，SKILL 只留指针）", count(SKILL, "docs/protocols/") === 1, count(SKILL, "docs/protocols/"));
+
+  // ---------- A-v0120-DESBAN：DESIGN.md 机制总纲防失真钉组（v1.2 M7-1；权威 = aggregated G2 终裁
+  //   + DP2c DESIGN 重写纲要节；DESBAN 与 DESIGN 重写同 mission 闭环=改写者自证耦合，H-1） ----------
+  // 三禁：①版本号字面（①的绿即「DESIGN 零版本号字面」钉自证，M7-1 验收句本体）
+  //   ②工具/角色/命令计数句法 ③「唯一设计权威」类独占声明；数字一律由归属机制套件钉族承载。
+  // 施工留痕（M7-1）：既有钉面 grep 盘点=零断言读取/引用 DESIGN.md 内容（仅注释提及其节号），
+  //   「DESIGN 重写连带改写既有钉面」=空操作；M10 固定文案钉 14 条不动（run-all.mjs REGISTRY 注释有据）。
+  const DESIGN_DOC = read("DESIGN.md");
+  ck.ok("DESBAN-00 DESIGN.md 存在非空（机制总纲在位）", DESIGN_DOC.trim().length > 0, DESIGN_DOC.length);
+  // ① 版本号字面零残留（钉自证）；文中确需指涉版本一律写「见 plugin.json」
+  const desbanVer = DESIGN_DOC.match(/v?\d+\.\d+/g) || [];
+  ck.ok("DESBAN-01 DESIGN.md 零版本号字面（v?数字.数字 全文零命中=钉自证）", desbanVer.length === 0, desbanVer.slice(0, 8));
+  // ② 计数句法零残留；工具/角色/命令数量以 plugin.json 注册字段与 server 注册表为准
+  const desbanCnt = DESIGN_DOC.match(/\d+\s*个\s*(工具|角色|命令)/g) || [];
+  ck.ok("DESBAN-02 DESIGN.md 零工具/角色/命令计数句法（「N 个工具」族）", desbanCnt.length === 0, desbanCnt.slice(0, 8));
+  // ③ 独占权威声明零残留（权威分工在头声明与 §1 表；行为面 SKILL 优先/协议物面卡优先）
+  const desbanSole = DESIGN_DOC.match(/唯一(的)?(设计)?权威/g) || [];
+  ck.ok("DESBAN-03 DESIGN.md 零独占权威声明（「唯一(设计)权威」族）", desbanSole.length === 0, desbanSole.slice(0, 8));
+  // ④ 协议卡索引双向覆盖：DESIGN 引用的卡存在非空 + 在册卡必被索引（新增卡漏补索引即红）
+  const desbanRefs = [...new Set([...DESIGN_DOC.matchAll(/docs\/protocols\/([\w.-]+\.md)/g)].map((m) => m[1]))];
+  const desbanMissing = desbanRefs.filter((f) => {
+    try { return fs.statSync(path.join(PLUGIN_DIR, "docs", "protocols", f)).size === 0; } catch { return true; }
+  });
+  ck.ok("DESBAN-04 DESIGN 卡索引引用全部存在非空（docs/protocols/）", desbanRefs.length > 0 && desbanMissing.length === 0, { refs: desbanRefs, missing: desbanMissing });
+  const desbanUnindexed = fs
+    .readdirSync(path.join(PLUGIN_DIR, "docs", "protocols"))
+    .filter((f) => f.endsWith(".md") && !DESIGN_DOC.includes(f))
+    .sort();
+  ck.ok("DESBAN-05 协议面文件反向全覆盖（docs/protocols/*.md 每件都被 DESIGN 索引至少一次）", desbanUnindexed.length === 0, desbanUnindexed);
+  // ⑤ SKILL 章号引用真实性（C1-05 同构：DESIGN 引用「第 N 章」必须真实存在）
+  {
+    const desbanChaps = [...new Set([...DESIGN_DOC.matchAll(/第 (\d+) 章/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+    const desbanReal = new Set((SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1"))));
+    const desbanChapMissing = desbanChaps.filter((n) => !desbanReal.has(n));
+    ck.ok("DESBAN-06 DESIGN 引用的 SKILL 章号均真实存在", desbanChaps.length > 0 && desbanChapMissing.length === 0, { refs: desbanChaps, missing: desbanChapMissing });
+  }
 
   // ---------- A-v110-W4-A1：v1.1 W4 尾部契约块/三段派发静态回潮防钉（DESIGN §1/§2） ----------
   // 行为面 = sentinel-teardown T12（stop-check 黑盒）+ crv2-pack W4-PREFIX（跨派发前缀字节）。

@@ -1,3 +1,4 @@
+// @module probe-caps
 /*!
  * suites/probe-caps.mjs —— v0.6 A6 probe 帽 suite（第 11 号工具，上下文经济第二支柱）
  *

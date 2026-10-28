@@ -1,3 +1,4 @@
+// @module crv6-statemachine
 /*!
  * suites/crv6-statemachine.mjs —— v0.6 状态机 suite（A1 bootstrap：SM-08；A4 波增例 SM-01..07/P2P-01）
  *

@@ -1,3 +1,4 @@
+// @module crv8-memory
 /*!
  * suites/crv8-memory.mjs —— v0.8 记忆子系统 suite（W1 bootstrap：P0 分发端补门 INJ 族；
  *   W2 增例：两级库与捎带面 SYNC/GLEAN/INJ-06b 族；W3 增例：ORCHTEMP 与锁 GLEAN-03/05 族）
@@ -2071,6 +2072,49 @@ function startServerX({ serverPath = DEFAULT_SERVER, root, args = [], timeoutMs 
       pStale && pStale.split("\n").find((l) => l.startsWith("## PROJECT DIGEST")));
     const dStale = await listDigest();
     ck.ok("W3-DG-06 glean_due.digest status=stale", Boolean(dStale) && dStale.status === "stale", dStale);
+
+    // ---- STL 组（v1.2 M8-1，A-v0120-STL）：stale_reason 结构化 {field,want,now,drift}＋按 drift
+    // 分级渲染（O2=N=5 绝对数终裁：drift≤5 轻微=态势面大概率仍有效；>5 显著=建议触发归敛；
+    // 无数值漂移→显著）。断言面=注入头（PROJECT DIGEST 节头）逐字样例＋N5 边界两侧分级文案。
+    const digestHeaderOf = (pack) =>
+      String(pack || "").split("\n").find((l) => l.startsWith("## PROJECT DIGEST")) || "";
+    // STL-01 漂移 5（≤N5 边界内侧）→ 轻微样例：态势面大概率仍有效
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 6, lessons_mtime_ms: libStat.mtimeMs } }),
+    );
+    const pStlMinor = await packOf("m-stl-minor");
+    ck.ok("STL-01 漂移 5≤N5 → 注入头轻微样例（lessons_lines 6 ≠ 1（漂移 5≤5，轻微——态势面大概率仍有效））",
+      digestHeaderOf(pStlMinor).includes("；STALE：lessons_lines 6 ≠ 1（漂移 5≤5，轻微——态势面大概率仍有效）"),
+      digestHeaderOf(pStlMinor));
+    // STL-02 漂移 7（>N5 边界外侧）→ 显著文案；分级互斥（轻微不出现）
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 8, lessons_mtime_ms: libStat.mtimeMs } }),
+    );
+    const pStlMajor = await packOf("m-stl-major");
+    const hStlMajor = digestHeaderOf(pStlMajor);
+    ck.ok("STL-02 漂移 7>N5 → 显著分级文案（建议触发归敛），轻微不出现",
+      hStlMajor.includes("（漂移 7>5，显著——建议触发归敛）") && !hStlMajor.includes("轻微"),
+      hStlMajor);
+    // STL-03 大漂移注入头样例（旧文案前缀兼容：`lessons_lines 999 ≠ 1` 仍可检索）
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
+    );
+    const pStlBig = await packOf("m-stl-big");
+    ck.ok("STL-03 大漂移注入头样例（lessons_lines 999 ≠ 1（漂移 998>5，显著——建议触发归敛））",
+      digestHeaderOf(pStlBig).includes("；STALE：lessons_lines 999 ≠ 1（漂移 998>5，显著——建议触发归敛）"),
+      digestHeaderOf(pStlBig));
+    // STL-04 mtime 单独不匹配（无数值漂移）→ drift 未知 → 显著（fail-safe 侧）
+    fs.writeFileSync(
+      digestJson,
+      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs + 12345 } }),
+    );
+    const pStlMtime = await packOf("m-stl-mtime");
+    ck.ok("STL-04 mtime 漂移未知 → 注入头显著样例（lessons_mtime_ms 不匹配（漂移未知，显著——建议触发归敛））",
+      digestHeaderOf(pStlMtime).includes("；STALE：lessons_mtime_ms 不匹配（漂移未知，显著——建议触发归敛）"),
+      digestHeaderOf(pStlMtime));
 
     // ---- 腿 4：指纹侧车缺失 → STALE（fail-safe，不回落旧节——digest 仍在位）
     fs.rmSync(digestJson, { force: true });

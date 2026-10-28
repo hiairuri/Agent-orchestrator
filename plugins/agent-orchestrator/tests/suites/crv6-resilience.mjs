@@ -1,3 +1,4 @@
+// @module crv6-resilience
 /*!
  * suites/crv6-resilience.mjs —— v0.6 韧性 suite（A1 bootstrap：SG/SPL；A2 波增例 RES/HRV/ATW/GC/INJ-02..04）
  *
@@ -13,13 +14,25 @@
  *     DETAILS_MAX_CHARS=4000 存储帽）。转录自 W-A2 §2 各断言草案；ATW-01 沿 LOCK-03/04
  *   先例以「结构腿+可达行为腿」承接（rename 恒失败黑盒不可达，root-id 目录化探针触发
  *   fallback 路径）。suite 注册行归主控 G 胶水波收口（run-all REGISTRY）。
+ *   A-v0120-DSP-01..08（v1.2 M3-1 W3 波：dispatch 三缺陷必修——Q1 播种三段式
+ *     model→dms→首 api-key〔O9=a level 原值直通〕+Q2 busy 闸三层兜底〔killed-index/
+ *     fail() 补 index/超龄豁免 O10=a+hint 分叉〕+Q3b 死信摘要〔outcome/timed_out/
+ *     exit_code〕+spawned_by_session 归因字段）。impl-plan §批1 M3-1 权威。
+ *   A-v0120-NST-01..04（v1.2 M5-1 批 3 波：dispatch 组装出口 mode=nested——不 spawn
+ *     返 {mission_id, token, prompt, pack_path} 四元组〔组包链复用 context_pack 物化〕+
+ *     busy 闸板语义分叉〔nested 在飞=dispatched 无 worker 结果拒二次组装，不消费
+ *     result-dir index；恢复=dispatched→drafted 合法腿〕+内嵌校验〔CONTRACT 三行/
+ *     token 鉴权 p2pTokenGate 同语义/scope yolo 闸两形态同闸〕+纪律第 11 条自动携带+
+ *     触发面② ensureSentinelFamily 接线）。impl-plan §批3 M5-1 权威（M-2 裁死
+ *     NST=crv6-resilience 扩展）。-p 链零触碰底线：crv2-pack 字节基线+DSP 组全绿为证。
  *
  * 运行方式：node tests/suites/crv6-resilience.mjs [--root <临时根>]
  * 前置：node >= 20；无 git 依赖。
  */
 import fs from "node:fs";
 import path from "node:path";
-import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, DEFAULT_SERVER, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
+import { runNode } from "../harness/capture.mjs";
 import { makeTempRoot, parseRootArg, blankMission, writeBoardSeed, readBoard } from "../harness/temp-root.mjs";
 
 const ck = new Checker("crv6-resilience");
@@ -536,6 +549,855 @@ function seedEvent(mid, id, text) {
   } finally {
     s.close();
   }
+}
+
+/* ================= 场景 DSP：v1.2 M3-1 dispatch 三缺陷必修（A-v0120-DSP） ================= */
+/* Q1 播种三段式（model→dms→首 api-key，dms 命中跳覆写）＋Q2 busy 闸三层兜底
+   （killed-index / fail() 补 index / O10=a 超龄豁免＋hint 分叉）＋Q3b 死信摘要
+   （outcome/timed_out/exit_code）＋spawned_by_session 归因字段。 */
+{
+  const grp = (t) => ck.ok(t, true, "");
+  const dspBase = subRoot("dsp");
+  const dspPack = path.join(dspBase, "pack.md");
+  fs.writeFileSync(
+    dspPack,
+    "# 任务包：DSP 断言组\n\n## CONTRACT（三行契约）\n\n[channel] m-dsp-x\n[worker] gp-dsp#1\n[token] dsp token placeholder\n\n## TASK\n桩 CLI 黑盒。\n",
+  );
+  const dspPersona = path.join(PLUGIN_DIR, "agents", "orch-worker.md");
+  /** 即时桩 CLI（同 crv6-statemachine FA 形）：写 model-io + result envelope。 */
+  const dspStub = (file, sessionId) =>
+    fs.writeFileSync(
+      file,
+      [
+        'import fs from "node:fs";',
+        'import path from "node:path";',
+        'const dir = process.env.ORCH_ROLLOUT_DIR || ".";',
+        'fs.mkdirSync(dir, { recursive: true });',
+        `fs.writeFileSync(path.join(dir, "model-io-${sessionId}.jsonl"), JSON.stringify({ t: 1 }) + "\\n");`,
+        `console.log(JSON.stringify({ type: "result", sessionId: "${sessionId}", response: "stub-ok", usage: {} }));`,
+      ].join("\n") + "\n",
+    );
+  const fakeBuiltinOf = (dir) => {
+    const p = path.join(dir, "zcode-builtin.json");
+    fs.writeFileSync(p, JSON.stringify({ schemaVersion: 1, revision: 1, config: { providerConfigRules: { templateRules: [], providerRules: [] }, modelConfigRules: {} } }, null, 2));
+    return p;
+  };
+  const dspUpsert = (sX, id) =>
+    sX.call("board", {
+      action: "upsert",
+      mission: { id, title: id, status: "drafted", agent_type: "agent-orchestrator:orch-worker", scope_paths: ["src/"] },
+    });
+  const resultDirOf = (rt) => path.join(rt, "context", "dispatch-results");
+  const wakeDirOf = (rt) => path.join(rt, "context", "wake-queue");
+
+  // ---- DSP-01（Q1①④）：dms 命中 → 选题=dms、level=dms 原值（非 values.at(-1)）、
+  //      种子 defaultModelSelection 与真实配置逐字节同值（跳覆写）、真实配置不动 ----
+  {
+    const dir = path.join(dspBase, "dsp1");
+    fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp1");
+    const fakeBuiltin = fakeBuiltinOf(dir);
+    const fakePersonal = path.join(dir, "provider_config.json");
+    const dmsReal = { providerId: "p-dsp", modelId: "DSP-Model", options: { reasoningLevel: "fast" } };
+    const personalOriginal = JSON.stringify(
+      {
+        schemaVersion: 1,
+        config: {
+          providerConfigRules: {
+            providerRules: [
+              {
+                providerId: "p-dsp",
+                config: {
+                  access: { type: "api-key", apiKey: "sk-dsp" },
+                  personalModelIds: ["DSP-Model"],
+                  modelOrder: ["DSP-Model"],
+                },
+              },
+            ],
+          },
+          modelConfigRules: {
+            providerModelRules: [
+              {
+                modelId: "DSP-Model",
+                config: { enabled: false, optionSpecs: { reasoningLevel: { values: ["fast", "slow"] } } },
+                providerId: "p-dsp",
+              },
+            ],
+          },
+          defaultModelSelection: dmsReal,
+        },
+      },
+      null,
+      2,
+    );
+    fs.writeFileSync(fakePersonal, personalOriginal);
+    const sX = startServer({
+      root: path.join(dir, "troot"),
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: fakePersonal,
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: fakeBuiltin,
+      },
+    });
+    try {
+      await dspUpsert(sX, "m-dsp1");
+      const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp1", pack_path: dspPack, persona_path: dspPersona }));
+      let seedDms = null;
+      try {
+        seedDms = JSON.parse(fs.readFileSync(r.model_seed.config_path, "utf8")).config.defaultModelSelection;
+      } catch {
+        seedDms = null;
+      }
+      ck.ok(
+        "DSP-01 Q1①④ dms 命中：选题=dms 的 provider/model 且 reasoning_level=dms 原值 fast" +
+          "（optionSpecs at(-1)=slow 未被采用——O9=a 原值直通实锤）；种子 defaultModelSelection 与真实配置同值" +
+          "（跳覆写）；真实配置字节级不动",
+        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
+          r.model_seed.provider_id === "p-dsp" && r.model_seed.model_id === "DSP-Model" &&
+          r.model_seed.reasoning_level === "fast" &&
+          JSON.stringify(seedDms) === JSON.stringify(dmsReal) &&
+          fs.readFileSync(fakePersonal, "utf8") === personalOriginal,
+        { model_seed: r.model_seed, seedDms },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- DSP-02（Q1②）：dms 指向 disabled provider → 回落首 api-key，覆写在回落分支生效 ----
+  {
+    const dir = path.join(dspBase, "dsp2");
+    fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp2");
+    const fakeBuiltin = fakeBuiltinOf(dir);
+    const fakePersonal = path.join(dir, "provider_config.json");
+    fs.writeFileSync(
+      fakePersonal,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          config: {
+            providerConfigRules: {
+              providerRules: [
+                { providerId: "p-stale", enabled: false, config: { access: { type: "api-key", apiKey: "sk-old" } } },
+                {
+                  providerId: "p-live",
+                  config: { access: { type: "api-key", apiKey: "sk-live" }, modelOrder: ["DSP-New"] },
+                },
+              ],
+            },
+            modelConfigRules: {
+              providerModelRules: [
+                {
+                  modelId: "DSP-New",
+                  config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["a", "b"] } } },
+                  providerId: "p-live",
+                },
+              ],
+            },
+            defaultModelSelection: { providerId: "p-stale", modelId: "DSP-Old", options: { reasoningLevel: "mid" } },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const sX = startServer({
+      root: path.join(dir, "troot"),
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: fakePersonal,
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: fakeBuiltin,
+      },
+    });
+    try {
+      await dspUpsert(sX, "m-dsp2");
+      const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp2", pack_path: dspPack, persona_path: dspPersona }));
+      let seedDms = null;
+      try {
+        seedDms = JSON.parse(fs.readFileSync(r.model_seed.config_path, "utf8")).config.defaultModelSelection;
+      } catch {
+        seedDms = null;
+      }
+      ck.ok(
+        "DSP-02 Q1② dms 指向 disabled provider → 回落首个 enabled api-key（p-live/DSP-New），" +
+          "reasoning_level=optionSpecs values.at(-1)=b（levelOf 回落语义），种子 dms 被覆写为有效选型（陈旧 dms 自愈）",
+        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
+          r.model_seed.provider_id === "p-live" && r.model_seed.model_id === "DSP-New" &&
+          r.model_seed.reasoning_level === "b" &&
+          JSON.stringify(seedDms) ===
+            JSON.stringify({ providerId: "p-live", modelId: "DSP-New", options: { reasoningLevel: "b" } }),
+        { model_seed: r.model_seed, seedDms },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- DSP-03（Q1③）：无 dms → 行为与现状一致（回落首 api-key + values.at(-1)，回归锁） ----
+  {
+    const dir = path.join(dspBase, "dsp3");
+    fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp3");
+    const fakeBuiltin = fakeBuiltinOf(dir);
+    const fakePersonal = path.join(dir, "provider_config.json");
+    fs.writeFileSync(
+      fakePersonal,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          config: {
+            providerConfigRules: {
+              providerRules: [
+                { providerId: "p-only", config: { access: { type: "api-key", apiKey: "sk-x" }, modelOrder: ["M-Only"] } },
+              ],
+            },
+            modelConfigRules: {
+              providerModelRules: [
+                {
+                  modelId: "M-Only",
+                  config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["x", "y"] } } },
+                  providerId: "p-only",
+                },
+              ],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const sX = startServer({
+      root: path.join(dir, "troot"),
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: fakePersonal,
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: fakeBuiltin,
+      },
+    });
+    try {
+      await dspUpsert(sX, "m-dsp3");
+      const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp3", pack_path: dspPack, persona_path: dspPersona }));
+      ck.ok(
+        "DSP-03 Q1③ 无 dms 回归锁：选题=首个 enabled api-key（p-only/M-Only）且 reasoning_level=" +
+          "values.at(-1)=y（与 v1.1.2 现状语义逐点一致），种子 dms 由回落分支写入",
+        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
+          r.model_seed.provider_id === "p-only" && r.model_seed.model_id === "M-Only" &&
+          r.model_seed.reasoning_level === "y",
+        { model_seed: r.model_seed },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- DSP-04（Q1⑤）：显式 model 参数优先级最高（dms 在场仍让位），覆写随显式选型 ----
+  {
+    const dir = path.join(dspBase, "dsp4");
+    fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp4");
+    const fakeBuiltin = fakeBuiltinOf(dir);
+    const fakePersonal = path.join(dir, "provider_config.json");
+    fs.writeFileSync(
+      fakePersonal,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          config: {
+            providerConfigRules: {
+              providerRules: [
+                {
+                  providerId: "p-dsp",
+                  config: { access: { type: "api-key", apiKey: "sk-d" }, modelOrder: ["DSP-Model"] },
+                },
+                {
+                  providerId: "p-other",
+                  config: { access: { type: "api-key", apiKey: "sk-o" }, modelOrder: ["Other-Model"] },
+                },
+              ],
+            },
+            modelConfigRules: {
+              providerModelRules: [
+                {
+                  modelId: "DSP-Model",
+                  config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["fast", "slow"] } } },
+                  providerId: "p-dsp",
+                },
+                {
+                  modelId: "Other-Model",
+                  config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["lo", "hi"] } } },
+                  providerId: "p-other",
+                },
+              ],
+            },
+            defaultModelSelection: { providerId: "p-dsp", modelId: "DSP-Model", options: { reasoningLevel: "fast" } },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const sX = startServer({
+      root: path.join(dir, "troot"),
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: fakePersonal,
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: fakeBuiltin,
+      },
+    });
+    try {
+      await dspUpsert(sX, "m-dsp4");
+      const r = resultText(
+        await sX.call("dispatch", {
+          mission_id: "m-dsp4",
+          pack_path: dspPack,
+          persona_path: dspPersona,
+          model: "p-other/Other-Model@hi",
+        }),
+      );
+      let seedDms = null;
+      try {
+        seedDms = JSON.parse(fs.readFileSync(r.model_seed.config_path, "utf8")).config.defaultModelSelection;
+      } catch {
+        seedDms = null;
+      }
+      ck.ok(
+        "DSP-04 Q1⑤ 显式 model 最高优先：dms 在场仍采用 p-other/Other-Model@hi（显式 @level 直通），" +
+          "种子 dms 覆写为显式选型（非 fromDms → 覆写分支生效）",
+        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
+          r.model_seed.provider_id === "p-other" && r.model_seed.model_id === "Other-Model" &&
+          r.model_seed.reasoning_level === "hi" &&
+          JSON.stringify(seedDms) ===
+            JSON.stringify({ providerId: "p-other", modelId: "Other-Model", options: { reasoningLevel: "hi" } }),
+        { model_seed: r.model_seed, seedDms },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- DSP-05（Q2 busy 闸三态＋O10=a 超龄豁免）----
+  {
+    const dir = path.join(dspBase, "dsp5");
+    const rt = path.join(dir, "troot");
+    fs.mkdirSync(path.join(rt, "context", "dispatch-results"), { recursive: true });
+    fs.mkdirSync(path.join(rt, "context", "dispatch-logs"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp5");
+    const sX = startServer({
+      root: rt,
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: "",
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: "",
+      },
+    });
+    try {
+      // 05a kill/spawn-fail 模拟放行：runner 死亡兜底/早期失败补写的 index 在场 → 闸放行
+      //（模拟 runner_killed / runner_early_fail 落盘形态——文件名族与真 index 同）
+      await dspUpsert(sX, "m-dsp5a");
+      await sX.call("board", {
+        action: "upsert",
+        mission: { id: "m-dsp5a", status: "dispatched", dispatch: { mode: "headless" } },
+      });
+      fs.writeFileSync(
+        path.join(resultDirOf(rt), "m-dsp5a-1700000000000.index.json"),
+        JSON.stringify({ mission_id: "m-dsp5a", killed: true, outcome: "error", error: "runner_killed: exit" }) + "\n",
+      );
+      const ra = resultText(await sX.call("dispatch", { mission_id: "m-dsp5a", pack_path: dspPack, persona_path: dspPersona }));
+      ck.ok(
+        "DSP-05a Q2 kill/spawn-fail 模拟放行：killed/early-fail index 在场（无新鲜侧车门槛）→ busy 闸放行，" +
+          "重派 e2e ok 且现形 session（双入口补 index 的闸解锁语义）",
+        ra.ok === true && ra.session_id === "sess_dsp5" && ra.warning === undefined,
+        { ok: ra.ok, session_id: ra.session_id, err: ra.error },
+      );
+      // 05b 真在飞不误放：无 index + 新鲜侧车 → 拒双跑
+      await dspUpsert(sX, "m-dsp5b");
+      await sX.call("board", {
+        action: "upsert",
+        mission: { id: "m-dsp5b", status: "dispatched", dispatch: { mode: "headless" } },
+      });
+      const freshLog = path.join(rt, "context", "dispatch-logs", "m-dsp5b-now.runner.log");
+      fs.writeFileSync(freshLog, "flying\n");
+      const rb = await sX.call("dispatch", { mission_id: "m-dsp5b", pack_path: dspPack, persona_path: dspPersona });
+      ck.ok(
+        "DSP-05b Q2 真在飞不误放：无 index + 侧车新鲜 → busy 闸拒双跑（isError 文案含 busy 闸/index）",
+        rb.isError === true && /busy 闸/.test(rb.text) && /index/.test(rb.text),
+        rb.text.slice(0, 120),
+      );
+      // 05c O10=a 超龄豁免：无 index + 侧车全超龄（3h 前，>默认 120min）→ 放行 + warning
+      await dspUpsert(sX, "m-dsp5c");
+      await sX.call("board", {
+        action: "upsert",
+        mission: { id: "m-dsp5c", status: "dispatched", dispatch: { mode: "headless" } },
+      });
+      const stalePrompt = path.join(rt, "context", "dispatch-logs", "m-dsp5c-old.prompt");
+      fs.writeFileSync(stalePrompt, "stale\n");
+      const staleMs = (Date.now() - 3 * 3600 * 1000) / 1000;
+      fs.utimesSync(stalePrompt, staleMs, staleMs);
+      const rc = resultText(await sX.call("dispatch", { mission_id: "m-dsp5c", pack_path: dspPack, persona_path: dspPersona }));
+      ck.ok(
+        "DSP-05c Q2 O10=a 超龄豁免：无 index + 侧车全超龄（3h>120min 默认阈值）→ 放行重派 ok + " +
+          "warning 含超龄豁免与孤儿风险提示 + e2e 现形 session",
+        rc.ok === true && rc.session_id === "sess_dsp5" && typeof rc.warning === "string" &&
+          /超龄豁免/.test(rc.warning) && /孤儿/.test(rc.warning),
+        { ok: rc.ok, session_id: rc.session_id, warning: rc.warning },
+      );
+      // 05d 侧车全无维持拒（never-dispatched ≠ 孤儿；crv2 W4-DISPATCH-08 黑盒同语义）
+      await dspUpsert(sX, "m-dsp5d");
+      await sX.call("board", {
+        action: "upsert",
+        mission: { id: "m-dsp5d", status: "dispatched", dispatch: { mode: "headless" } },
+      });
+      const rd = await sX.call("dispatch", { mission_id: "m-dsp5d", pack_path: dspPack, persona_path: dspPersona });
+      ck.ok(
+        "DSP-05d Q2 判据边界：无 index 且零侧车（dispatch 同步段从未跑过）→ 维持拒双跑" +
+          "（偏差声明：DP2b「侧车全无→豁免」腿收敛为拒，防手写 mode=headless 记录误放行，crv2-08 语义保持）",
+        rd.isError === true && /busy 闸/.test(rd.text),
+        rd.text.slice(0, 120),
+      );
+      // 05e 阈值 env 生效：ORCH_DISPATCH_BUSY_STALE_MIN=1 → 2min 侧车即超龄 → 豁免放行
+      const dirE = path.join(dspBase, "dsp5e");
+      const rtE = path.join(dirE, "troot");
+      fs.mkdirSync(path.join(rtE, "context", "dispatch-logs"), { recursive: true });
+      fs.mkdirSync(path.join(dirE, "rollout"), { recursive: true });
+      dspStub(path.join(dirE, "stub.mjs"), "sess_dsp5e");
+      const sE = startServer({
+        root: rtE,
+        env: {
+          ZCODE_CLI_PATH: path.join(dirE, "stub.mjs"),
+          ORCH_ROLLOUT_DIR: path.join(dirE, "rollout"),
+          ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: "",
+          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: "",
+          ORCH_DISPATCH_BUSY_STALE_MIN: "1",
+        },
+      });
+      try {
+        await dspUpsert(sE, "m-dsp5e");
+        await sE.call("board", {
+          action: "upsert",
+          mission: { id: "m-dsp5e", status: "dispatched", dispatch: { mode: "headless" } },
+        });
+        const twoMinOld = path.join(rtE, "context", "dispatch-logs", "m-dsp5e-old.prompt");
+        fs.writeFileSync(twoMinOld, "old\n");
+        const oldMs = (Date.now() - 2 * 60 * 1000) / 1000;
+        fs.utimesSync(twoMinOld, oldMs, oldMs);
+        const re = resultText(await sE.call("dispatch", { mission_id: "m-dsp5e", pack_path: dspPack, persona_path: dspPersona }));
+        ck.ok(
+          "DSP-05e Q2 阈值 env 可调：ORCH_DISPATCH_BUSY_STALE_MIN=1 → 2min 侧车超龄 → 豁免放行",
+          re.ok === true && typeof re.warning === "string" && re.warning.includes(">1min"),
+          { ok: re.ok, warning: re.warning },
+        );
+      } finally {
+        sE.close();
+      }
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- DSP-06/07（Q3b 死信摘要＋Q2 fail() 补 index：runner 黑盒直跑）----
+  {
+    const dir = path.join(dspBase, "dsp6");
+    const rt = path.join(dir, "root");
+    const resDir = path.join(rt, "context", "dispatch-results");
+    fs.mkdirSync(resDir, { recursive: true });
+    const runnerPath = path.join(PLUGIN_DIR, "hooks", "dispatch-runner.mjs");
+    // 06a 失败腿：桩 exit 1 且无信封 → finish() error 路径 index outcome=error + wake 三字段
+    const stubFail = path.join(dir, "stub-fail.mjs");
+    fs.writeFileSync(stubFail, 'process.exit(1);\n');
+    fs.writeFileSync(path.join(dir, "prompt.txt"), "[worker] gp-dsp#1\nTASK stub\n");
+    const runFail = runNode(runnerPath, [
+      "--mission-id", "m-dsp6a",
+      "--prompt", path.join(dir, "prompt.txt"),
+      "--cwd", rt,
+      "--result-dir", resDir,
+      "--log", path.join(rt, "context", "dispatch-logs", "m-dsp6a.log"),
+      "--cli", stubFail,
+    ], { cwd: rt });
+    const idxA = (() => {
+      try {
+        const name = fs.readdirSync(resDir).find((n) => /^m-dsp6a-\d+\.index\.json$/.test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(resDir, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    })();
+    const evA = (() => {
+      try {
+        const qdir = wakeDirOf(rt);
+        const name = fs.readdirSync(qdir).find((n) => /^m-dsp6a\.json$/.test(n) || /^\d+-m-dsp6a\.json$/.test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(qdir, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    })();
+    ck.ok(
+      "DSP-06a Q3b 死信摘要（失败腿）：桩 exit 1 无信封 → index {outcome:error, timed_out:false, exit_code:1}，" +
+        "wake 事件携 outcome/timed_out/exit_code 三字段（主控被唤即知死因）",
+      runFail.code === 0 && idxA && idxA.outcome === "error" && idxA.timed_out === false && idxA.exit_code === 1 &&
+        evA && evA.outcome === "error" && evA.timed_out === false && evA.exit_code === 1,
+      { code: runFail.code, idxA, evA },
+    );
+    // 06b 正常腿：即时桩 → index outcome=result + wake 三字段
+    const rtB = path.join(dir, "root-b");
+    const resDirB = path.join(rtB, "context", "dispatch-results");
+    fs.mkdirSync(resDirB, { recursive: true });
+    const stubOk = path.join(dir, "stub-ok.mjs");
+    dspStub(stubOk, "sess_dsp6b");
+    const runOk = runNode(runnerPath, [
+      "--mission-id", "m-dsp6b",
+      "--prompt", path.join(dir, "prompt.txt"),
+      "--cwd", rtB,
+      "--result-dir", resDirB,
+      "--log", path.join(rtB, "context", "dispatch-logs", "m-dsp6b.log"),
+      "--cli", stubOk,
+    ], { cwd: rtB });
+    const idxB = (() => {
+      try {
+        const name = fs.readdirSync(resDirB).find((n) => /^m-dsp6b-\d+\.index\.json$/.test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(resDirB, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    })();
+    const evB = (() => {
+      try {
+        const qdir = wakeDirOf(rtB);
+        const name = fs.readdirSync(qdir).find((n) => /^\d+-m-dsp6b\.json$/.test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(qdir, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    })();
+    ck.ok(
+      "DSP-06b Q3b 死信摘要（正常腿）：收 result → index {outcome:result, timed_out:false, exit_code:0}，" +
+        "wake 事件三字段同值（timeout 腿以源钉承接：runner 源含 timedOut?\"timeout\" 映射，分钟粒度不实弹）",
+      runOk.code === 0 && idxB && idxB.outcome === "result" && idxB.timed_out === false && idxB.exit_code === 0 &&
+        evB && evB.outcome === "result" && evB.timed_out === false && evB.exit_code === 0 &&
+        /\? "timeout" : /.test(fs.readFileSync(runnerPath, "utf8")),
+      { code: runOk.code, idxB, evB },
+    );
+    // 07 fail() 早期失败补 index（error=runner_early_fail）——缺 --prompt 实弹
+    const rtC = path.join(dir, "root-c");
+    const resDirC = path.join(rtC, "context", "dispatch-results");
+    fs.mkdirSync(resDirC, { recursive: true });
+    const runC = runNode(runnerPath, [
+      "--mission-id", "m-dsp7",
+      "--cwd", rtC,
+      "--result-dir", resDirC,
+      "--log", path.join(rtC, "context", "dispatch-logs", "m-dsp7.log"),
+      "--cli", stubOk,
+    ], { cwd: rtC });
+    const idxC = (() => {
+      try {
+        const name = fs.readdirSync(resDirC).find((n) => /^m-dsp7-\d+\.index\.json$/.test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(resDirC, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    })();
+    const errC = fs.existsSync(resDirC)
+      ? fs.readdirSync(resDirC).some((n) => /^m-dsp7-.+\.error\.json$/.test(n))
+      : false;
+    ck.ok(
+      "DSP-07 Q2 入口② fail() 补 index：缺 --prompt → runner exitCode=1 且 index 在场" +
+        "（error=runner_early_fail 前缀、session_id/result_path=null、error_path 指向 error 侧车）" +
+        "——spawn 失败路径不再零 index，busy 闸解锁",
+      runC.code === 1 && idxC && typeof idxC.error === "string" && idxC.error.startsWith("runner_early_fail") &&
+        idxC.session_id === null && idxC.result_path === null && typeof idxC.error_path === "string" && errC,
+      { code: runC.code, idxC, errC },
+    );
+  }
+
+  // ---- DSP-08（Q2 spawned_by_session 归因字段：写入面+声明面+外写面）----
+  {
+    // 08a 锚在场：dispatch 写 spawned_by_session=coord-session.txt 值
+    const dir = path.join(dspBase, "dsp8");
+    const rt = path.join(dir, "troot");
+    fs.mkdirSync(path.join(rt, "sentinel"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout"), { recursive: true });
+    fs.writeFileSync(path.join(rt, "sentinel", "coord-session.txt"), "sess_coord_dsp\n");
+    const stub = path.join(dir, "stub.mjs");
+    dspStub(stub, "sess_dsp8");
+    const sX = startServer({
+      root: rt,
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: "",
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: "",
+      },
+    });
+    try {
+      await dspUpsert(sX, "m-dsp8");
+      const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp8", pack_path: dspPack, persona_path: dspPersona }));
+      const board = JSON.parse(fs.readFileSync(path.join(rt, "board.json"), "utf8"));
+      const dm = board.missions.find((m) => m.id === "m-dsp8");
+      ck.ok(
+        "DSP-08a Q2 归因写入面：coord-session.txt 锚在场 → dispatch 落 dispatch.spawned_by_session=锚值" +
+          "（W9 scoping 前向归因消费面）",
+        r.ok === true && dm && dm.dispatch && dm.dispatch.spawned_by_session === "sess_coord_dsp",
+        { dispatch: dm && dm.dispatch },
+      );
+    } finally {
+      sX.close();
+    }
+    // 08b 锚缺席 → null（前向归因缺席回落，不造值）
+    const rtB = path.join(dir, "troot-b");
+    fs.mkdirSync(rtB, { recursive: true });
+    fs.mkdirSync(path.join(dir, "rollout-b"), { recursive: true });
+    const sB = startServer({
+      root: rtB,
+      env: {
+        ZCODE_CLI_PATH: stub,
+        ORCH_ROLLOUT_DIR: path.join(dir, "rollout-b"),
+        ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: "",
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: "",
+      },
+    });
+    try {
+      await dspUpsert(sB, "m-dsp8b");
+      await sB.call("dispatch", { mission_id: "m-dsp8b", pack_path: dspPack, persona_path: dspPersona });
+      const board = JSON.parse(fs.readFileSync(path.join(rtB, "board.json"), "utf8"));
+      const dm = board.missions.find((m) => m.id === "m-dsp8b");
+      ck.ok(
+        "DSP-08b Q2 归因锚缺席 → spawned_by_session=null（best-effort 不造值，W9 空值三段回落）",
+        dm && dm.dispatch && dm.dispatch.mode === "headless" && dm.dispatch.spawned_by_session === null,
+        { dispatch: dm && dm.dispatch },
+      );
+      // 08c 声明面+外写面：board upsert 携 spawned_by_session 过 schema 且 ONE_LEVEL 合并存活
+      const up = await sB.call("board", {
+        action: "upsert",
+        mission: { id: "m-dsp8c", title: "外写探针", dispatch: { mode: "agent", spawned_by_session: "sess_ext" } },
+      });
+      const board2 = JSON.parse(fs.readFileSync(path.join(rtB, "board.json"), "utf8"));
+      const dm2 = board2.missions.find((m) => m.id === "m-dsp8c");
+      ck.ok(
+        "DSP-08c Q2 归因声明面：board 工具 schema 增 spawned_by_session（宿主不再拒）且外部 upsert 经" +
+          "dispatch/ONE_LEVEL 子键合并存活（R4 低-3 白名单陷阱处置=子键方案，MERGEABLE_KEYS 零改动）",
+        up.isError !== true && dm2 && dm2.dispatch && dm2.dispatch.spawned_by_session === "sess_ext",
+        { up: up.isError, dispatch: dm2 && dm2.dispatch },
+      );
+    } finally {
+      sB.close();
+    }
+  }
+  grp("DSP 组收尾（A-v0120-DSP 15 断言：Q1 五腿/忙碌闸三态+env 阈值/死信两腿+fail 补 index/归因三面）");
+}
+
+/* ============ 场景 NST：v1.2 M5-1 dispatch 组装出口 mode=nested（A-v0120-NST） ============ */
+/* 不 spawn 进程、返四元组（组包链复用）；busy 闸板语义分叉；内嵌校验；纪律第 11 条
+   自动携带；触发面②接线。nested 分支测试免哨兵进程噪声：预种活槽位（pid=测试进程
+   +新鲜心跳）使 ensureSentinelFamily 探活 no-op。 */
+{
+  const grp = (t) => ck.ok(t, true, "");
+  const nstBase = subRoot("nst");
+  const nstPersona = path.join(PLUGIN_DIR, "agents", "orch-worker.md");
+  /** 手写包（NST-03 token 失配/缺 CONTRACT 形态用——绕开 context_pack 铸发链）。 */
+  const nstHandPack = (channel, token, withContract) =>
+    [
+      `# 任务包：NST 手写包（${channel}）`,
+      "",
+      ...(withContract
+        ? ["## CONTRACT（三行契约）", "", `[channel] ${channel}`, "[worker] gp-nst#1", `[token] ${token}`, ""]
+        : []),
+      "## TASK",
+      "nested 组装出口断言桩包。",
+      "",
+    ].join("\n");
+  const nstUpsert = (sX, id) =>
+    sX.call("board", {
+      action: "upsert",
+      mission: { id, title: id, status: "drafted", agent_type: "agent-orchestrator:orch-worker", scope_paths: ["src/"] },
+    });
+  const seedLiveSlot = (rt) => {
+    fs.mkdirSync(path.join(rt, "sentinel"), { recursive: true });
+    fs.writeFileSync(
+      path.join(rt, "sentinel", "instance-0.json"),
+      JSON.stringify({ pid: process.pid, heartbeatAt: new Date().toISOString() }) + "\n",
+    );
+  };
+
+  // ---- NST-01 组装出口 e2e：组包链复用+四元组+记账+纪律携带+零 spawn ----
+  {
+    const dir = path.join(nstBase, "nst1");
+    const rt = path.join(dir, "troot");
+    seedLiveSlot(rt); // 先建 sentinel/ 目录（coord-session 锚同目录）
+    fs.writeFileSync(path.join(rt, "sentinel", "coord-session.txt"), "sess_coord_nst\n");
+    const rollout = path.join(dir, "rollout");
+    fs.mkdirSync(rollout, { recursive: true });
+    const sX = startServer({ root: rt, env: { ORCH_ROLLOUT_DIR: rollout } });
+    try {
+      await nstUpsert(sX, "m-nst1");
+      const packed = resultText(
+        await sX.call("context_pack", { mission_id: "m-nst1", title: "nst 组装出口探针", task: "nested 组装链复用验证" }),
+      );
+      const r = resultText(await sX.call("dispatch", { mission_id: "m-nst1", mode: "nested" }));
+      const absOf = (p) => (path.isAbsolute(String(p)) ? String(p) : path.join(rt, String(p))); // displayPath 根相对
+      ck.ok(
+        "NST-01a 组装出口四元组+组包链复用：ok/mode=nested/mission_id 齐备，token ≡ context_pack 铸发值" +
+          "（包 CONTRACT 同源；pack_path=mission.pack.path 解析，pack.md 唯一世界零新协议）",
+        r.ok === true && r.mode === "nested" && r.mission_id === "m-nst1" &&
+          r.token === packed.token && typeof r.prompt === "string" && r.prompt.length > 0 &&
+          typeof r.pack_path === "string" && fs.existsSync(absOf(r.pack_path)),
+        { ok: r.ok, mode: r.mode, token: r.token, packed: packed.token, pack_path: r.pack_path },
+      );
+      ck.ok(
+        "NST-01b prompt 形状（内嵌 CONTRACT 三行+指针句+纪律段含第 11 条）：组装出口纪律注入段自动携带" +
+          "（消费 M6-2 DISPATCH_DISCIPLINE_BODY，11 条随 prompt 进 worker 上下文）",
+        r.prompt.includes("[channel] m-nst1") && r.prompt.includes(`[token] ${packed.token}`) &&
+          r.prompt.includes("先 Read 任务包") && r.prompt.includes("【纪律（全角色通用编排纪律") &&
+          r.prompt.includes("尾块态上报"),
+        { head: String(r.prompt).slice(0, 80), tail: String(r.prompt).slice(-120) },
+      );
+      ck.ok(
+        "NST-01c 审计 prompt 落盘与回执同文（dispatch-logs 同命名族——组装事实时间锚）",
+        typeof r.prompt_path === "string" && fs.existsSync(absOf(r.prompt_path)) &&
+          fs.readFileSync(absOf(r.prompt_path), "utf8") === r.prompt,
+        r.prompt_path,
+      );
+      const board = JSON.parse(fs.readFileSync(path.join(rt, "board.json"), "utf8"));
+      const dm = board.missions.find((m) => m.id === "m-nst1");
+      ck.ok(
+        "NST-01d 记账：drafted→dispatched 自动 + dispatch.mode=nested + spawned_by_session=coord 锚" +
+          "（W3 归因消费面）+ agent_id 留空（主控在场直收，哨兵默认不盯 §5.2.4）",
+        dm && dm.status === "dispatched" && dm.dispatch && dm.dispatch.mode === "nested" &&
+          dm.dispatch.spawned_by_session === "sess_coord_nst" && dm.dispatch.agent_id === null,
+        { status: dm && dm.status, dispatch: dm && dm.dispatch },
+      );
+      const rolloutFiles = fs.existsSync(rollout) ? fs.readdirSync(rollout) : [];
+      const resDir = path.join(rt, "context", "dispatch-results");
+      ck.ok(
+        "NST-01e 零 spawn 实锤：无 model-io（rollout 净空）、无 dispatch-results 目录、" +
+          "回执无 session_id/model_seed/result_dir（-p 专属字段整体缺席）",
+        rolloutFiles.length === 0 && !fs.existsSync(resDir) &&
+          r.session_id === undefined && r.model_seed === undefined && r.result_dir === undefined,
+        { rolloutFiles, resDirExists: fs.existsSync(resDir), keys: Object.keys(r) },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- NST-02 busy 闸分叉（板语义，不消费 result-dir index）----
+  {
+    const dir = path.join(nstBase, "nst2");
+    const rt = path.join(dir, "troot");
+    seedLiveSlot(rt);
+    const sX = startServer({ root: rt, env: {} });
+    try {
+      await nstUpsert(sX, "m-nst2");
+      await sX.call("context_pack", { mission_id: "m-nst2", title: "nst busy 分叉探针", task: "busy 闸板语义" });
+      const r1 = resultText(await sX.call("dispatch", { mission_id: "m-nst2", mode: "nested" }));
+      const rb = await sX.call("dispatch", { mission_id: "m-nst2", mode: "nested" });
+      ck.ok(
+        "NST-02a nested 在飞拒二次组装：dispatched+nested（worker 结果未落板）→ isError，文案含 nested busy 闸" +
+          "与恢复指引（板语义在飞=凭据已交付主控）",
+        r1.ok === true && rb.isError === true && /busy 闸（nested）/.test(rb.text) && /drafted/.test(rb.text),
+        { ok: r1.ok, err: rb.text.slice(0, 140) },
+      );
+      const rd = await sX.call("dispatch", { mission_id: "m-nst2" }); // 缺省 mode=headless 同拒
+      ck.ok(
+        "NST-02b 分叉按 mission.mode 判非按请求 mode：nested 在飞 mission 用缺省 headless 重派同拒" +
+          "（防绕道 -p 双发）",
+        rd.isError === true && /busy 闸（nested）/.test(rd.text),
+        rd.text.slice(0, 140),
+      );
+      const rec = await sX.call("board", { action: "upsert", mission: { id: "m-nst2", status: "drafted" } });
+      const r2 = resultText(await sX.call("dispatch", { mission_id: "m-nst2", mode: "nested" }));
+      const resDir = path.join(rt, "context", "dispatch-results");
+      ck.ok(
+        "NST-02c 不消费 result-dir index+恢复路径：dispatched→drafted（合法腿）后重派 nested 成功——" +
+          "全程零 index 零 dispatch-results（同形态 headless 被 DSP-05d 拒，nested 走板语义）",
+        rec.isError !== true && r2.ok === true && r2.mode === "nested" && !fs.existsSync(resDir),
+        { rec: rec.isError, ok: r2.ok, resDir: fs.existsSync(resDir) },
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- NST-03 内嵌校验（token 鉴权 p2pTokenGate 同语义 + CONTRACT 三行强制）----
+  {
+    const dir = path.join(nstBase, "nst3");
+    const rt = path.join(dir, "troot");
+    seedLiveSlot(rt);
+    const sX = startServer({ root: rt, env: {} });
+    try {
+      // 03a token 失配：context_pack 铸板 token 后包文件被陈旧化（token 异源）→ 组装出口拒。
+      // 注：resolveDispatchPack 以 mission.pack.path 为首级——陈旧化就地对 mission.pack.path
+      // 指向的包文件覆写（真实陈旧包形态），不走低优先级 pack_path。
+      await nstUpsert(sX, "m-nst3");
+      const packed3 = resultText(
+        await sX.call("context_pack", { mission_id: "m-nst3", title: "nst token 闸探针", task: "token 鉴权" }),
+      );
+      const stalePack = path.join(rt, "packs", "m-nst3", "pack.md");
+      fs.writeFileSync(stalePack, nstHandPack("m-nst3", "nst-stale-token-0001", true));
+      const ra = await sX.call("dispatch", { mission_id: "m-nst3", mode: "nested" });
+      ck.ok(
+        "NST-03a token 鉴权内嵌：包 CONTRACT token ≠ mission.dispatch.token → isError（陈旧包/异源包" +
+          "在组装面即拒——worker report/p2p 闸 expected token 前置一致）",
+        ra.isError === true && /token 鉴权不过/.test(ra.text),
+        { err: ra.text.slice(0, 140), packed: packed3.token },
+      );
+      // 03b CONTRACT 缺三行：无 context_pack 的 mission（无 mission.pack.path）→ 显式 pack_path
+      // 生效 → buildDispatchPrompt 契约解析失败经组装出口浮出（无板 token 且非 strict → 走到组包闸）。
+      await nstUpsert(sX, "m-nst3b");
+      const barePack = path.join(dir, "pack-bare.md");
+      fs.writeFileSync(barePack, nstHandPack("m-nst3b", "", false));
+      const rb = await sX.call("dispatch", { mission_id: "m-nst3b", mode: "nested", pack_path: barePack });
+      ck.ok(
+        "NST-03b CONTRACT 三行内嵌强制：包缺 [channel]/[worker]/[token] 三行 → isError" +
+          "（组装出口不产无契约凭据的 prompt——派发纪律工具面保证 §8.7）",
+        rb.isError === true && /CONTRACT 三行解析失败/.test(rb.text),
+        rb.text.slice(0, 140),
+      );
+    } finally {
+      sX.close();
+    }
+  }
+
+  // ---- NST-04 schema/枚举/接线静态锁（活体 strict-tokens 面不可达——harness 不支持
+  //      server 额外 CLI 旗标，以源码钉承接；strictTokens 拒收分支与 report/p2p 闸同款）----
+  {
+    const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    ck.ok(
+      "NST-04a schema 两面：board 工具 dispatch.mode 枚举加 nested（W3 headless 不动）+" +
+        "dispatch 工具 inputSchema mode enum [headless, nested]",
+      src.includes('mode: { enum: ["agent", "workflow", "headless", "nested"] }') &&
+        /mode:\s*\{[\s\S]{0,80}enum:\s*\["headless", "nested"\]/.test(src),
+      "",
+    );
+    ck.ok(
+      "NST-04b 触发面②接线：nested 分支内 ensureSentinelFamily() 调用在源（「无哨兵不派发」" +
+        "组装出口同探活，M9-1 既有实现复用）+ strictTokens 拒收分支在组装出口在源",
+      /if \(dispatchMode === "nested"\) \{[\s\S]*?ensureSentinelFamily\(\);/.test(src) &&
+        /strict-tokens 模式下不接受无派发 token 的组装/.test(src),
+      "",
+    );
+    ck.ok(
+      "NST-04c -p 链零触碰结构锁：headless 分支 mode 写点唯一（mode: \"headless\" 字面恰 2 处——" +
+        "同步段记账+session 回填，nested 未染指）",
+      (src.match(/mode: "headless"/g) || []).length === 2,
+      (src.match(/mode: "headless"/g) || []).length,
+    );
+  }
+  grp("NST 组收尾（A-v0120-NST 14 断言：组装出口 e2e 五面/busy 分叉三态/内嵌校验两腿/静态锁三钉）");
 }
 
 BASE.cleanup();

@@ -629,7 +629,7 @@ function wakeFailureInfo(m) {
   if (!suspected) return { suspected: false, result_at: null, minutes: null };
   const resultAt = lastResultAt(m);
   const ms = resultAt == null ? NaN : Date.parse(resultAt);
-  const minutes = Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 60000) : null;
+  const minutes = Number.isFinite(ms) ? Math.max(0, Math.floor((Date.now() - ms) / 60000)) : null;
   return { suspected: true, result_at: resultAt == null ? null : resultAt, minutes };
 }
 

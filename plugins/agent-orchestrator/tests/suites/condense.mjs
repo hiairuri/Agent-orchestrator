@@ -1,3 +1,4 @@
+// @module condense
 /*!
  * suites/condense.mjs —— CR-V9（tail=0 探测零回显+元数据逐位）/ CR-V10（≥1MB 大末行+中途重写）
  *   + CR-V16（①缺失不 throw 不动板 ②0.4.1 逐字节回归双进程对拍）+ 工具清单不变量

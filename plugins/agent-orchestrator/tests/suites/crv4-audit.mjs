@@ -1,3 +1,4 @@
+// @module crv4-audit
 /*!
  * suites/crv4-audit.mjs —— CRV4-01…05（files_touched 审计）+ CR-V18…V21/V29（manifest 七步管线）
  *

@@ -101,7 +101,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.1.2";
+const SERVER_VERSION = "1.2.0";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -4348,6 +4348,11 @@ function wakeQueueProduce(opts) {
           worker: opts.worker ?? null,
           session_id: opts.sessionId ?? null,
           result_path: opts.resultPath ?? null,
+          // Q3b 死信摘要（v1.2 M3-1）：runner 出口传真值（result|error|timeout）；
+          // server 生产者①（report done）不传 → null（加字段向后兼容，drain 消费面不改语义）。
+          outcome: opts.outcome ?? null,
+          timed_out: opts.timedOut ?? null,
+          exit_code: opts.exitCode ?? null,
           created_at: new Date().toISOString(),
           source: opts.source,
         },
@@ -6412,11 +6417,13 @@ const DISPATCH_TAIL_CLOSE = "<!-- orch-tail-end -->";
 // v1.1.2 I1 四段式（用户裁定终序）：纪律段置顶（offset 0 恒在，全角色同文零角色分叉）；
 // 全文照 D2 设计 v2 §4 逐字（designs/agent-orchestrator-v1.1.2-PLAN-draft.md；
 // 可微调标点不可减条）+ 主控追加裁定第 10 条迭代闭环（2026-10-26 MaimaiBOT R3 取证）。
-// 10 条与主控铁律 8 条（orch-manual）同构不同面，各自独立断言。
+// + v1.2 M6-2 第 11 条尾块态上报（aggregated §4.4② 草案全文；O13=a 双源：SKILL 第 17 章
+//   「主控信息面（尾块契约）」=面向人权威，本常量=执行面拷贝，漂移由 po-static D11 钉组对拍）。
+// 11 条与主控铁律 8 条（orch-manual）同构不同面，各自独立断言。
 const DISPATCH_DISCIPLINE_FENCE =
   "【纪律（全角色通用编排纪律；指令层；与包 RULES 冲突时以包 RULES 为准；权威=SKILL 章节指针）】";
 const DISPATCH_DISCIPLINE_BODY = [
-  "即使你跳过任务包细读，以下 10 条纪律也已随本消息进入你的上下文，此刻生效：",
+  "即使你跳过任务包细读，以下 11 条纪律也已随本消息进入你的上下文，此刻生效：",
   "",
   "| # | 纪律 | 权威 |",
   "|---|---|---|",
@@ -6430,6 +6437,7 @@ const DISPATCH_DISCIPLINE_BODY = [
   "| 8 | report 不在工具面（TOOL_ABSENT）→ 终态回复行首标注 KIND=xxx 降级交付（仅终态，无 milestone 与哨兵联动） | SKILL 第 8 章 RP-4 |",
   "| 9 | P2P 配对交互（星型拓扑的仲裁例外，仅限配对模式 mission，如策划↔调研）：经 board p2p_ask/p2p_answer 由 server 仲裁中转（非子代理直连）；发问前置=本 mission 置 blocked/question；作答方=目标 mission 当前持有者；调用携本 mission 自有 CONTRACT token（服务端按 token 鉴权）；与配对对手外仍禁互调 | board p2p 门禁（server.mjs p2p_ask/p2p_answer）、SKILL 第 1 章 OV-2 仲裁例外 |",
   "| 10 | 配对迭代（如评审↔修正循环）：迭代轮中不 report(kind=done)——以 milestone 上报保持 running，直到全部意见吸收并通过自验；done 即退出，后续 p2p 将无人应答。每轮意见无法 p2p 投递时，回落=等主控开新轮 mission（意见会内联进包） | SKILL 第 14 章 TS-12+实战（2026-10-26 MaimaiBOT） |",
+  "| 11 | 尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报 | SKILL 第 17 章（主控信息面）、第 8 章 RP-4 |",
   "",
   "P2P 补注：board schema 修复已落 v1.1.1——新会话经会话 MCP 面常规通道调用（顶层 token 参数在 schema 声明内）；",
   "宿主客户端剥参致调用被拒时，回退通道=stdio 直连（orch-cli 一次性 JSON-RPC，args 携本 mission 自有 CONTRACT",
@@ -6491,14 +6499,17 @@ function dispatchDigestSection(digest) {
 /**
  * Assemble the headless first message (pure; crv2 extracts this region and
  * drives it directly). v1.1.2 I1 四段式（用户裁定终序，不可变）：
- *   【纪律】纪律段（恒在，offset 0；10 条+P2P 补注，全角色同文）
+ *   【纪律】纪律段（恒在，offset 0；11 条+P2P 补注，全角色同文）
  *   →【项目概览】尾块轨迹（≤10 块，去 ts:/seq:，旧→新；条件节）→ digest 条件节
- *   →【职责】persona 正文 →【任务】指针句 + CONTRACT 三行
+ *   →【哨兵 scoping】缺席计数（恒在；v1.2 M9-1 无条件硬约束件）→【职责】persona 正文
+ *   →【任务】指针句 + CONTRACT 三行
  * The digest argument is the readProjectDigest() result (the server reads it;
- * purity keeps the file system out of this function). Returns
+ * purity keeps the file system out of this function). The scoping argument is
+ * {absent:n} precomputed by the caller (the board read stays outside the pure
+ * zone). Returns
  * {ok:true,text,worker,channel,token,blocks,chars} or {ok:false,error}.
  */
-function buildDispatchPrompt(mission, packText, logText, personaText, digest = null) {
+function buildDispatchPrompt(mission, packText, logText, personaText, digest = null, scoping = null) {
   const missionId = String((mission && mission.id) || "");
   const contract = dispatchParseContract(packText);
   if (!missionId) return { ok: false, error: "mission.id 缺失：无法组装派发 prompt" };
@@ -6520,6 +6531,15 @@ function buildDispatchPrompt(mission, packText, logText, personaText, digest = n
   }
   const digestSection = dispatchDigestSection(digest);
   if (digestSection) sections.push(digestSection);
+  // v1.2 M9-1（§6.2a 空值归因硬约束件·无条件）：组包尾块携带「归因缺席在盯 mission」
+  // 计数——scoping 缺席回落「漏报可见」的主控呈现面（scoping-skipped 留痕事件之外的
+  // 第二可见面）。恒在（0=无缺席），不随 digest/轨迹缺席而省略；值由调用方在纯区外
+  // 预算（dispatchScopingAbsentCount），纯区零 fs 依赖不破。置于 persona 之前、
+  // digest 之后：W4-PREFIX 尾块形制（指针句→三行 CONTRACT 收尾）不受影响。
+  const absentN = scoping && Number.isFinite(scoping.absent) ? Math.max(0, Math.floor(scoping.absent)) : 0;
+  sections.push(
+    `【哨兵 scoping】归因缺席在盯 mission：${absentN} 件（scoping-skipped——补齐 dispatch.session_id/spawned_by_session 前哨兵不盯守；0=无缺席）`,
+  );
   const persona = String(personaText ?? "").replace(/\r\n?/g, "\n").trimEnd();
   if (persona) sections.push(persona);
   const pointer =
@@ -6641,6 +6661,172 @@ function dispatchHasResultIndex(resultDir, missionId) {
   );
   try {
     return fs.readdirSync(resultDir).some((name) => exact.test(name));
+  } catch {
+    return false;
+  }
+}
+
+/** Q2 O10=a（v1.2 M3-1）busy 闸超龄豁免阈值（分钟）：env
+ *  ORCH_DISPATCH_BUSY_STALE_MIN 可调，默认 120（2h 起步）。 */
+function dispatchBusyStaleMin() {
+  const raw = Number(process.env.ORCH_DISPATCH_BUSY_STALE_MIN);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120;
+}
+
+/** 某 mission 的派发侧车盘点（文件系统事实，免 board 解析——O10=a 时间锚）：
+ *  dispatch-results/<id>-*（index/error 家族）∪ dispatch-logs/<id>-*
+ *  （prompt + runner.log——runner 起手即写 log，prompt 由 server 同步段落盘，
+ *  两者任一在场即证明 dispatch 工具同步段真实跑过）。 */
+function dispatchMissionSidecars(missionId) {
+  const pre = String(missionId) + "-";
+  const dirs = [
+    path.join(root, "context", "dispatch-results"),
+    path.join(root, "context", "dispatch-logs"),
+  ];
+  const out = [];
+  for (const dir of dirs) {
+    let names = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      names = [];
+    }
+    for (const name of names) {
+      if (!name.startsWith(pre)) continue;
+      try {
+        out.push({ dir, name, mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs });
+      } catch {
+        /* vanished → ignore */
+      }
+    }
+  }
+  return out;
+}
+
+/** Q2 归因字段值源（v1.2 M3-1）：派发时主控会话 id 锚 =
+ *  <root>/sentinel/coord-session.txt（resume 通道刷新，bg-sentinel 同款消费面）。
+ *  best-effort：缺文件/空内容 → null（W9 scoping 空值三段的「前向归因缺席」回落，
+ *  消费端按缺席语义处理，此处不造值）。 */
+function dispatchCoordSessionId() {
+  try {
+    const v = fs.readFileSync(path.join(root, "sentinel", "coord-session.txt"), "utf8").trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+/** v1.2 M9-1（§6.2a 空值归因硬约束件·无条件）：组包尾块缺席计数——统计「哨兵本应产生
+ * 盯守条件、但归因缺席将被 scoping 跳过」的在盯 mission 数。watchable 集合镜像
+ * bg-sentinel classify 条件集（C1=终态+dispatch.agent_id+未签收+非 workflow；
+ * C2/C3=在飞+dispatch.agent_id——均要求 agent_id，headless 在飞无 agent 本就不产条件）；
+ * 归因=dispatch.session_id ∥ dispatch.spawned_by_session（W3 M3-1 前向归因字段）。
+ * selfMissionId=本次派发的 mission：其 spawned_by_session 在同步段随 upsert 落盘，
+ * 锚在场即有归因（不计入）；锚缺失则计入（如实呈现最坏面，不因组装时序低估）。
+ * 板不可读 → 0（计数是呈现面非门禁，不阻塞派发）。 */
+function dispatchScopingAbsentCount(selfMissionId) {
+  try {
+    const board = JSON.parse(fs.readFileSync(path.join(root, "board.json"), "utf8"));
+    const missions = board && Array.isArray(board.missions) ? board.missions : [];
+    const anchor = dispatchCoordSessionId();
+    const inFlight = (s) => s === "dispatched" || s === "running" || s === "resumed";
+    const result = (s) => s === "done" || s === "failed" || s === "blocked" || s === "question";
+    let n = 0;
+    for (const m of missions) {
+      if (!m || typeof m !== "object") continue;
+      const d = m.dispatch && typeof m.dispatch === "object" ? m.dispatch : {};
+      if (d.mode === "workflow") continue; // B4：workflow 由宿主通知，哨兵不盯守
+      const status = String(m.status ?? "");
+      const watchable =
+        Boolean(d.agent_id) &&
+        (inFlight(status) || (result(status) && !(m.ack && typeof m.ack === "object")));
+      if (!watchable) continue;
+      const sid = typeof d.session_id === "string" ? d.session_id.trim() : "";
+      const spawned = typeof d.spawned_by_session === "string" ? d.spawned_by_session.trim() : "";
+      if (sid || spawned) continue; // 有归因 → 等值判定照常，不计缺席
+      if (selfMissionId != null && String(m.id) === String(selfMissionId)) {
+        if (!anchor) n += 1; // 自 mission：锚缺失时同步段的 spawned_by_session 也将为 null
+        continue;
+      }
+      n += 1;
+    }
+    return n;
+  } catch {
+    return 0; // 板不可读 → 0（呈现面非门禁）
+  }
+}
+
+/** v1.2 M9-1 触发面②（复活/自补员·派发前探活）：headless dispatch 同步段内探活——
+ * 家族全灭（无任一 fresh 槽位）时补员拉起 bg-sentinel（「无哨兵不派发」语义在既有
+ * headless 派发面的落地；W5 组装出口后续接同探活）。判活=pid 存活 ∧ 心跳（heartbeatAt
+ * 回落 mtime）龄 ≤ SENTINEL_HEARTBEAT_STALE_MS（与 bg-gate sentinelAlive 同规）；
+ * 拉起数量=cfg family_size（缺省 3，1..5 钳制），多余实例由槽位 wx 认领仲裁自然让位
+ * 退出（幂等，重复触发无害）。best-effort：任何异常只返回 false，不阻塞派发。 */
+function sentinelFamilyAlive() {
+  try {
+    const sentDir = path.join(root, "sentinel");
+    for (const name of fs.readdirSync(sentDir)) {
+      if (!/^instance-\d+\.json$/.test(name)) continue;
+      const f = path.join(sentDir, name);
+      try {
+        const doc = JSON.parse(fs.readFileSync(f, "utf8"));
+        const pid = Number(doc && doc.pid);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        let alive = false;
+        try {
+          process.kill(pid, 0);
+          alive = true;
+        } catch (err) {
+          alive = Boolean(err && err.code === "EPERM");
+        }
+        if (!alive) continue;
+        const hb = Date.parse(String((doc && doc.heartbeatAt) ?? ""));
+        let age = Number.isFinite(hb) ? Date.now() - hb : NaN;
+        if (!Number.isFinite(age)) {
+          try {
+            age = Date.now() - fs.statSync(f).mtimeMs;
+          } catch {
+            continue;
+          }
+        }
+        if (Math.max(0, age) <= SENTINEL_HEARTBEAT_STALE_MS) return true;
+      } catch {
+        /* bad slot file → next */
+      }
+    }
+  } catch {
+    /* no sentinel dir → family dead */
+  }
+  return false;
+}
+
+function ensureSentinelFamily() {
+  try {
+    if (sentinelFamilyAlive()) return false;
+    const script = path.join(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+      "hooks",
+      "bg-sentinel.mjs",
+    );
+    let familySize = 3;
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(root, "sentinel.cfg.json"), "utf8"));
+      if (cfg && Number.isFinite(cfg.family_size)) {
+        familySize = Math.min(5, Math.max(1, Math.round(cfg.family_size)));
+      }
+    } catch {
+      /* 无/坏 cfg → 内建缺省 3 */
+    }
+    for (let k = 0; k < familySize; k++) {
+      try {
+        child_process
+          .spawn(process.execPath, [script, "--root", root], { detached: true, stdio: "ignore", windowsHide: true })
+          .unref();
+      } catch {
+        /* best effort */
+      }
+    }
+    return true;
   } catch {
     return false;
   }
@@ -6831,9 +7017,12 @@ function dispatchProviderConfigEnv() {
 }
 
 /** Pick the seed target model. `modelArg` = "providerId/modelId[@level]".
- *  Default: first enabled api-key provider rule with a usable model — the only
- *  provider kind that resolves in standalone -p (account/zhipu-account needs
- *  the desktop entitlement bridge, per FA empirics). */
+ *  v1.2 M3-1 Q1 播种三段式：① 显式 model 参数 → ② 会话真值 defaultModelSelection
+ *  （provider enabled + api-key 才采信；O9=a：level 原值直通不经 levelOf 重解析，
+ *  fromDms 标记驱动 dispatchSeedModelConfig 跳过 dms 覆写）→ ③ 回落：first enabled
+ *  api-key provider rule with a usable model — the only provider kind that
+ *  resolves in standalone -p (account/zhipu-account needs the desktop
+ *  entitlement bridge, per FA empirics). */
 function dispatchPickSeedModel(doc, modelArg) {
   const rules = doc && doc.config && doc.config.providerConfigRules && doc.config.providerConfigRules.providerRules;
   if (!Array.isArray(rules)) return null;
@@ -6860,6 +7049,30 @@ function dispatchPickSeedModel(doc, modelArg) {
     const rule = rules.find((r) => r && r.providerId === m[1]);
     if (!rule || !rule.config || !rule.config.access || rule.config.access.type !== "api-key") return null;
     return { providerId: m[1], modelId: m[2], reasoningLevel: levelOf(m[1], m[2], m[3] || null) };
+  }
+  // Q1 段②（v1.2 M3-1）：会话真值 dms 优先于「首个 api-key」猜测。dms 是宿主自己
+  // 维护的 defaultModelSelection——provider 层校验（enabled + api-key 类型）后采信；
+  // model 层从宽（不查 modelRules enabled——宿主真值不重裁）。level 取 dms 原值
+  // （O9=a）：不经 levelOf 重解析，缺失时 null（种子覆写跳过后该值不进种子文件，
+  // 只做回执元数据）。dms 指向 disabled/非 api-key provider → 穿透到段③回落。
+  const sel = doc.config.defaultModelSelection;
+  if (sel && typeof sel === "object" && sel.providerId && sel.modelId) {
+    const selRule = rules.find((r) => r && r.providerId === sel.providerId);
+    if (
+      selRule &&
+      selRule.enabled !== false &&
+      selRule.config &&
+      selRule.config.access &&
+      selRule.config.access.type === "api-key"
+    ) {
+      return {
+        providerId: String(sel.providerId),
+        modelId: String(sel.modelId),
+        reasoningLevel:
+          sel.options && sel.options.reasoningLevel != null ? String(sel.options.reasoningLevel) : null,
+        fromDms: true,
+      };
+    }
   }
   for (const rule of rules) {
     if (!rule || rule.enabled === false) continue;
@@ -6941,7 +7154,11 @@ function dispatchSeedModelConfig(missionId, modelArg) {
     // so the seed never writes optionSpecs itself). Without a dms the CLI's
     // registry-fallback (xet @596667 → gQi values.at(-1)) picks the enabled
     // model with a valid level — empirically verified end-to-end.
-    if (pick.reasoningLevel != null) {
+    // Q1（v1.2 M3-1）：fromDms 命中时跳过覆写——种子拷贝自带会话真值
+    // defaultModelSelection（宿主原样，strict-zod 已被真实配置自证），任何重写
+    // 都是画蛇添足；覆写仅在回落分支（显式 model / 首 api-key）生效，顺带把
+    // 指向 disabled provider 的陈旧 dms 换成有效选型。
+    if (!pick.fromDms && pick.reasoningLevel != null) {
       seedDoc.config.defaultModelSelection = {
         providerId: pick.providerId,
         modelId: pick.modelId,
@@ -6967,6 +7184,12 @@ function dispatchSeedModelConfig(missionId, modelArg) {
 
 function toolDispatchInner(args) {
   const missionId = safeSegment(args.mission_id, "mission_id");
+  // v1.2 M5-1：mode 参数（缺省 headless——-p 链既有语义零触碰；"nested"=组装出口，
+  // 不 spawn 进程、返 {mission_id, token, prompt, pack_path} 由主控经宿主 Agent 嵌套发出）。
+  const dispatchMode = args.mode == null || args.mode === "" ? "headless" : String(args.mode);
+  if (dispatchMode !== "headless" && dispatchMode !== "nested") {
+    throw new ToolError(`dispatch mode 非法：${dispatchMode}（enum: headless|nested）`);
+  }
   const mission = findMission(loadBoard(), missionId);
   if (!mission) {
     throw new ToolError(`mission 不在板：${missionId}（先 board upsert + context_pack）`);
@@ -6985,13 +7208,40 @@ function toolDispatchInner(args) {
     );
   }
   const resultDir = path.join(root, "context", "dispatch-results");
+  // Q2 O10=a（v1.2 M3-1）超龄豁免：结果 index 缺席时盘点侧车——全部超龄（>阈值）
+  // → 放行重派并附 warning（孤儿会话风险提示）。判据不取「侧车全无」腿：零侧车=
+  // dispatch 同步段从未跑过（含手写 mode=headless 的板记录，l-20261026-792cf9 形态），
+  // never-dispatched ≠ 孤儿，维持拒双跑（crv2 W4-DISPATCH-08 黑盒语义保持）。
+  // 真在飞 mission 必有新鲜侧车（log runner 起手即写 / prompt server 同步段先写），
+  // 不会被误放行。killed-index（runner 死亡兜底）落真 index 文件名 → 先于豁免放行。
+  let busyExempt = null;
   if (
     mission.dispatch &&
     mission.dispatch.mode === "headless" &&
     !dispatchHasResultIndex(resultDir, missionId)
   ) {
+    const staleMin = dispatchBusyStaleMin();
+    const sidecars = dispatchMissionSidecars(missionId);
+    const cutoff = Date.now() - staleMin * 60000;
+    const allStale = sidecars.length > 0 && sidecars.every((sc) => sc.mtimeMs <= cutoff);
+    if (!allStale) {
+      throw new ToolError(
+        `busy 闸：mission ${missionId} 已有 headless 派发在飞（dispatch-results 无结果 index），拒双跑`,
+      );
+    }
+    busyExempt = { stale_min: staleMin, sidecars: sidecars.length };
+  }
+  // v1.2 M5-1 nested busy 闸分叉（板语义，不消费 result-dir index——result-dir 三件套对
+  // nested 整体缺席，headless 闸上块的 mode 判据天然不消费 nested mission）。在飞判定=
+  // 组装凭据已交付主控（宿主 Agent 嵌套发出）而 worker 结果尚未落板（status 仍
+  // dispatched）——拒二次组装防双发；running 已被上方状态闸拦（board running+claim
+  // 租约语义）。恢复路径=主控会话内可见首 Agent 已死时 board upsert status:"drafted"
+  // （dispatched→drafted 合法腿）后重派，或等 worker report 演进状态。
+  if (mission.dispatch && mission.dispatch.mode === "nested" && status === "dispatched") {
     throw new ToolError(
-      `busy 闸：mission ${missionId} 已有 headless 派发在飞（dispatch-results 无结果 index），拒双跑`,
+      `busy 闸（nested）：mission ${missionId} 已有 nested 组装凭据在飞（board dispatched、` +
+        "worker 结果未落板），拒二次组装——恢复：首个嵌套 Agent 已死时 " +
+        'board upsert status:"drafted"（dispatched→drafted 合法腿）后重派，或等 worker report',
     );
   }
   const packFile = resolveDispatchPack(mission, args.pack_path);
@@ -7035,8 +7285,76 @@ function toolDispatchInner(args) {
   // coordinator-facing display path.
   const promptPackPath = cwd === projectDir ? displayPath(packFile) : path.resolve(packFile);
   const promptMission = { ...mission, pack: { ...(mission.pack || {}), path: promptPackPath } };
-  const built = buildDispatchPrompt(promptMission, packText, logText, personaText, dispatchDigestRead());
+  // v1.2 M9-1：组包尾块缺席计数随 scoping 参数入纯区组装（计数在纯区外预算——纯区零 fs）。
+  const built = buildDispatchPrompt(promptMission, packText, logText, personaText, dispatchDigestRead(), {
+    absent: dispatchScopingAbsentCount(missionId),
+  });
   if (!built.ok) throw new ToolError(built.error);
+
+  // v1.2 M5-1 mode=nested 组装出口（主形态；aggregated §5）：不 spawn 进程——组包链
+  // 复用（pack.md 唯一世界、buildDispatchPrompt 同一纯区组装、零新协议），组装好的
+  // 首条消息返主控，由主控经宿主 Agent 嵌套发出。本分支纯新增，default（headless）
+  // -p 链以下逐字节不变。嵌套形态下 bg-gate 对宿主 Agent 调用只是提示面非防线
+  // （PT-5 fail-open 三层，且不知 mission scope——§8.7），派发纪律靠本工具面内嵌校验保证：
+  //   ① CONTRACT 三行——buildDispatchPrompt ok 即已强制（包 CONTRACT 缺三行在此前抛错）；
+  //   ② token 鉴权（p2pTokenGate 同语义落组装面）——包 CONTRACT token 必须 ≡
+  //      mission.dispatch.token（context_pack 铸发、report/p2p 闸的 expected token）；
+  //      无板 token 且 --strict-tokens → 拒（与 report 闸同向）；
+  //   ③ scope_paths 预检——上方 yolo 闸两形态同闸（worker 类非空写集强制）。
+  if (dispatchMode === "nested") {
+    const boardToken =
+      mission.dispatch && mission.dispatch.token ? String(mission.dispatch.token) : null;
+    if (boardToken != null) {
+      if (built.token !== boardToken) {
+        throw new ToolError(
+          "组装出口 token 鉴权不过：包 CONTRACT token 与 mission.dispatch.token 不一致" +
+            "（重新 context_pack 铸发后重派，或核对 pack_path 指向陈旧包）",
+        );
+      }
+    } else if (strictTokens) {
+      throw new ToolError(
+        "组装出口 token 鉴权：--strict-tokens 模式下不接受无派发 token 的组装（先 context_pack 铸发 token 再派发）",
+      );
+    }
+    // 审计 prompt 落盘（与 -p 同目录同命名族：组装事实的时间锚，兼作后续 headless
+    // 重派时 O10 判据的侧车素材——确有派发发生）。
+    const stampN = new Date().toISOString().replace(/[:.]/g, "-");
+    const promptPathN = path.join(root, "context", "dispatch-logs", `${missionId}-${stampN}.prompt`);
+    atomicWriteFileSync(promptPathN, built.text);
+    // 记账（与 headless 同形：mode=nested 先于宿主 Agent 存在即板上可见；
+    // spawned_by_session=W3 归因锚消费面；agent_id/task_id/session_id 留 null——
+    // 主控在场直收结果，哨兵 classify 要求 agent_id → nested 默认不盯，§5.2.4）。
+    upsertMission(
+      {
+        id: missionId,
+        ...(status === "drafted" ? { status: "dispatched" } : {}),
+        dispatch: {
+          mode: "nested",
+          agent_id: null,
+          task_id: null,
+          session_id: null,
+          spawned_by_session: dispatchCoordSessionId(),
+        },
+      },
+      { internal: true },
+    );
+    // v1.2 M9-1 触发面②（复活/自补员）组装出口接线：「无哨兵不派发」探活复用
+    // ensureSentinelFamily（M9-1 既有实现，impl-plan M5-1 task 指定接同探活）。
+    ensureSentinelFamily();
+    return {
+      ok: true,
+      mode: "nested",
+      mission_id: missionId,
+      worker: built.worker,
+      channel: built.channel,
+      token: built.token,
+      prompt: built.text,
+      pack_path: displayPath(packFile),
+      prompt_path: displayPath(promptPathN),
+      chars: built.chars,
+      __nested: true, // wrapper 消费：nested 无进程可捕获，跳过 ≤8s 组合捕获
+    };
+  }
 
   const logDir = path.join(root, "context", "dispatch-logs");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -7059,14 +7377,27 @@ function toolDispatchInner(args) {
 
   // Board first: mode=headless is visible to the busy gate / sentinel before the
   // process exists (the double-dispatch window closed by the lock, not by luck).
+  // Q2 归因（v1.2 M3-1）：spawned_by_session=派发时主控会话 id 锚（coord-session.txt
+  // best-effort，缺锚=null）——W9 scoping 的前向归因消费面；寄 dispatch/ONE_LEVEL
+  // 子键，mergeMission 白名单陷阱不触（R4 低-3 三选一处置：子键方案）。
   upsertMission(
     {
       id: missionId,
       ...(status === "drafted" ? { status: "dispatched" } : {}),
-      dispatch: { mode: "headless", agent_id: null, task_id: null, session_id: null },
+      dispatch: {
+        mode: "headless",
+        agent_id: null,
+        task_id: null,
+        session_id: null,
+        spawned_by_session: dispatchCoordSessionId(),
+      },
     },
     { internal: true },
   );
+
+  // v1.2 M9-1 触发面②：派发前探活补员（「无哨兵不派发」——家族全灭时拉起 bg-sentinel
+  // 家族；任一 fresh 槽位在岗即让位，幂等。落本 headless 派发面，W5 组装出口后续接同探活）。
+  ensureSentinelFamily();
 
   // v1.1.1-FA: seed the headless model supply BEFORE the spawn (in-lock, small
   // file IO). Seed failure is NOT fatal — the runner boots anyway and the
@@ -7097,8 +7428,12 @@ function toolDispatchInner(args) {
     ],
     { detached: true, stdio: "ignore", windowsHide: true, cwd: projectDir },
   );
-  // A spawn failure lands as a missing result index (the busy gate then holds);
-  // the no-op listener keeps an EMFILE-style error from reaching uncaughtException.
+  // Spawn failures land as an index written by the runner's fail() path
+  // (error=runner_early_fail, v1.2 M3-1 Q2 entry-② fix) — the busy gate
+  // unblocks on re-dispatch. Residual: a hard kill (taskkill /F) before any
+  // handler runs leaves NO index; the gate then holds until the O10
+  // stale-sidecar exemption or manual sidecar cleanup. The no-op listener
+  // keeps an EMFILE-style error from reaching uncaughtException.
   child.on("error", () => {});
   child.unref();
   return {
@@ -7108,6 +7443,13 @@ function toolDispatchInner(args) {
     log_path: displayPath(runnerLogPath),
     prompt_path: displayPath(promptPath),
     result_dir: displayPath(resultDir),
+    ...(busyExempt
+      ? {
+          warning:
+            `busy 闸超龄豁免放行：结果 index 缺席且全部侧车超龄（>${busyExempt.stale_min}min，` +
+            "ORCH_DISPATCH_BUSY_STALE_MIN 可调）——可能有孤儿会话残留，重派前建议核查旧会话",
+        }
+      : {}),
     __rollout_before: rolloutBefore,
     __results_before: resultsBefore,
     __result_dir_abs: resultDir,
@@ -7129,6 +7471,12 @@ function toolDispatch(args) {
   const lockT0 = Date.now();
   const prepared = withRootLock(() => toolDispatchInner(args));
   const lockHoldMs = Date.now() - lockT0;
+  // v1.2 M5-1：nested 组装出口无进程可捕获——锁内组装即终态回执，跳过 ≤8s 组合捕获
+  //（-p 链捕获面零触碰）。
+  if (prepared.__nested) {
+    delete prepared.__nested;
+    return { ...prepared, lock_hold_ms: lockHoldMs };
+  }
   const rolloutBefore = prepared.__rollout_before;
   const resultsBefore = prepared.__results_before;
   const resultDirAbs = prepared.__result_dir_abs;
@@ -7148,12 +7496,19 @@ function toolDispatch(args) {
     const summary = outcome.errorPath
       ? dispatchFailureSummary(outcome.errorPath)
       : { error: "runner 记录失败（exit_code=" + String(outcome.exitCode) + "，error 侧车缺失）", modelError: false };
+    // Q2 O8=a（v1.2 M3-1）hint 按 index 有无分叉：fail()/killed-index 双入口补写后
+    // index 通常已落（旧文案「busy 闸不拦重派」为真）；残余无 index 面（强杀先于全部
+    // handler / 历史存量）→ 如实说明 + 解锁指引，不再给出与 busy 闸互斥的指引迷路面。
     const hint = summary.modelError
       ? "headless 子代理未启动：CLI 在发消息前要求选模型（该机器 -p 无模型供给）。" +
         "本版 dispatch 已自动播种模型选型副本（见 model_seed 字段）；seeded:false 时请先在桌面/交互模式" +
         "打开该项目 /model 选型并保存为默认，或升级宿主 CLI（上游 -p 缺 --model 旗标）。修复后直接重派。"
-      : "headless 子代理未启动（CLI 提前退出）。查 runner 日志（log_path）与 error 侧车（error_path）定位；" +
-        "修复后直接重派（结果 index 已落，busy 闸不拦重派）。";
+      : dispatchHasResultIndex(resultDirAbs, prepared.mission_id)
+        ? "headless 子代理未启动（CLI 提前退出）。查 runner 日志（log_path）与 error 侧车（error_path）定位；" +
+          "修复后直接重派（结果 index 已落，busy 闸不拦重派）。"
+        : "headless 子代理未启动（CLI 提前退出），且结果 index 未落——runner 死亡过快或被强杀，" +
+          "busy 闸会拦重派：删除 dispatch-results 中该 mission 的侧车文件后重派，" +
+          "或等全部侧车超龄豁免（ORCH_DISPATCH_BUSY_STALE_MIN，默认 120 分钟）。";
     return {
       ...prepared,
       ok: false,
@@ -9203,7 +9558,8 @@ const TOOLS = [
             dispatch: {
               type: "object",
               properties: {
-                mode: { enum: ["agent", "workflow", "headless"] },
+                // v1.2 M5-1：mode 枚举加 nested（组装出口；headless 系 W3 M3-1 在案补齐）
+                mode: { enum: ["agent", "workflow", "headless", "nested"] },
                 agent_id: {
                   type: ["string", "null"],
                   description: "agent_<uuid>",
@@ -9222,6 +9578,11 @@ const TOOLS = [
                   description: "dispatch session id (from the SessionStart injection)",
                 },
                 token: { type: "string", description: "8-hex dispatch token" },
+                spawned_by_session: {
+                  type: ["string", "null"],
+                  description:
+                    "coordinator session id that issued the spawn (v1.2 M3-1: written by dispatch from coord-session.txt; W9 scoping ownership face; null = anchor absent)",
+                },
               },
             },
             pack: {
@@ -9770,19 +10131,26 @@ const TOOLS = [
     // prefix and probe keeps its 11th position — zero drift for old readers).
     name: PREFIX + "dispatch",
     description:
-      "Headless dispatch launcher: assemble the subagent's first message and start a detached `zcode -p` session.\n\n" +
+      "Dispatch launcher: assemble the subagent's first message. Two forms — headless (default, fire-and-forget `zcode -p` runner) and nested (v1.2 M5-1 assembly exit, the primary form: no spawn, the coordinator emits the assembled prompt via a host Agent).\n\n" +
       "Usage:\n" +
       "- Coordinator-only. Dispatch surface = board upsert → context_pack → dispatch(mission_id); no prompt assembly on the coordinator side.\n" +
       "- Pack resolves mission.pack.path → pack_path → <root>/packs/<mission_id>/pack.md; persona resolves persona_path → mission.pack.persona → agent_type role file → isError.\n" +
-      "- First message order: tail trace (≤10 blocks, ts:/seq: stripped, oldest→newest) → digest section (when present) → persona body → pointer sentence + CONTRACT three lines.\n" +
-      "- yolo gate: worker-class missions need a non-empty scope_paths (scout/reviewer/gleaner exempt); busy gate: a headless mission without a result index rejects a second run.\n" +
-      "- Model supply (v1.1.1-FA): before the spawn the server writes a mission-stamped provider-config SEED COPY (env-redirected; the real config is never touched) so headless -p always has a model selection; `model` (\"providerId/modelId[@reasoningLevel]\") overrides the target, default = the user's first enabled api-key provider/model. Response carries model_seed {seeded, provider_id?, model_id?, reasoning_level?, config_path?} or {seeded:false, reason}.\n" +
-      "- Returns fast with {ok, mission_id, worker, log_path, prompt_path, result_dir, model_seed}; the ≤8s combined capture then resolves session_id (booted), ok:false + error + hint (runner recorded a fast death — R2 静默失败 eliminated), or session_pending:true (true slow start). Results land in <root>/context/dispatch-results/; completion still arrives through the worker's report.",
+      "- First message order: tail trace (≤10 blocks, ts:/seq: stripped, oldest→newest) → digest section (when present) → persona body → pointer sentence + CONTRACT three lines. The discipline-injection section (11 rules incl. rule 11 tail-block reporting) always rides at offset 0.\n" +
+      "- mode=nested (v1.2 M5-1, primary form): no process is spawned — returns {ok, mode:\"nested\", mission_id, token, prompt, pack_path, prompt_path}; feed `prompt` to a host Agent as its first message. Bookkeeping: dispatch.mode=nested + spawned_by_session; agent_id stays null (the coordinator is in-session and receives the result directly, so the sentinel does not watch nested missions by default). Embedded checks (dispatch discipline enforced by the tool face, §8.7): pack CONTRACT token must equal mission.dispatch.token (p2pTokenGate semantics; strict-tokens closes the no-token face) + the yolo scope_paths gate (both modes).\n" +
+      "- mode=headless (default, fire-and-forget): detached-spawns hooks/dispatch-runner (`zcode -p <prompt> --json --mode yolo`); yolo gate: worker-class missions need a non-empty scope_paths (scout/reviewer/gleaner exempt); busy gate: a headless mission without a result index rejects a second run (stale-sidecar exemption, ORCH_DISPATCH_BUSY_STALE_MIN). Busy gate forks by mode: a nested-dispatched mission still awaiting its worker result rejects a second assembly (board semantics; the result-dir index is never consumed for nested) — recovery = board upsert status:\"drafted\" then re-dispatch.\n" +
+      "- Model supply (headless only, v1.1.1-FA): before the spawn the server writes a mission-stamped provider-config SEED COPY (env-redirected; the real config is never touched) so headless -p always has a model selection; `model` (\"providerId/modelId[@reasoningLevel]\") overrides the target, default = the session's defaultModelSelection when its provider is an enabled api-key one (v1.2 M3-1 three-stage pick), else the user's first enabled api-key provider/model. Response carries model_seed {seeded, provider_id?, model_id?, reasoning_level?, config_path?} or {seeded:false, reason}. Nested inherits the session model — no seed, no model/timeout_min consumption.\n" +
+      "- Returns fast with {ok, mission_id, worker, log_path, prompt_path, result_dir, model_seed} (headless) or {ok, mode:\"nested\", mission_id, token, prompt, pack_path, prompt_path} (nested); the ≤8s combined capture (headless) then resolves session_id (booted), ok:false + error + hint (runner recorded a fast death — R2 静默失败 eliminated), or session_pending:true (true slow start). Results land in <root>/context/dispatch-results/; completion still arrives through the worker's report.",
     inputSchema: {
       type: "object",
       required: ["mission_id"],
       properties: {
         mission_id: { type: "string", description: "Mission id (must be on the board with status drafted/dispatched)" },
+        mode: {
+          type: "string",
+          enum: ["headless", "nested"],
+          description:
+            'Dispatch form: "headless" (default; fire-and-forget -p runner) or "nested" (v1.2 M5-1 assembly exit — no spawn, returns {mission_id, token, prompt, pack_path} for the coordinator to emit via a host Agent; model/timeout_min are headless-only)',
+        },
         persona_path: {
           type: "string",
           description: "Explicit persona file (overrides mission.pack.persona and the agent_type role match)",
@@ -9794,7 +10162,7 @@ const TOOLS = [
         model: {
           type: "string",
           description:
-            'Optional headless model supply override, "providerId/modelId[@reasoningLevel]" (e.g. "account:bigmodel-individual-coding-plan/GLM-5.3-Flash@low"). Only api-key providers resolve in standalone -p; omit to seed the user\'s first enabled api-key provider/model',
+            'Optional headless model supply override, "providerId/modelId[@reasoningLevel]" (e.g. "account:bigmodel-individual-coding-plan/GLM-5.3-Flash@low"). Only api-key providers resolve in standalone -p; omit to seed the session default (defaultModelSelection when usable, v1.2 M3-1) else the user\'s first enabled api-key provider/model',
         },
         timeout_min: {
           type: "number",
@@ -9884,19 +10252,44 @@ function digestSourcesNow() {
   return src;
 }
 
+// v1.2 M8-1 (A-v0120-STL; O2 终裁): STALE 分级渲染 — drift 按 N=5 绝对数分级
+// （≤5 轻微=态势面大概率仍有效；>5 显著=建议触发归敛；mtime 类无数值漂移或
+// NaN → drift:null → 显著，fail-safe 侧：无法担保新鲜即按显著处理）。分级文案
+// 烘入 stale_reason 渲染串（两注入头模板零改携带分级：context_pack 节头 + 纯区
+// dispatch 前缀），结构化契约 {field,want,now,drift} 随 stale_detail 输出
+// （card-memory-views.md §5 消费面；旧文案 `lessons_lines W ≠ N` 为新文案前缀，
+// 考古兼容）。
+const DIGEST_DRIFT_N = 5;
+function digestGradedStaleReason(field, want, now) {
+  const nWant = Number(want);
+  const nNow = Number(now);
+  const drift =
+    field === "lessons_lines" && Number.isFinite(nWant) && Number.isFinite(nNow)
+      ? Math.abs(nNow - nWant)
+      : null;
+  const minor = drift !== null && drift <= DIGEST_DRIFT_N;
+  const head = field === "lessons_lines" ? `${field} ${want} ≠ ${now}` : `${field} 不匹配`;
+  const tail = drift !== null ? `漂移 ${drift}${minor ? "≤" : ">"}${DIGEST_DRIFT_N}` : "漂移未知";
+  const grade = minor ? "轻微——态势面大概率仍有效" : "显著——建议触发归敛";
+  return { text: `${head}（${tail}，${grade}）`, detail: { field, want, now, drift } };
+}
+
 /**
  * Read + validate the digest. Returns
- *   {status:"missing"|"fresh"|"stale", generated_at, lines, stale_reason}
+ *   {status:"missing"|"fresh"|"stale", generated_at, lines, stale_reason, stale_detail}
  * fail-safe contract (DESIGN §3.2/§3.3 + pack RULES):
  *  - missing → the caller falls back to the two legacy memory sections
  *    (default packs stay byte-identical);
  *  - stale (fingerprint mismatch / sidecar unusable / over-cap) → the body is
- *    still renderable, tagged STALE — assembly is never blocked;
+ *    still renderable, tagged STALE — assembly is never blocked; fingerprint
+ *    mismatches are graded by drift (M8-1, O2=N5 absolute): stale_reason keeps
+ *    its render-string form (both injection-face templates consume it
+ *    unchanged) and stale_detail carries {field,want,now,drift};
  *  - body lines are clamped to the G4 caps so an oversized file can never
  *    inflate the pack (clamping only affects invalid inputs).
  */
 function readProjectDigest() {
-  const missing = { status: "missing", generated_at: null, lines: [], stale_reason: null };
+  const missing = { status: "missing", generated_at: null, lines: [], stale_reason: null, stale_detail: null };
   let raw;
   try {
     raw = fs.readFileSync(digestMdFile(), "utf8");
@@ -9923,7 +10316,10 @@ function readProjectDigest() {
   if (Buffer.byteLength(joined, "utf8") > DIGEST_MAX_BYTES) joined = byteSliceUtf8(joined, DIGEST_MAX_BYTES);
   lines = joined ? joined.split("\n") : [];
   if (!staleReason && !lines.length) staleReason = "digest 正文为空";
-  // Source fingerprint (generation-time vs current).
+  // Source fingerprint (generation-time vs current). Mismatch reasons are
+  // graded in place (M8-1, O2=N5): stale_reason stays the render string, the
+  // structured {field,want,now,drift} rides stale_detail (card §5 contract).
+  let staleDetail = null;
   if (!staleReason) {
     let side = null;
     try {
@@ -9935,17 +10331,29 @@ function readProjectDigest() {
     const now = digestSourcesNow();
     if (!want) staleReason = "digest 指纹侧车缺失/不可解析";
     else if (Number(want.lessons_lines) !== now.lessons_lines) {
-      staleReason = `lessons_lines ${want.lessons_lines} ≠ ${now.lessons_lines}`;
+      const g = digestGradedStaleReason("lessons_lines", want.lessons_lines, now.lessons_lines);
+      staleReason = g.text;
+      staleDetail = g.detail;
     } else if ((want.lessons_mtime_ms ?? null) !== now.lessons_mtime_ms) {
-      staleReason = "lessons_mtime_ms 不匹配";
+      const g = digestGradedStaleReason("lessons_mtime_ms", want.lessons_mtime_ms, now.lessons_mtime_ms);
+      staleReason = g.text;
+      staleDetail = g.detail;
     } else if (
       Object.prototype.hasOwnProperty.call(want, "agents_md_mtime_ms") &&
       (want.agents_md_mtime_ms ?? null) !== now.agents_md_mtime_ms
     ) {
-      staleReason = "agents_md_mtime_ms 不匹配";
+      const g = digestGradedStaleReason("agents_md_mtime_ms", want.agents_md_mtime_ms, now.agents_md_mtime_ms);
+      staleReason = g.text;
+      staleDetail = g.detail;
     }
   }
-  return { status: staleReason ? "stale" : "fresh", generated_at: generatedAt, lines, stale_reason: staleReason };
+  return {
+    status: staleReason ? "stale" : "fresh",
+    generated_at: generatedAt,
+    lines,
+    stale_reason: staleReason,
+    stale_detail: staleDetail,
+  };
 }
 
 /** §3.2 consumption: only replace the two legacy memory sections when at least

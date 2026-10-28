@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /*!
  * tests/run-all.mjs —— 全量回归入口（=发版门）。按 CR-15 分层跑断言 ID 子集对应的 suites。
+ * LM-04：本文件 REGISTRY ≡ suites/ 名单为结构锁之一（lint-manifest LM-04 组三锁）。
  *
  * 覆盖断言组：L0 骨架（l0-skeleton：A-v041-R01 静态子集/tools=12〔v0.6 A6 probe 转正 + v1.1.1 W20 dispatch〕/BOARD_VERSION/hooks.json/SB09+M07/B07
- *   + lint-manifest：V7-12 发版 lint LM-01 约定路径防复发〔W-F4 钉〕/LM-02 manifest 引用存在/LM-03 版本三方一致）
+ *   + lint-manifest：V7-12 发版 lint LM-01 约定路径防复发〔W-F4 钉〕/LM-02 manifest 引用存在/LM-03 版本三方一致
+ *   /LM-05 文档卡同步锁〔v1.2 M1-3：契约卡存在非空+锚标识符源码 grep 可见〕）
  *   + L1 直接层全跑（sb-normalize=SB01/02/05+M01/02；crv1-scope=CRV1-01..08+E4+M04；
  *   crv2-pack=CRV2-01..08+CR-V22/23/24/25；crv4-audit=CRV4-01..05+CR-V18..V21/V29；
  *   crv3-present=CRV3-01..03+CR-V26/27/28+M03/05/06；condense=CR-V9/10/16；bggate=M08..M10+B01..07+S09；sentinel-teardown=哨兵 v2.1 待命/轮换 T1..T4）。
@@ -59,6 +61,8 @@ const REGISTRY = [
   //   （W4-01 固定文案钉 14 条/旧措辞+M2 残句 ban/W4-04 SKILL 同步钉+M10 文案钉）。
   //   断言主句权威 tests/assertions/v0.11.x.md §1 A-v0110-M10-03..05。
   { name: "po-static", layer: "L1" },
+  { name: "twin-lock", layer: "L1" }, // v1.2 M2-1（A-v0120-TW）：五文件 twin 行为矩阵锁+VALUE_TWINS 值锁+负例腿（M-4 内存副本零源触碰）
+  { name: "contract-sync", layer: "L1" }, // v1.2 M1-3（A-v0120-CARD）：状态机卡 ALLOWED_TRANSITIONS fenced 块 vs crv6-statemachine 源实现语义对拍（卡≈码漂移即红）+M1-2 建议两实锚；LM-05 文档卡同步锁同 mission 注册于 lint-manifest（上方 L0 行）
 ];
 
 function argOf(flag) {

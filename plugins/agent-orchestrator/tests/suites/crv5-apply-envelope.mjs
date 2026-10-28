@@ -1,3 +1,4 @@
+// @module crv5-apply-envelope
 /*!
  * suites/crv5-apply-envelope.mjs —— v0.6 apply 包络 suite（A1 bootstrap：QUOT/LOCK；A5 波增例 ENV-01..07）
  *
