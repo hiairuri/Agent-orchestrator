@@ -101,7 +101,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.2.0";
+const SERVER_VERSION = "1.2.1";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -6419,11 +6419,11 @@ const DISPATCH_TAIL_CLOSE = "<!-- orch-tail-end -->";
 // 可微调标点不可减条）+ 主控追加裁定第 10 条迭代闭环（2026-10-26 MaimaiBOT R3 取证）。
 // + v1.2 M6-2 第 11 条尾块态上报（aggregated §4.4② 草案全文；O13=a 双源：SKILL 第 17 章
 //   「主控信息面（尾块契约）」=面向人权威，本常量=执行面拷贝，漂移由 po-static D11 钉组对拍）。
-// 11 条与主控铁律 8 条（orch-manual）同构不同面，各自独立断言。
+// 12 条与主控手册命令内联铁律速览同构不同面，各自独立断言。
 const DISPATCH_DISCIPLINE_FENCE =
   "【纪律（全角色通用编排纪律；指令层；与包 RULES 冲突时以包 RULES 为准；权威=SKILL 章节指针）】";
 const DISPATCH_DISCIPLINE_BODY = [
-  "即使你跳过任务包细读，以下 11 条纪律也已随本消息进入你的上下文，此刻生效：",
+  "即使你跳过任务包细读，以下 12 条纪律也已随本消息进入你的上下文，此刻生效：",
   "",
   "| # | 纪律 | 权威 |",
   "|---|---|---|",
@@ -6435,9 +6435,10 @@ const DISPATCH_DISCIPLINE_BODY = [
   "| 6 | 星型拓扑：只与主控通信，不与其他子代理互调 | SKILL 第 1 章 OV-2 |",
   "| 7 | 只改任务包 OWNERSHIP/scope_paths 清单内文件，清单外一律只读；done 的 files_touched 按清单比对，越界=验收 fail 信号 | SKILL 第 8 章 RP-12、第 3 章 OWNERSHIP |",
   "| 8 | report 不在工具面（TOOL_ABSENT）→ 终态回复行首标注 KIND=xxx 降级交付（仅终态，无 milestone 与哨兵联动） | SKILL 第 8 章 RP-4 |",
-  "| 9 | P2P 配对交互（星型拓扑的仲裁例外，仅限配对模式 mission，如策划↔调研）：经 board p2p_ask/p2p_answer 由 server 仲裁中转（非子代理直连）；发问前置=本 mission 置 blocked/question；作答方=目标 mission 当前持有者；调用携本 mission 自有 CONTRACT token（服务端按 token 鉴权）；与配对对手外仍禁互调 | board p2p 门禁（server.mjs p2p_ask/p2p_answer）、SKILL 第 1 章 OV-2 仲裁例外 |",
-  "| 10 | 配对迭代（如评审↔修正循环）：迭代轮中不 report(kind=done)——以 milestone 上报保持 running，直到全部意见吸收并通过自验；done 即退出，后续 p2p 将无人应答。每轮意见无法 p2p 投递时，回落=等主控开新轮 mission（意见会内联进包） | SKILL 第 14 章 TS-12+实战（2026-10-26 MaimaiBOT） |",
+  "| 9 | P2P 是默认工作通道之一（与 report/文件直投并列）：事实问调研方、意见打回对接方、审查↔修正循环全走 p2p_ask/p2p_answer（server 仲裁中转，非子代理直连）；发问前置=本 mission 置 blocked/question；作答方=目标 mission 当前持有者；调用携本 mission 自有 CONTRACT token；配对授权经循环模板包 RULES 默认授予；与配对对手外仍禁互调（星型拓扑 OV-2 保持）；主控只转指针不转内容 | SKILL 第 17 章（主控信息面）、第 1 章 OV-2 |",
+  "| 10 | 配对循环是默认工作形态：三小循环（策划↔策划QA／计划↔计划QA／实行↔版本QA）以「产出方↔QA 方」配对 mission 运行；迭代轮 report(kind=milestone) 保持 running 吸收意见，全部意见吸收并通过自验后 report(kind=done)；done=退出循环，后续 p2p 将无人应答；每轮意见无法 p2p 投递时，回落=等主控开新轮 mission（意见会内联进包） | SKILL 第 17 章（主控信息面）、第 14 章 TS-12 |",
   "| 11 | 尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报 | SKILL 第 17 章（主控信息面）、第 8 章 RP-4 |",
+  "| 12 | 编辑效率：中小文件（粗略 ≤300 行）需修改多处时，一次 Write 整文件重写优于多次 Edit 零敲——逐次请求与上下文开销累积远超一次全量写入，缓存命中也省不回来；大文件（≥1000 行）仍守禁整读、定点 Edit | SKILL 第 15 章 CS-14 姊妹条 |",
   "",
   "P2P 补注：board schema 修复已落 v1.1.1——新会话经会话 MCP 面常规通道调用（顶层 token 参数在 schema 声明内）；",
   "宿主客户端剥参致调用被拒时，回退通道=stdio 直连（orch-cli 一次性 JSON-RPC，args 携本 mission 自有 CONTRACT",
@@ -6499,7 +6500,7 @@ function dispatchDigestSection(digest) {
 /**
  * Assemble the headless first message (pure; crv2 extracts this region and
  * drives it directly). v1.1.2 I1 四段式（用户裁定终序，不可变）：
- *   【纪律】纪律段（恒在，offset 0；11 条+P2P 补注，全角色同文）
+ *   【纪律】纪律段（恒在，offset 0；12 条+P2P 补注，全角色同文）
  *   →【项目概览】尾块轨迹（≤10 块，去 ts:/seq:，旧→新；条件节）→ digest 条件节
  *   →【哨兵 scoping】缺席计数（恒在；v1.2 M9-1 无条件硬约束件）→【职责】persona 正文
  *   →【任务】指针句 + CONTRACT 三行

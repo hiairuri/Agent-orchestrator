@@ -25,6 +25,10 @@
  *     + 尾块三要素/直投两形态/主控不读正文/p2p 分工钉 + 派发纪律第 11 条核心句双源逐字一致
  *     （O13=a：SKILL 第 17 章=面向人权威 × server DISPATCH_DISCIPLINE_BODY=执行面拷贝）
  *     + §1 场景表行 + 协议卡指针行（docs/protocols/）。权威 = aggregated.md §4.4①②（v1.2 M6-2））
+ *   A-v0121-OV（v1.2.1 提示词补丁主控铁律四条存在钉：SKILL 第 1 章 OV-4/5/6/7 逐字在案
+ *     〔主控不读写项目文件/尾块契约/三小循环默认形态/运行面禁热修改——OV-7 系主控追加裁定，
+ *     出处第 12 章 SB-8〕+ OV-1..OV-8 零重号 + 原协议卡指针行改号 OV-8 存续。
+ *     权威 = 任务包 m-20261028-202204-faa3 TASK ① 逐字文本+主控追加铁律）
  *   A-v0120-DESBAN（v1.2 M7-1 DESIGN.md 机制总纲防失真钉组：三禁（①版本号字面零残留=钉自证
  *     「DESIGN 零版本号字面」本验收 ②工具/角色/命令计数句法零残留 ③独占权威声明零残留）
  *     + 协议卡索引双向覆盖（引用存在+在册卡必被索引）+ SKILL 章号引用真实性。权威 =
@@ -177,10 +181,20 @@ try {
   // D11-03 派发纪律第 11 条核心句双源逐字一致（O13=a 漂移兜底；协议卡指针行 O1① 同组）
   const D11_CORE = "尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报";
   ck.ok("D11-03 第 11 条核心句双源逐字一致（server DISPATCH_DISCIPLINE_BODY 恰 1 + SKILL §17 恰 1）", count(SERVER, D11_CORE) === 1 && count(SKILL, D11_CORE) === 1, { server: count(SERVER, D11_CORE), skill: count(SKILL, D11_CORE) });
-  ck.ok("D11-03 fence 引言行随第 11 条同步（11 条纪律）", count(SERVER, "以下 11 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 10 条纪律") === 0, { n11: count(SERVER, "以下 11 条纪律也已随本消息进入你的上下文"), n10: count(SERVER, "以下 10 条纪律") });
+  ck.ok("D11-03 fence 引言行随第 12 条同步（12 条纪律；v1.2.1 主控追加）", count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 11 条纪律") === 0, { n12: count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文"), n11: count(SERVER, "以下 11 条纪律") });
   // D11-04 §1 场景表行 + 协议卡指针行（O1①：SKILL 只加指针行，卡本体在 docs/protocols/）
   ck.ok("D11-04 §1 场景表尾块态行在位", count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |") === 1, count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |"));
   ck.ok("D11-04 协议卡指针行在位（docs/protocols/ 恰 1，SKILL 只留指针）", count(SKILL, "docs/protocols/") === 1, count(SKILL, "docs/protocols/"));
+
+  // ---------- A-v0121-OV：v1.2.1 主控铁律存在钉（任务包 m-20261028-202204-faa3；TASK ① 逐字文本
+  //   落 SKILL 第 1 章，编号接 OV-3 后；原 OV-4 协议卡指针随插位改号；主控追加裁定 OV-7 运行面禁热修改，
+  //   协议卡指针再顺延 OV-8——出处第 12 章 SB-8 实锚可达） ----------
+  ck.ok("OV-01 OV-4 主控不读写项目文件（强规则）在位且唯一", countRe(SKILL_LF, /^OV-4 主控不读写项目文件/gm) === 1 && count(SKILL, "违反即流程缺陷：先补派再继续") === 1, { head: countRe(SKILL_LF, /^OV-4 主控不读写项目文件/gm), tail: count(SKILL, "违反即流程缺陷：先补派再继续") });
+  ck.ok("OV-02 OV-5 尾块契约在位且唯一", countRe(SKILL_LF, /^OV-5 尾块契约/gm) === 1 && count(SKILL, "无尾块=下一派发子代理失态") === 1, { head: countRe(SKILL_LF, /^OV-5 尾块契约/gm), tail: count(SKILL, "无尾块=下一派发子代理失态") });
+  ck.ok("OV-03 OV-6 三小循环默认形态在位且唯一", countRe(SKILL_LF, /^OV-6 三小循环默认形态/gm) === 1 && count(SKILL, "循环间 grill 门默认必开+豁免显式声明") === 1, { head: countRe(SKILL_LF, /^OV-6 三小循环默认形态/gm), tail: count(SKILL, "循环间 grill 门默认必开+豁免显式声明") });
+  ck.ok("OV-04a OV-7 运行面禁热修改（强规则）在位且唯一", countRe(SKILL_LF, /^OV-7 运行面禁热修改/gm) === 1 && count(SKILL, "紧急修复也走沙箱快进，不做在位热补") === 1, { head: countRe(SKILL_LF, /^OV-7 运行面禁热修改/gm), tail: count(SKILL, "紧急修复也走沙箱快进，不做在位热补") });
+  ck.ok("OV-04 OV-1..OV-8 行首各恰一（零重号；协议卡指针=OV-8）", ["1", "2", "3", "4", "5", "6", "7", "8"].every((n) => countRe(SKILL_LF, new RegExp("^OV-" + n + " ", "gm")) === 1), { counts: ["1", "2", "3", "4", "5", "6", "7", "8"].map((n) => countRe(SKILL_LF, new RegExp("^OV-" + n + " ", "gm"))) });
+  ck.ok("OV-05 协议卡指针行改号存续（OV-8 恰 1）", count(SKILL, "OV-8 协议契约卡指针") === 1, count(SKILL, "OV-8 协议契约卡指针"));
 
   // ---------- A-v0120-DESBAN：DESIGN.md 机制总纲防失真钉组（v1.2 M7-1；权威 = aggregated G2 终裁
   //   + DP2c DESIGN 重写纲要节；DESBAN 与 DESIGN 重写同 mission 闭环=改写者自证耦合，H-1） ----------
@@ -466,23 +480,26 @@ try {
     count(SERVER, "function countUnreadSafe") === 1 && count(SERVER, "unread: countUnreadSafe(m.id)") === 1,
     { def: count(SERVER, "function countUnreadSafe"), use: count(SERVER, "unread: countUnreadSafe(m.id)") });
 
-  // ---------- A-v1111-C1：/orch-manual 强提示词命令静态锁（v1.1.1-C1 波，任务包 m-20261026-040100-c1；
-  //   2026-10-26 主控强化口径：内联铁律速览+阻塞式读取+可证阅读确认+固定末行，覆盖任务包「强提示词」力度定义） ----------
+  // ---------- A-v1111-C1：/manual 强提示词命令静态锁（v1.1.1-C1 波建 /orch-manual，任务包 m-20261026-040100-c1；
+  //   2026-10-26 主控强化口径：内联铁律速览+阻塞式读取+可证阅读确认+固定末行，覆盖任务包「强提示词」力度定义；
+  //   v1.2.1 改名 /manual（commands/manual.md）——/orch 让位总控台 orch.md，主控裁决 m-20261028-202204-faa3） ----------
   // §0 偏差留痕（l-20261022-8fa733 口径）：
-  //   (a) 现存 5 命令 frontmatter 均无 name 字段（name 由文件名派生）；本波按任务包要求新增
-  //       name: orch-manual——增量字段，宿主忽略未知 frontmatter，无行为回退面。
+  //   (a) 现存 5 命令 frontmatter 均无 name 字段（name 由文件名派生）；C1 波按任务包要求新增
+  //       name 字段（v1.2.1 前值 name: orch-manual，现值 name: manual）——增量字段，宿主忽略未知
+  //       frontmatter，无行为回退面。
   //   (b) 任务包原稿「任何偏离须先 report(kind=blocked)」与主控实况（report 仅子代理，SKILL §14
   //       面向列）相悖；已按主控强化口径裁决落定：固定末行保留 report(blocked) 措辞（承诺痕迹），
   //       命令正文注明主控侧实现=向用户显式提问待裁。偏差已消解，非悬空。
   //   (c) SKILL 同步：SKILL 全文无命令清单（仅 OV-3 泛指 commands/*.md 命令入口、CL-9 提及
   //       /orch-resume），按任务包条件分支「若无则只在 frontmatter 层面存在」执行，零 SKILL 改动。
-  //   (d) 铁律速览 8 条为 SKILL 原文提炼内联（非逐字抄录），每条带真实章号引用（C1-05/09 锁）；
-  //       SKILL 演进时命令内速览须同步，本组锁条数与章号防漂移（主控强化口径第 4 点）。
-  const MANUAL = read(path.join("commands", "orch-manual.md"));
+  //   (d) 铁律速览 12 条为 SKILL 原文提炼内联（非逐字抄录；v1.2.1 增 OV-4/5/6/7 四条，前值 8 条），
+  //       每条带真实章号引用（C1-05/09 锁）；SKILL 演进时命令内速览须同步，本组锁条数与章号防漂移
+  //       （主控强化口径第 4 点）。
+  const MANUAL = read(path.join("commands", "manual.md"));
   {
     const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(MANUAL);
     const fmLines = fm ? fm[1].split(/\r?\n/) : [];
-    ck.ok("C1-01 commands/orch-manual.md 存在且 frontmatter name=orch-manual", fmLines.some((l) => l.trim() === "name: orch-manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
+    ck.ok("C1-01 commands/manual.md 存在且 frontmatter name=manual（v1.2.1 前值 orch-manual）", fmLines.some((l) => l.trim() === "name: manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
   }
   ck.ok("C1-02 强措辞·全文读取句（立即完整读取＋不节选、不跳读）", count(MANUAL, "立即完整读取") >= 1 && count(MANUAL, "不节选、不跳读") >= 1, { read: count(MANUAL, "立即完整读取"), noSkip: count(MANUAL, "不节选、不跳读") });
   ck.ok("C1-03 强措辞·偏离=任务失败句（静默偏离=任务失败）", count(MANUAL, "静默偏离=任务失败") >= 1, count(MANUAL, "静默偏离=任务失败"));
@@ -491,10 +508,10 @@ try {
   ck.ok("C1-07 可证引述句（逐字抄录＋不算引述）", count(MANUAL, "逐字抄录") >= 1 && count(MANUAL, "不算引述") >= 1, { quote: count(MANUAL, "逐字抄录"), noFake: count(MANUAL, "不算引述") });
   ck.ok("C1-08 固定末行（本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁）", count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁") === 1, count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁"));
   {
-    // 铁律速览锁（强化口径第 4 点）：8 条表格行、每条带章号引用，防 SKILL 演进漂移。
+    // 铁律速览锁（强化口径第 4 点；v1.2.1 扩 12 条含 OV-4/5/6/7）：12 条表格行、每条带章号引用，防 SKILL 演进漂移。
     const ironRows = MANUAL.match(/^\| \d+ \|.*\|$/gm) || [];
-    const ironOk = ironRows.length === 8 && ironRows.every((r) => /第 \d+ 章/.test(r));
-    ck.ok("C1-09 铁律速览 8 条且每条带章号引用", ironOk, { rows: ironRows.length, withChap: ironRows.filter((r) => /第 \d+ 章/.test(r)).length });
+    const ironOk = ironRows.length === 12 && ironRows.every((r) => /第 \d+ 章/.test(r));
+    ck.ok("C1-09 铁律速览 12 条且每条带章号引用（v1.2.1 前值 8 条）", ironOk, { rows: ironRows.length, withChap: ironRows.filter((r) => /第 \d+ 章/.test(r)).length });
   }
   {
     // 章节引用一致性：命令文引用的「第 N 章」必须全部是 SKILL 真实章号；自检清单 ≥7 章（派发七步/
