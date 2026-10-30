@@ -12,7 +12,9 @@
  *        config is never touched. Only set when the server saw the
  *        ZCODE_BUILTIN/PERSONAL env pair — H1r requires both or neither.)
  *   out: <result-dir>/<sessionId>.json            (envelope + mission/exit meta)
- *        <result-dir>/<mission_id>-<ms>.index.json (mission → result sidecar)
+ *        <result-dir>/<mission_id>-<ms>.index.json (mission → result sidecar;
+ *        v1.2 M3-1: also written by the fail() path (error=runner_early_fail)
+ *        and by the death handlers (killed:true) — the busy gate unblocks)
  *        <result-dir>/<mission_id>-<ts>.error.json (envelope unparsable: log tail)
  *   log: child stdout+stderr merged, appended verbatim.
  *
@@ -35,7 +37,7 @@ import child_process from "node:child_process";
 
 const DEFAULT_CLI = "C:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs";
 const DEFAULT_TIMEOUT_MIN = 240;
-const LOG_TAIL_CHARS = 4000;
+const LOG_TAIL_CHARS = 16384; // v1.2.3 W1: 4000 -> 16384 (OPEN-4=A; 0.17.x multi-line envelopes are KB-scale)
 
 function argOf(argv, flag, def = "") {
   for (let i = 0; i < argv.length; i++) {
@@ -74,6 +76,11 @@ function wakeQueueProduce(opts) {
           worker: opts.worker ?? null,
           session_id: opts.sessionId ?? null,
           result_path: opts.resultPath ?? null,
+          // Q3b 死信摘要（v1.2 M3-1）：与 mcp/server.mjs twin 同文加字段——
+          // outcome=result|error|timeout，主控被唤时即知死因免开 index。
+          outcome: opts.outcome ?? null,
+          timed_out: opts.timedOut ?? null,
+          exit_code: opts.exitCode ?? null,
           created_at: new Date().toISOString(),
           source: opts.source,
         },
@@ -118,7 +125,19 @@ function wakeQueueProduce(opts) {
   return true;
 }
 
-/** Last JSON line that looks like the --json result envelope. */
+/** Last JSON object that looks like the --json result envelope. Two channels:
+ *  - Channel A (0.16.x, unchanged): single-line envelope — backward scan, one
+ *    JSON.parse per `{`-opening line, same predicate.
+ *  - Channel B (0.17.x, v1.2.3 W1/M1): pretty-printed multi-line envelope — only
+ *    when channel A finds nothing: take the LAST `{`-opening line as the single
+ *    candidate start, accumulate lines forward trying JSON.parse after each
+ *    append; success + same predicate => return. Accumulation bound = the whole
+ *    tail window (natural boundary, no new constant).
+ *  Declared residual surfaces (design-internal; the error sidecar is the fallback):
+ *  - a `{`-opening noise line AFTER the envelope latches the single candidate
+ *    start => graceful miss (R2-08 multi-candidate scan deferred, impl-plan §8);
+ *  - envelopes longer than LOG_TAIL_CHARS truncate at the window head => graceful
+ *    miss (PQA4/impl-plan §11: >16KB envelope still misses -> error sidecar). */
 function parseEnvelope(text) {
   const lines = String(text ?? "").split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -127,6 +146,27 @@ function parseEnvelope(text) {
     let obj;
     try {
       obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (obj && typeof obj === "object" && (obj.type === "result" || typeof obj.sessionId === "string")) return obj;
+  }
+  // Channel B: multi-line pretty JSON (0.17.x). Single candidate start = the last
+  // `{`-opening line; accumulate forward, parse after each append (impl-plan §2 M1).
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim().startsWith("{")) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return null;
+  let acc = "";
+  for (let i = start; i < lines.length; i++) {
+    acc += (i > start ? "\n" : "") + lines[i];
+    let obj;
+    try {
+      obj = JSON.parse(acc);
     } catch {
       continue;
     }
@@ -193,10 +233,71 @@ function main() {
   const startedMs = Date.now();
   const stamp = startedAt.replace(/[:.]/g, "-");
 
+  // Q2 兜底①（v1.2 M3-1）：runner 进程自身死亡（uncaughtException / unhandledRejection /
+  // exit 时 index 仍未落）→ 补写 killed index。落真 index 文件名
+  // (<missionId>-<startedMs>.index.json, killed:true) —— busy 闸（dispatchHasResultIndex）
+  // 与 ≤8s 组合捕获直读，无需 server 侧正则扩面。indexWritten 由 fail()/finish() 置位，
+  // 正常路径 exit handler 不覆盖既有 index。边界如实（DP2b Q2）：taskkill /F 强杀时
+  // OS 不保证 exit handler 执行——该残余面由 server 侧 O10 超龄豁免兜底。
+  let indexWritten = false;
+  const writeKilledIndex = (reason, errText) => {
+    if (!missionId || !resultDir || indexWritten) return;
+    try {
+      indexWritten = true;
+      atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {
+        mission_id: missionId,
+        worker: null,
+        session_id: null,
+        result_path: null,
+        error_path: null,
+        exit_code: null,
+        timed_out: false,
+        outcome: "error",
+        killed: true,
+        error: `runner_killed: ${reason}${errText ? ": " + String(errText).slice(0, 200) : ""}`,
+        started_at: startedAt,
+        exit_at: new Date().toISOString(),
+        log_path: logFile,
+      });
+    } catch {
+      /* best effort: diagnostic face only */
+    }
+  };
+  process.on("uncaughtException", (err) => {
+    writeKilledIndex("uncaughtException", err && err.message ? err.message : err);
+    try {
+      process.stderr.write(
+        "[agent-orchestrator] dispatch-runner uncaughtException: " +
+          (err && err.message ? err.message : err) +
+          "\n",
+      );
+    } catch {
+      /* silence */
+    }
+    process.exitCode = 1;
+  });
+  process.on("unhandledRejection", (err) => {
+    writeKilledIndex("unhandledRejection", err && err.message ? err.message : String(err));
+    try {
+      process.stderr.write(
+        "[agent-orchestrator] dispatch-runner unhandledRejection: " +
+          (err && err.message ? err.message : String(err)) +
+          "\n",
+      );
+    } catch {
+      /* silence */
+    }
+    process.exitCode = 1;
+  });
+  process.on("exit", () => {
+    writeKilledIndex("exit", null);
+  });
+
   const fail = (message) => {
     try {
       if (resultDir) {
-        atomicWriteJson(path.join(resultDir, `${missionId}-${stamp}.error.json`), {
+        const errorPath = path.join(resultDir, `${missionId}-${stamp}.error.json`);
+        atomicWriteJson(errorPath, {
           mission_id: missionId,
           worker: null,
           started_at: startedAt,
@@ -205,6 +306,24 @@ function main() {
           timed_out: false,
           error: String(message),
           log_tail: logFile ? readLogTail(logFile) : "",
+        });
+        // Q2 双入口同堵·入口②（v1.2 M3-1）：早期失败补写 index（error=runner_early_fail）
+        // ——旧形态只写 error 侧车不写 index，spawn 失败路径 busy 闸永久锁死
+        // （server.mjs 旧注释「A spawn failure lands as a missing result index」自认面）。
+        indexWritten = true;
+        atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {
+          mission_id: missionId,
+          worker: null,
+          session_id: null,
+          result_path: null,
+          error_path: errorPath,
+          exit_code: null,
+          timed_out: false,
+          outcome: "error",
+          error: "runner_early_fail: " + String(message),
+          started_at: startedAt,
+          exit_at: new Date().toISOString(),
+          log_path: logFile,
         });
       }
     } catch {
@@ -301,6 +420,11 @@ function main() {
         log_tail: tail,
       });
     }
+    // Q3b 死信摘要（v1.2 M3-1）：outcome=result|error|timeout——超时杀树、信封缺失、
+    // 正常收 result 三态一目了然；index 原有 timed_out/exit_code 保留，wake 事件
+    // 同步携带三字段（主控被唤即知死因，免开 index）。
+    const outcome = timedOut ? "timeout" : resultPath ? "result" : "error";
+    indexWritten = true;
     atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {
       mission_id: missionId,
       worker,
@@ -309,6 +433,7 @@ function main() {
       error_path: errorPath,
       exit_code: code,
       timed_out: timedOut,
+      outcome,
       started_at: startedAt,
       exit_at: exitAt,
       log_path: logFile,
@@ -327,6 +452,9 @@ function main() {
         worker,
         sessionId,
         resultPath: resultPath || errorPath,
+        outcome,
+        timedOut,
+        exitCode: code,
       });
     } catch (err) {
       try {

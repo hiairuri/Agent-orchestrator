@@ -1,3 +1,4 @@
+// @module watcher-shim
 /*!
  * suites/watcher-shim.mjs —— v0.10 W1 relay shim 套（SHIM-01..04；设计=designs/agent-orchestrator-v0.10-DESIGN.md §2/§9.2）
  *

@@ -1,3 +1,4 @@
+// @module bggate
 /*!
  * suites/bggate.mjs —— M-08/M-09/M-10（bg-gate C4/C7/strict=ask 收尾）+ A-v020-B01…B07
  *   + A-v031-S09 扩展（两代哨兵在岗都认/前台叠加句/冷却静默等九分支）
@@ -321,6 +322,150 @@ try {
       replica.length > 1500 && out.endsWith("...") && out.includes("；其余 1 项：") &&
       !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out) && !out.includes("\uFFFD"),
       { replicaLen: replica.length, outTail: out.slice(-40), raw: r.raw.slice(0, 120) });
+  }
+
+  // ---- v1.2 M9-1 REV 组（A-v0120-REV）：触发面① session-start 复活/自补员——
+  // 死家族拉起（cfg family_size 驱动）、在岗让位（幂等）、W-A0/G14 同闸不补员、
+  // 闸③无板不补员、闸④无 cfg（server 管理面不在岗）不补员。
+  {
+    const REV_SLOT = (k) => path.join(ROOT, "sentinel", `instance-${k}.json`);
+    const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+    const killSlots = async () => {
+      for (let k = 0; k < 5; k++) {
+        try {
+          const doc = JSON.parse(fs.readFileSync(REV_SLOT(k), "utf8"));
+          if (Number.isFinite(doc.pid) && doc.pid !== process.pid) {
+            try {
+              process.kill(doc.pid);
+            } catch {
+              /* already gone */
+            }
+          }
+        } catch {
+          /* no slot */
+        }
+      }
+      for (let i = 0; i < 40; i++) {
+        let any = false;
+        for (let k = 0; k < 5; k++) if (fs.existsSync(REV_SLOT(k))) any = true;
+        if (!any) break;
+        await sleepMs(150);
+      }
+    };
+    const slotPids = () =>
+      [0, 1, 2, 3, 4].map((k) => {
+        try {
+          return JSON.parse(fs.readFileSync(REV_SLOT(k), "utf8")).pid;
+        } catch {
+          return null;
+        }
+      });
+    const writeRevCfg = (familySize) =>
+      fs.writeFileSync(path.join(ROOT, "sentinel.cfg.json"), JSON.stringify({ family_size: familySize }) + "\n");
+    const rmRev = () => {
+      fs.rmSync(path.join(ROOT, "sentinel"), { recursive: true, force: true });
+      fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true });
+    };
+    const runSSRev = (sessionId, extraEnv = {}) =>
+      runNode(SESSION_START, [], {
+        cwd: PROJ,
+        env: { ZCODE_PROJECT_DIR: PROJ, ...extraEnv },
+        input: { hook_event_name: "SessionStart", session_id: sessionId },
+      });
+    const anchorIs = (sid) => {
+      try {
+        return fs.readFileSync(path.join(ROOT, "sentinel", "coord-session.txt"), "utf8") === sid + "\n";
+      } catch {
+        return false;
+      }
+    };
+    try {
+      // REV-a 死家族 + cfg + 板 → 复活拉起（锚先发布——复活实例天然有锚）
+      resetFixture();
+      rmRev();
+      writeRevCfg(1);
+      const rA = runSSRev("sess_rev-coord");
+      let slotA = null;
+      for (let i = 0; i < 70 && !slotA; i++) {
+        await sleepMs(150);
+        slotA = slotPids()[0] || null;
+      }
+      ck.ok(
+        "REV-a 触发面① 复活拉起：SessionStart（死家族+cfg+板）→ 拉起 bg-sentinel（instance-0 槽位认领）∧ 锚先发布（coord-session.txt=本会话）∧ hook exit 0",
+        rA.code === 0 && Boolean(slotA) && anchorIs("sess_rev-coord"),
+        { code: rA.code, slotA, anchor: anchorIs("sess_rev-coord") },
+      );
+      await killSlots();
+
+      // REV-b 在岗让位（幂等）：家族 fresh 槽位在岗 → 不补员（无新槽位出现）
+      resetFixture();
+      rmRev();
+      writeRevCfg(2);
+      fs.mkdirSync(path.join(ROOT, "sentinel"), { recursive: true });
+      fs.writeFileSync(
+        REV_SLOT(0),
+        JSON.stringify({ pid: process.pid, slot: 0, state: "standby", heartbeatAt: new Date().toISOString() }) + "\n",
+      );
+      const rB = runSSRev("sess_rev-coord");
+      await sleepMs(1800);
+      const pidB = slotPids();
+      ck.ok(
+        "REV-b 家族在岗让位（幂等）：fresh 槽位在岗 → 零补员（仅预置槽位在，instance-1 未被认领）",
+        rB.code === 0 && pidB[0] === process.pid && pidB[1] === null,
+        { pids: pidB },
+      );
+
+      // REV-c W-A0 同闸：托管 worker 会话不补员（锚零写 + 零槽位）
+      resetFixture();
+      rmRev();
+      writeRevCfg(1);
+      const rC = runSSRev("sess_rev-coord", { ORCH_MANAGED_WORKER: "m-rev-c" });
+      await sleepMs(1800);
+      ck.ok(
+        "REV-c W-A0 同闸：ORCH_MANAGED_WORKER 托管 worker 的 SessionStart 不补员不写锚（零槽位；headless 家族由 dispatch 触发面②负责）",
+        rC.code === 0 && slotPids().every((p) => p === null) && !anchorIs("sess_rev-coord"),
+        { slots: slotPids(), anchor: anchorIs("sess_rev-coord") },
+      );
+
+      // REV-d G14 同闸：sess_subagent 前缀会话不补员
+      resetFixture();
+      rmRev();
+      writeRevCfg(1);
+      const rD = runSSRev("sess_subagent_agent_rev-d");
+      await sleepMs(1800);
+      ck.ok(
+        "REV-d G14 同闸：sess_subagent 前缀子代理会话不补员（零槽位）",
+        rD.code === 0 && slotPids().every((p) => p === null),
+        { slots: slotPids() },
+      );
+
+      // REV-e 闸③：无板不补员（纯 hooks 面旧部署维持 bg-gate 提示老路径）
+      resetFixture();
+      rmRev();
+      writeRevCfg(1);
+      fs.rmSync(path.join(ROOT, "board.json"), { force: true });
+      const rE = runSSRev("sess_rev-coord");
+      await sleepMs(1800);
+      ck.ok(
+        "REV-e 闸③ 无板不补员：board.json 缺席 → 零槽位（无可盯守面）",
+        rE.code === 0 && slotPids().every((p) => p === null),
+        { slots: slotPids() },
+      );
+
+      // REV-f 闸④：无 sentinel.cfg.json（server 管理面不在岗）不补员——纯夹具/异构根防误拉起
+      resetFixture();
+      rmRev();
+      const rF = runSSRev("sess_rev-coord");
+      await sleepMs(1800);
+      ck.ok(
+        "REV-f 闸④ 无 cfg 不补员：sentinel.cfg.json 缺席（server 未曾接管此根）→ 零槽位（root-contract/异构根保护闸）",
+        rF.code === 0 && slotPids().every((p) => p === null),
+        { slots: slotPids() },
+      );
+    } finally {
+      await killSlots();
+      rmRev();
+    }
   }
 
   // ---- 静态项

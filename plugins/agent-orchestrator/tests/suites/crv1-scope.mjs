@@ -1,3 +1,4 @@
+// @module crv1-scope
 /*!
  * suites/crv1-scope.mjs —— CRV1-01…08（冲突预检八步，验 CR-05）+ E4 形状门 + M-04
  *

@@ -1,3 +1,4 @@
+// @module root-contract
 /*!
  * suites/root-contract.mjs —— root-id 契约行为矩阵（v0.6 B1；W-B findings §1 为契约权威）
  *

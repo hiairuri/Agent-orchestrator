@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @module typed-dispatch-docs
 /*!
  * suites/typed-dispatch-docs.mjs —— v0.6 簇 C 断言套（V6-63 文档在位防回退 + V6-64 到期回收机制载体）
  *
@@ -21,6 +22,9 @@
  *   待 V6-61 定稿提交后回填编号，并同步回填 RECYCLE_LIST 各条 issue 字段。
  *
  * 运行方式：node tests/suites/typed-dispatch-docs.mjs（回收核对：ORCH_HOST_FIXED=1 node …）
+ * v1.2.3 W1 守卫（主控扩授裁决 m-20261030-060549-56b4）：AGENTS.md（A-AGENTS-1/A-DOC-V4P25/
+ *   R-4）与 designs/（A-V090-HOST-01）缺席（OSS 发布快照 checkout 永不含 AGENTS.md，66757fd
+ *   untrack）→ skip 带标记不崩不红；主仓在盘时全量断言不弱化。
  * 前置：node >= 20；零依赖（node:fs + node:assert/strict）。退出码：全绿 0；任一 FAIL 非 0。
  * 失败信息规范：断言 ID + 缺失子串 + 回写指针（designs/agent-orchestrator-v0.6-W-C-findings.md §1 E-xx），
  *   断言红时零查证即可按指针补稿。
@@ -129,7 +133,12 @@ function subGroup(ck, id, targetLabel, text, { need = [], ban = [] }, editRef) {
 function main() {
   const ck = new DocChecker("typed-dispatch-docs");
   const skill = readFile(FILES.skill);
-  const agentsMd = readFile(FILES.agentsMd);
+  // v1.2.3 W1 守卫（主控扩授裁决 m-20261030-060549-56b4）：AGENTS.md 与 designs/ 自 66757fd
+  // untrack（OSS 发布快照剔除面，AGENTS.md 永不在发布 checkout）——硬读在干净 worktree 必
+  // ENOENT 崩溃（基线 stash 复跑实证）。守卫语义=缺席 skip 带标记；主仓在盘时全量断言不弱化
+  // （在盘分支与原实现同语义，G1 发版门强度不减）。
+  const agentsMdExists = fs.existsSync(FILES.agentsMd);
+  const agentsMd = agentsMdExists ? readFile(FILES.agentsMd) : "";
   const skill3 = section(skill, "## 3.", "## 4.");
   const skill4 = section(skill, "## 4.", "## 5.");
   const skill8 = section(skill, "## 8.", "## 9.");
@@ -146,7 +155,11 @@ function main() {
   const hostFixed = process.env.ORCH_HOST_FIXED === "1";
 
   // ---- 编辑单落地断言（W-C §2 表；判据列逐条对应）----
-  subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["startup snapshot 校验数据源分叉", "勿重试"], ban: ["原生角色派发需全新会话"] }, "E-01");
+  if (agentsMdExists) {
+    subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["startup snapshot 校验数据源分叉", "勿重试"], ban: ["原生角色派发需全新会话"] }, "E-01");
+  } else {
+    ck.ok("A-AGENTS-1 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
+  }
   subGroup(ck, "A-SKILL-1", "SKILL.md §8（主派发形态）", skill8, { need: [REPORT, "双通道", "KIND="] }, "E-04");
 
   { // A-SKILL-2：「仅终态」与「哨兵联动」须同句（E-04 降级通道缺口声明）
@@ -176,7 +189,11 @@ function main() {
   subGroup(ck, "A-DOC-V4P31", "SKILL.md", skill, { need: ["action ∈ upsert/get/list/ack/claim"] }, "E-12");
   subGroup(ck, "A-DOC-SIGNALS", "SKILL.md", skill, { need: ["signals", "空串语义 = 哨兵侧内建默认"] }, "E-13");
   subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
-  subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
+  if (agentsMdExists) {
+    subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
+  } else {
+    ck.ok("A-DOC-V4P25 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
+  }
 
   { // A-COMPAT-1：角色模板 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
     const bad = [];
@@ -236,14 +253,19 @@ function main() {
       shapeErr = e && e.message ? e.message : String(e);
     }
     let modeErr = "";
+    // v1.2.3 W1 守卫（主控扩授裁决）：R-4 file=AGENTS.md untracked 缺席（worktree）时该条
+    // 跳过不核、断言名带 [SKIP ...] 标记（缺席≠误删≠已回收，不计入任一收集集）；主仓在盘
+    // 时 R-4 全量照核。
+    const recycleAbsent = RECYCLE_LIST.filter((e) => !fs.existsSync(e.file)).map((e) => e.id);
+    const recycleAnchorPresent = (e) => fs.existsSync(e.file) && readFile(e.file).includes(e.anchor);
     if (!shapeErr) {
       if (!hostFixed) {
         // 默认模式：缺陷期措辞必须在位（删了会让读者误以为 typed 可用）
-        const still = RECYCLE_LIST.filter((e) => !readFile(e.file).includes(e.anchor));
+        const still = RECYCLE_LIST.filter((e) => !recycleAbsent.includes(e.id) && !recycleAnchorPresent(e));
         if (still.length) modeErr = `锚点被误删（宿主缺陷期措辞应在位）: ${still.map((e) => e.id).join(", ")}`;
       } else {
         // 回收模式（ORCH_HOST_FIXED=1）：各 anchor 应已回收；R-2 永久条款仍在位
-        const left = RECYCLE_LIST.filter((e) => readFile(e.file).includes(e.anchor));
+        const left = RECYCLE_LIST.filter((e) => recycleAnchorPresent(e));
         if (left.length) modeErr = `回收未完成: ${left.map((e) => e.id).join(", ")}`;
         const skillNow = readFile(FILES.skill);
         const perm10 = section(skillNow, "## 8.", "## 9.");
@@ -254,7 +276,8 @@ function main() {
     }
     const cond = !shapeErr && !modeErr;
     const modeLabel = hostFixed ? "回收模式 ORCH_HOST_FIXED=1" : "默认模式（anchor 在位）";
-    ck.ok(`A-RECYCLE-1 RECYCLE_LIST 形状 + ${modeLabel}`, cond,
+    const skipNote = recycleAbsent.length ? ` [SKIP 缺席文件未核: ${recycleAbsent.join(", ")}]` : "";
+    ck.ok(`A-RECYCLE-1 RECYCLE_LIST 形状 + ${modeLabel}${skipNote}`, cond,
       cond ? "" : `A-RECYCLE-1 失败: ${shapeErr || modeErr} —— 回写指针: 见 ${POINTER} §3（回收清单与触发双通道）`);
   }
 
@@ -288,9 +311,11 @@ function main() {
   // ---- v0.9 P2-① 增例（静态在位断言，权威 designs/agent-orchestrator-v0.9-C6-findings.md §3/§5-2 移交语义 +
   //      v0.9-DESIGN §16 HOST-01 行；不随 ORCH_HOST_FIXED 双模翻转）----
   { // A-V090-HOST-01：C6 findings 在册口径——文件存在 + §0 判定串 + §1 锚点串（轻量 grep，DESIGN §16「文档断言」）
-    const bad = [];
+    // v1.2.3 W1 守卫（主控扩授裁决）：designs/ untracked 缺席（worktree）→ skip 带标记
+    // （原缺席=FAIL 语义退役——缺席≠断言红，worktree 环境无法核在库文件）；在盘但子串
+    // 缺失仍 FAIL（主仓断言不弱化）。
     if (!fs.existsSync(FILES.c6Findings)) {
-      bad.push("C6 findings 文件不存在");
+      ck.ok("A-V090-HOST-01 @ C6-findings [SKIP: designs/ untracked absent in worktree checkout]", true);
     } else {
       const c6 = readFile(FILES.c6Findings);
       const need = [
@@ -302,10 +327,9 @@ function main() {
         "injectAgentsMd !== false", // §1 锚点：默认注入谓词
       ];
       const miss = firstMissing(c6, need);
-      if (miss) bad.push(`缺失子串 ${JSON.stringify(miss)}`);
+      ck.ok("A-V090-HOST-01 @ C6-findings 在册+§0 判定串+§1 锚点串", !miss,
+        miss ? `A-V090-HOST-01 失败: 缺失子串 ${JSON.stringify(miss)} —— 回写指针: 见 ${C6_POINTER} §3/§5-2（HOST-01 移交语义）` : "");
     }
-    ck.ok("A-V090-HOST-01 @ C6-findings 在册+§0 判定串+§1 锚点串", bad.length === 0,
-      bad.length ? `A-V090-HOST-01 失败: ${bad.join("; ")} —— 回写指针: 见 ${C6_POINTER} §3/§5-2（HOST-01 移交语义）` : "");
   }
 
   // ---- 回收提醒面（非 fail，不挡发版门；run-all 注册后即出现在其尾行）----

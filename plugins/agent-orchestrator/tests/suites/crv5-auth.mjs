@@ -1,3 +1,4 @@
+// @module crv5-auth
 /*!
  * suites/crv5-auth.mjs —— v0.6 鉴权 suite（A1 bootstrap：SCOPE/INJ-01；A2 波 INJ-02..04 归
  *   crv6-resilience；A3 波增例 AUTH-01..08）

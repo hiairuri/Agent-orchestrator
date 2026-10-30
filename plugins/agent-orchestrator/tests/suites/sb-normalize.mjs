@@ -1,3 +1,4 @@
+// @module sb-normalize
 /*!
  * suites/sb-normalize.mjs —— SB01/SB02/SB05（沙箱 materialize/越界检出/discard 零损伤）
  *   + M-01/M-02（F1 归一化黑盒面：空串丢弃、trim+反斜杠、归一化前缀放行）+ F1 单元抽取断言

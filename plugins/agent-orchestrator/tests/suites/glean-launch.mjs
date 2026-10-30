@@ -1,3 +1,4 @@
+// @module glean-launch
 /*!
  * suites/glean-launch.mjs —— v1.1.1 W23/A2 归敛自动拉起（bg-sentinel 黑盒 + 库级桩）
  *

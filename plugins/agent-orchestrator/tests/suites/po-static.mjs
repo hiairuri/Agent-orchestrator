@@ -1,3 +1,4 @@
+// @module po-static
 /*!
  * suites/po-static.mjs —— PO 提示词工程不变量静态锁（P3-2，M10 收编 v0.11.x.md §2.10 手工 grep）
  *
@@ -15,11 +16,33 @@
  *   A-v0110-M10-05（W4-04 SKILL §3 样本同步钉 5 条 + M10 文案钉：⑥TS-10 布尔参数
  *     tail=true（ban mode:"tail" 旧形）/P3-3 WK-1 语义权威指针/⑦SKILL §3 样本
  *     RULES 新行形）
- *   A-v0110-PL1-01..03（PL1 波 v2.1 编排流水线产品面：SKILL §16 章在位 + 章号 1..16
- *     连续零重号 + PL 规则族 9 条 + v2.1 逐字关键句钉〔grill#1/grill#3 两豁免判据与
- *     免开声明/调研可行性结论行/主控提炼披露/grill 格式纪律/组包 checklist〕+ §1 场景表行
- *     + frontmatter description 增行。权威 = 任务包 CONTEXT v2.1 逐字（用户 2026-10-23
- *     裁定 + 2026-10-25 编码裁定；豁免语义精确版 = 任务包 RULES））
+ *   A-v0110-PL1-01..03（PL1 波 v2.1 编排流水线产品面：SKILL §16 章在位 + 章号 1..17
+ *     连续零重号〔v1.2 M6-2 增第 17 章主控信息面，前值 1..16〕 + PL 规则族 10 条 + v2.1 逐字关键句
+ *     钉〔grill#1/grill#3 两豁免判据与免开声明/调研可行性结论行/主控提炼披露/grill 格式纪律/
+ *     组包 checklist〕+ §1 场景表行 + frontmatter description 增行。权威 = 任务包 CONTEXT v2.1
+ *     逐字（用户 2026-10-23 裁定 + 2026-10-25 编码裁定；豁免语义精确版 = 任务包 RULES））
+ *   A-v0120-D11（v1.2 M6-2 主控信息面产品面：SKILL §17 章头在位 + G3 边界声明（落新章不落 §16）
+ *     + 尾块三要素/直投两形态/主控不读正文/p2p 分工钉 + 派发纪律第 11 条核心句双源逐字一致
+ *     （O13=a：SKILL 第 17 章=面向人权威 × server DISPATCH_DISCIPLINE_BODY=执行面拷贝）
+ *     + §1 场景表行 + 协议卡指针行（docs/protocols/）。权威 = aggregated.md §4.4①②（v1.2 M6-2））
+ *   A-v0121-OV（v1.2.1 提示词补丁主控铁律四条存在钉：SKILL 第 1 章 OV-4/5/6/7 逐字在案
+ *     〔主控不读写项目文件/尾块契约/三小循环默认形态/运行面禁热修改——OV-7 系主控追加裁定，
+ *     出处第 12 章 SB-8〕+ OV-1..OV-8 零重号 + 原协议卡指针行改号 OV-8 存续。
+ *     权威 = 任务包 m-20261028-202204-faa3 TASK ① 逐字文本+主控追加铁律）
+ *   A-v0120-DESBAN（v1.2 M7-1 DESIGN.md 机制总纲防失真钉组：三禁（①版本号字面零残留=钉自证
+ *     「DESIGN 零版本号字面」本验收 ②工具/角色/命令计数句法零残留 ③独占权威声明零残留）
+ *     + 协议卡索引双向覆盖（引用存在+在册卡必被索引）+ SKILL 章号引用真实性。权威 =
+ *     aggregated G2 终裁 + DP2c DESIGN 重写纲要节；DESBAN 与 DESIGN 重写同 mission 闭环
+ *     （H-1 改写者自证耦合）。施工留痕：既有钉面 grep 盘点零 DESIGN.md 读取/断言——
+ *     「DESIGN 重写连带改写既有钉面」=空操作；M10 固定文案钉 14 条不动（run-all.mjs
+ *     REGISTRY 注释原文有据，QA R1 A.2 核））
+ *   A-v0122-L10（v1.2.2 滞回+教训节波）：W4-05 改写（COORD_TAIL_LOG_MAX_BLOCKS 字面钉 →
+ *     TRIM_AT=20/TRIM_TO=10 双常量钉+旧常量零残留）；W4-08 改写（PL-10 ② 轨迹子句滞回措辞
+ *     +教训转投节+scoping 恒在行）；新增 W4-11 字面等值锁（「≤20 块全量」==3/「教训转投」==4/
+ *     「哨兵 scoping 恒在行」==4/「滞回窗 20/10」==1+旧措辞零残留）。偏差留痕（l-20261022-8fa733）：
+ *     design §4「新增 W4-07」编号已被既有 W4-07（撤译零残留）占用 → 新钉改用空闲编号 W4-11；
+ *     SKILL 组装序四处 site（图行/DP-3/尾块模板/PL-10 ②）按 N-1 同源失真并集一次编辑一致化，
+ *     等值锁计数按并集后实测（design 预写「≤20 块全量」==1 系单 site 口径）。
  *   A-v111-W21（v1.1.1 文档波）：W4-01/02/08 按新 SKILL 重钉（v2 双标签/启动器自动注入/
  *     粘贴·共享头·逐字复用语汇零残留）；W4-05/05b/09/10 按 DESIGN §2 契约名预写日志化锚
  *     （日志文件名/封顶 10/coordTailLogLastFull/三遗留清理/dispatch 注册+runner 文件/
@@ -134,11 +157,11 @@ try {
   //   权威 = 任务包 CONTEXT v2.1 逐字（用户 2026-10-23 裁定+2026-10-25 编码裁定）；
   //   豁免语义精确版 = 任务包 RULES：grill#1=完整规格（范围+验收+取舍）∧零新增疑点 /
   //   grill#3=改动面 ≤2 波∧零新权衡；两豁免均须显式声明「grill#N 免开：<理由>」供否决） ----------
-  // PL1-01 §16 在位 + 章号 1..16 连续零重号 + PL 规则族计数（零撞号：PL 前缀不在既有 15 族）
+  // PL1-01 §16 在位 + 章号 1..17 连续零重号（v1.2 M6-2 增第 17 章主控信息面）+ PL 规则族计数（零撞号：PL 前缀不在既有 15 族）
   ck.ok("PL1-01 SKILL §16 章头在位（## 16. 编排流水线）", count(SKILL_LF, "## 16. 编排流水线") === 1, count(SKILL_LF, "## 16. 编排流水线"));
   const chapNums = (SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1")));
-  const chapOk = chapNums.length === 16 && chapNums.every((n, i) => n === i + 1);
-  ck.ok("PL1-01 SKILL 章号 1..16 连续零重号", chapOk, chapNums.join(","));
+  const chapOk = chapNums.length === 17 && chapNums.every((n, i) => n === i + 1);
+  ck.ok("PL1-01 SKILL 章号 1..17 连续零重号（v1.2 M6-2 增第 17 章，前值 1..16）", chapOk, chapNums.join(","));
   ck.ok("PL1-01 PL 规则族 10 条（行首 PL-N 计数；v1.1 W4 增 PL-10）", countRe(SKILL_LF, /^PL-\d+ /gm) === 10, countRe(SKILL_LF, /^PL-\d+ /gm));
   // PL1-02 v2.1 逐字关键句钉（两豁免/可行性结论行/披露/格式纪律/组包 checklist）
   ck.ok("PL1-02 grill#1 豁免判据+免开声明在位", count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点") === 1 && count(SKILL, "grill#1 免开：") === 1, { spec: count(SKILL, "用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点"), decl: count(SKILL, "grill#1 免开：") });
@@ -150,6 +173,71 @@ try {
   // PL1-03 §1 场景表行 + frontmatter description 增行
   ck.ok("PL1-03 §1 场景表 PL 行在位", count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |") === 1, count(SKILL, "| 标准编排流水线与 grill 确认门 | 第 16 章 |"));
   ck.ok("PL1-03 frontmatter description 增行在位", count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。") === 1, count(SKILL, "沙箱派发与成本纪律、编排流水线与 grill 确认门。"));
+
+  // ---------- A-v0120-D11：v1.2 M6-2 主控信息面（SKILL 第 17 章 + 派发纪律第 11 条）静态钉；
+  //   权威 = aggregated.md §4.4①②（v1.2 波次实行稿 M6-2）；双源对拍（O13=a）：
+  //   SKILL 第 17 章「主控信息面（尾块契约）」=面向人权威，server DISPATCH_DISCIPLINE_BODY=
+  //   执行面拷贝，第 11 条核心句逐字一致由 D11-03 对拍（server+SKILL 同文件双面读，纯静态） ----------
+  // D11-01 新章标题钉 + G3 边界声明（新章=信息形态契约非 §16 流水线纪律，落新章不落 §16）
+  ck.ok("D11-01 SKILL §17 章头在位（## 17. 主控信息面（尾块契约））", count(SKILL_LF, "## 17. 主控信息面（尾块契约）") === 1, count(SKILL_LF, "## 17. 主控信息面（尾块契约）"));
+  ck.ok("D11-01 G3 边界声明在位（落新章不落 §16；§16 两条硬规则口径不动）", count(SKILL, "落新章不落 §16") === 1 && count(SKILL, "两不相扰") === 1 && count(SKILL, "grill 门默认必开＋豁免显式声明") === 1, { boundary: count(SKILL, "落新章不落 §16"), noMix: count(SKILL, "两不相扰"), twoRules: count(SKILL, "grill 门默认必开＋豁免显式声明") });
+  // D11-02 尾块三要素（结论/计数/产物指针，「结论」通用措辞 R2 低-5）+ 直投两形态 + 主控不读正文 + p2p 分工
+  ck.ok("D11-02 尾块三要素钉（场景表行+IF-5 引文两处；done 缺产物指针=无效上报 IF-1+引文两处）", count(SKILL, "结论/计数/产物指针") === 2 && count(SKILL, "done 缺产物指针=无效上报") === 2, { triad: count(SKILL, "结论/计数/产物指针"), noPtr: count(SKILL, "done 缺产物指针=无效上报") });
+  ck.ok("D11-02 直投通道两形态+主控不读正文原则在位（IF-2/IF-3）", count(SKILL, "主控不读正文") >= 1 && count(SKILL, "文件直投") >= 1 && count(SKILL, "按指针自取") >= 1, { noRead: count(SKILL, "主控不读正文"), direct: count(SKILL, "文件直投"), byPtr: count(SKILL, "按指针自取") });
+  ck.ok("D11-02 与 p2p 分工钉（仲裁中转面 vs 文件通道，正文不过主控；IF-4）", count(SKILL, "仲裁中转面") === 1 && count(SKILL, "正文不过主控") === 1, { p2p: count(SKILL, "仲裁中转面"), notViaCoord: count(SKILL, "正文不过主控") });
+  // D11-03 派发纪律第 11 条核心句双源逐字一致（O13=a 漂移兜底；协议卡指针行 O1① 同组）
+  const D11_CORE = "尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报";
+  ck.ok("D11-03 第 11 条核心句双源逐字一致（server DISPATCH_DISCIPLINE_BODY 恰 1 + SKILL §17 恰 1）", count(SERVER, D11_CORE) === 1 && count(SKILL, D11_CORE) === 1, { server: count(SERVER, D11_CORE), skill: count(SKILL, D11_CORE) });
+  ck.ok("D11-03 fence 引言行随第 12 条同步（12 条纪律；v1.2.1 主控追加）", count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 11 条纪律") === 0, { n12: count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文"), n11: count(SERVER, "以下 11 条纪律") });
+  // D11-04 §1 场景表行 + 协议卡指针行（O1①：SKILL 只加指针行，卡本体在 docs/protocols/）
+  ck.ok("D11-04 §1 场景表尾块态行在位", count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |") === 1, count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |"));
+  ck.ok("D11-04 协议卡指针行在位（docs/protocols/ 恰 1，SKILL 只留指针）", count(SKILL, "docs/protocols/") === 1, count(SKILL, "docs/protocols/"));
+
+  // ---------- A-v0121-OV：v1.2.1 主控铁律存在钉（任务包 m-20261028-202204-faa3；TASK ① 逐字文本
+  //   落 SKILL 第 1 章，编号接 OV-3 后；原 OV-4 协议卡指针随插位改号；主控追加裁定 OV-7 运行面禁热修改，
+  //   协议卡指针再顺延 OV-8——出处第 12 章 SB-8 实锚可达） ----------
+  ck.ok("OV-01 OV-4 主控不读写项目文件（强规则）在位且唯一", countRe(SKILL_LF, /^OV-4 主控不读写项目文件/gm) === 1 && count(SKILL, "违反即流程缺陷：先补派再继续") === 1, { head: countRe(SKILL_LF, /^OV-4 主控不读写项目文件/gm), tail: count(SKILL, "违反即流程缺陷：先补派再继续") });
+  ck.ok("OV-02 OV-5 尾块契约在位且唯一", countRe(SKILL_LF, /^OV-5 尾块契约/gm) === 1 && count(SKILL, "无尾块=下一派发子代理失态") === 1, { head: countRe(SKILL_LF, /^OV-5 尾块契约/gm), tail: count(SKILL, "无尾块=下一派发子代理失态") });
+  ck.ok("OV-03 OV-6 三小循环默认形态在位且唯一", countRe(SKILL_LF, /^OV-6 三小循环默认形态/gm) === 1 && count(SKILL, "循环间 grill 门默认必开+豁免显式声明") === 1, { head: countRe(SKILL_LF, /^OV-6 三小循环默认形态/gm), tail: count(SKILL, "循环间 grill 门默认必开+豁免显式声明") });
+  ck.ok("OV-04a OV-7 运行面禁热修改（强规则）在位且唯一", countRe(SKILL_LF, /^OV-7 运行面禁热修改/gm) === 1 && count(SKILL, "紧急修复也走沙箱快进，不做在位热补") === 1, { head: countRe(SKILL_LF, /^OV-7 运行面禁热修改/gm), tail: count(SKILL, "紧急修复也走沙箱快进，不做在位热补") });
+  ck.ok("OV-04 OV-1..OV-8 行首各恰一（零重号；协议卡指针=OV-8）", ["1", "2", "3", "4", "5", "6", "7", "8"].every((n) => countRe(SKILL_LF, new RegExp("^OV-" + n + " ", "gm")) === 1), { counts: ["1", "2", "3", "4", "5", "6", "7", "8"].map((n) => countRe(SKILL_LF, new RegExp("^OV-" + n + " ", "gm"))) });
+  ck.ok("OV-05 协议卡指针行改号存续（OV-8 恰 1）", count(SKILL, "OV-8 协议契约卡指针") === 1, count(SKILL, "OV-8 协议契约卡指针"));
+
+  // ---------- A-v0120-DESBAN：DESIGN.md 机制总纲防失真钉组（v1.2 M7-1；权威 = aggregated G2 终裁
+  //   + DP2c DESIGN 重写纲要节；DESBAN 与 DESIGN 重写同 mission 闭环=改写者自证耦合，H-1） ----------
+  // 三禁：①版本号字面（①的绿即「DESIGN 零版本号字面」钉自证，M7-1 验收句本体）
+  //   ②工具/角色/命令计数句法 ③「唯一设计权威」类独占声明；数字一律由归属机制套件钉族承载。
+  // 施工留痕（M7-1）：既有钉面 grep 盘点=零断言读取/引用 DESIGN.md 内容（仅注释提及其节号），
+  //   「DESIGN 重写连带改写既有钉面」=空操作；M10 固定文案钉 14 条不动（run-all.mjs REGISTRY 注释有据）。
+  const DESIGN_DOC = read("DESIGN.md");
+  ck.ok("DESBAN-00 DESIGN.md 存在非空（机制总纲在位）", DESIGN_DOC.trim().length > 0, DESIGN_DOC.length);
+  // ① 版本号字面零残留（钉自证）；文中确需指涉版本一律写「见 plugin.json」
+  const desbanVer = DESIGN_DOC.match(/v?\d+\.\d+/g) || [];
+  ck.ok("DESBAN-01 DESIGN.md 零版本号字面（v?数字.数字 全文零命中=钉自证）", desbanVer.length === 0, desbanVer.slice(0, 8));
+  // ② 计数句法零残留；工具/角色/命令数量以 plugin.json 注册字段与 server 注册表为准
+  const desbanCnt = DESIGN_DOC.match(/\d+\s*个\s*(工具|角色|命令)/g) || [];
+  ck.ok("DESBAN-02 DESIGN.md 零工具/角色/命令计数句法（「N 个工具」族）", desbanCnt.length === 0, desbanCnt.slice(0, 8));
+  // ③ 独占权威声明零残留（权威分工在头声明与 §1 表；行为面 SKILL 优先/协议物面卡优先）
+  const desbanSole = DESIGN_DOC.match(/唯一(的)?(设计)?权威/g) || [];
+  ck.ok("DESBAN-03 DESIGN.md 零独占权威声明（「唯一(设计)权威」族）", desbanSole.length === 0, desbanSole.slice(0, 8));
+  // ④ 协议卡索引双向覆盖：DESIGN 引用的卡存在非空 + 在册卡必被索引（新增卡漏补索引即红）
+  const desbanRefs = [...new Set([...DESIGN_DOC.matchAll(/docs\/protocols\/([\w.-]+\.md)/g)].map((m) => m[1]))];
+  const desbanMissing = desbanRefs.filter((f) => {
+    try { return fs.statSync(path.join(PLUGIN_DIR, "docs", "protocols", f)).size === 0; } catch { return true; }
+  });
+  ck.ok("DESBAN-04 DESIGN 卡索引引用全部存在非空（docs/protocols/）", desbanRefs.length > 0 && desbanMissing.length === 0, { refs: desbanRefs, missing: desbanMissing });
+  const desbanUnindexed = fs
+    .readdirSync(path.join(PLUGIN_DIR, "docs", "protocols"))
+    .filter((f) => f.endsWith(".md") && !DESIGN_DOC.includes(f))
+    .sort();
+  ck.ok("DESBAN-05 协议面文件反向全覆盖（docs/protocols/*.md 每件都被 DESIGN 索引至少一次）", desbanUnindexed.length === 0, desbanUnindexed);
+  // ⑤ SKILL 章号引用真实性（C1-05 同构：DESIGN 引用「第 N 章」必须真实存在）
+  {
+    const desbanChaps = [...new Set([...DESIGN_DOC.matchAll(/第 (\d+) 章/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+    const desbanReal = new Set((SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1"))));
+    const desbanChapMissing = desbanChaps.filter((n) => !desbanReal.has(n));
+    ck.ok("DESBAN-06 DESIGN 引用的 SKILL 章号均真实存在", desbanChaps.length > 0 && desbanChapMissing.length === 0, { refs: desbanChaps, missing: desbanChapMissing });
+  }
 
   // ---------- A-v110-W4-A1：v1.1 W4 尾部契约块/三段派发静态回潮防钉（DESIGN §1/§2） ----------
   // 行为面 = sentinel-teardown T12（stop-check 黑盒）+ crv2-pack W4-PREFIX（跨派发前缀字节）。
@@ -234,7 +322,7 @@ try {
   // W4-05/09 v1.1.1 W21 预写：按 DESIGN §2 契约名钉日志化锚；实现由 W20 并行车道落地，
   // 本套此刻不要求其绿——绿验证在收尾波（实现与契约名不符只记 Return，不自行改锚）。
   ck.ok(
-    "W4-05 stop-check 抽取/日志契约静态锚（W21 预写，绿验证在收尾波）：v2 标记对/两形制帽/字段白名单/subagent 守卫/日志文件名+封顶",
+    "W4-05 stop-check 抽取/日志契约静态锚（W21 预写→v1.2.2 滞回改写）：v2 标记对/两形制帽/字段白名单/subagent 守卫/日志文件名+滞回 20/10 双常量",
     count(STOP_CHECK, "<!-- orch-tail v2") >= 1 &&
       count(STOP_CHECK, "<!-- orch-tail-end -->") >= 1 &&
       count(STOP_CHECK, "full: { lines: 10, bytes: 900 }") === 1 &&
@@ -242,7 +330,9 @@ try {
       count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];') === 1 &&
       count(STOP_CHECK, '"sess_subagent_"') === 1 &&
       count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";') === 1 &&
-      count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;") === 1,
+      count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;") === 1 &&
+      count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_TO = 10;") === 1 &&
+      count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS") === 0,
     {
       mark: count(STOP_CHECK, "<!-- orch-tail v2"),
       close: count(STOP_CHECK, "<!-- orch-tail-end -->"),
@@ -251,7 +341,9 @@ try {
       fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];'),
       guard: count(STOP_CHECK, '"sess_subagent_"'),
       logFile: count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";'),
-      logCap: count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS = 10;"),
+      trimAt: count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;"),
+      trimTo: count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_TO = 10;"),
+      oldCap: count(STOP_CHECK, "const COORD_TAIL_LOG_MAX_BLOCKS"),
     },
   );
   ck.ok(
@@ -282,15 +374,18 @@ try {
       stale: count(STOP_CHECK, "coordTailStale"),
     },
   );
-  // W21 注入面语义锁（v1.1.2 I1 四段式随行改写）：PL-10 注入=启动器自动（纪律段→轨迹→digest→persona→指针+CONTRACT），
+  // W21 注入面语义锁（v1.1.2 I1 四段式→v1.2.2 教训节随行改写）：PL-10 注入=启动器自动
+  // （纪律段→轨迹→digest→教训转投→scoping 恒在行→persona→指针+CONTRACT），
   // 日志存全量尾块（含协议行）/注入面去协议行；粘贴/共享头/逐字复用语汇零残留。
   const PL10 = SKILL.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
   ck.ok(
-    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.1.2 I1 四段式）：纪律段恒在 offset 0/轨迹 ≤10 块去 ts/seq 旧→新/digest 条件节机器组装/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
+    "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.2.2 滞回+教训节改写）：纪律段恒在 offset 0/轨迹 ≤20 全量 >20 尾 10 去 ts/seq 旧→新/digest 条件节机器组装/教训转投节/scoping 恒在行/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
     PL10.includes("注入=启动器自动") &&
       PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）") &&
-      PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）") &&
+      PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）") &&
       PL10.includes("digest 条件节（机器组装，Q8=a") &&
+      PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）") &&
+      PL10.includes("哨兵 scoping 恒在行") &&
       PL10.includes("persona 原型正文") &&
       PL10.includes("指针句+CONTRACT 三行") &&
       PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）") &&
@@ -306,13 +401,40 @@ try {
     {
       autoInject: PL10.includes("注入=启动器自动"),
       discipline: PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）"),
-      trajectory: PL10.includes("尾块轨迹节（≤10 块去 `ts:`/`seq:`，旧→新）"),
+      trajectory: PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）"),
       digest: PL10.includes("digest 条件节（机器组装，Q8=a"),
+      lessons: PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）"),
+      scoping: PL10.includes("哨兵 scoping 恒在行"),
       fullLog: PL10.includes("日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）"),
       bareInject: PL10.includes("注入面去协议行裸块（Q6）"),
       zeroAssembly: PL10.includes("主控零组装、零转译"),
       fence: count(SKILL, "派发首条消息尾块轨迹节"),
       residue: { paste: count(SKILL, "粘贴"), sharedHead: count(SKILL, "共享头"), verbatimReuse: count(SKILL, "逐字复用"), jingjian: count(SKILL, "精简态"), compact: count(SKILL, "compact"), stale: count(SKILL, "stale") },
+    },
+  );
+  // A-v0122-L10（v1.2.2 滞回+教训节字面钉；design §4 PIN 行「新增 W4-07」编号与既有
+  // W4-07（撤译零残留）冲突——按行为并集改用空闲编号 W4-11，偏差留痕本注释与套件 §0，
+  // l-20261022-8fa733）。计数=等值锁：四处 site（第 3 章图行/DP-3/尾块模板/PL-10 ②）
+  // 同波一致化（QA-R2 N-1 同源失真并集处置），多 site 漂移即红。
+  ck.ok(
+    "W4-11 SKILL 滞回+教训节字面等值锁（v1.2.2）：「≤20 块全量」==3（DP-3/尾块模板/PL-10 ②）∧「教训转投」==4（图行+前三者）∧「哨兵 scoping 恒在行」==4 ∧「滞回窗 20/10」==1（PL-10 ①）∧「滞回帽老化」==1",
+    count(SKILL, "≤20 块全量") === 3 &&
+      count(SKILL, "教训转投") === 4 &&
+      count(SKILL, "哨兵 scoping 恒在行") === 4 &&
+      count(SKILL, "滞回窗 20/10") === 1 &&
+      count(SKILL, "滞回帽老化") === 1 &&
+      count(SKILL, "封顶 10 块") === 0 &&
+      count(SKILL, "10 块帽老化") === 0 &&
+      count(SKILL, "≤10 块去") === 0,
+    {
+      cap20: count(SKILL, "≤20 块全量"),
+      lessonsXfer: count(SKILL, "教训转投"),
+      scopingLine: count(SKILL, "哨兵 scoping 恒在行"),
+      hysWindow: count(SKILL, "滞回窗 20/10"),
+      hysCap: count(SKILL, "滞回帽老化"),
+      oldCap: count(SKILL, "封顶 10 块"),
+      oldAging: count(SKILL, "10 块帽老化"),
+      oldTraj: count(SKILL, "≤10 块去"),
     },
   );
   // W21 日志保留链：抽取/解析/渲染/原子写/日志末条全形基线；判旧守卫（(ts,seq)/coordTailRead）
@@ -399,23 +521,26 @@ try {
     count(SERVER, "function countUnreadSafe") === 1 && count(SERVER, "unread: countUnreadSafe(m.id)") === 1,
     { def: count(SERVER, "function countUnreadSafe"), use: count(SERVER, "unread: countUnreadSafe(m.id)") });
 
-  // ---------- A-v1111-C1：/orch-manual 强提示词命令静态锁（v1.1.1-C1 波，任务包 m-20261026-040100-c1；
-  //   2026-10-26 主控强化口径：内联铁律速览+阻塞式读取+可证阅读确认+固定末行，覆盖任务包「强提示词」力度定义） ----------
+  // ---------- A-v1111-C1：/manual 强提示词命令静态锁（v1.1.1-C1 波建 /orch-manual，任务包 m-20261026-040100-c1；
+  //   2026-10-26 主控强化口径：内联铁律速览+阻塞式读取+可证阅读确认+固定末行，覆盖任务包「强提示词」力度定义；
+  //   v1.2.1 改名 /manual（commands/manual.md）——/orch 让位总控台 orch.md，主控裁决 m-20261028-202204-faa3） ----------
   // §0 偏差留痕（l-20261022-8fa733 口径）：
-  //   (a) 现存 5 命令 frontmatter 均无 name 字段（name 由文件名派生）；本波按任务包要求新增
-  //       name: orch-manual——增量字段，宿主忽略未知 frontmatter，无行为回退面。
+  //   (a) 现存 5 命令 frontmatter 均无 name 字段（name 由文件名派生）；C1 波按任务包要求新增
+  //       name 字段（v1.2.1 前值 name: orch-manual，现值 name: manual）——增量字段，宿主忽略未知
+  //       frontmatter，无行为回退面。
   //   (b) 任务包原稿「任何偏离须先 report(kind=blocked)」与主控实况（report 仅子代理，SKILL §14
   //       面向列）相悖；已按主控强化口径裁决落定：固定末行保留 report(blocked) 措辞（承诺痕迹），
   //       命令正文注明主控侧实现=向用户显式提问待裁。偏差已消解，非悬空。
   //   (c) SKILL 同步：SKILL 全文无命令清单（仅 OV-3 泛指 commands/*.md 命令入口、CL-9 提及
   //       /orch-resume），按任务包条件分支「若无则只在 frontmatter 层面存在」执行，零 SKILL 改动。
-  //   (d) 铁律速览 8 条为 SKILL 原文提炼内联（非逐字抄录），每条带真实章号引用（C1-05/09 锁）；
-  //       SKILL 演进时命令内速览须同步，本组锁条数与章号防漂移（主控强化口径第 4 点）。
-  const MANUAL = read(path.join("commands", "orch-manual.md"));
+  //   (d) 铁律速览 12 条为 SKILL 原文提炼内联（非逐字抄录；v1.2.1 增 OV-4/5/6/7 四条，前值 8 条），
+  //       每条带真实章号引用（C1-05/09 锁）；SKILL 演进时命令内速览须同步，本组锁条数与章号防漂移
+  //       （主控强化口径第 4 点）。
+  const MANUAL = read(path.join("commands", "manual.md"));
   {
     const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(MANUAL);
     const fmLines = fm ? fm[1].split(/\r?\n/) : [];
-    ck.ok("C1-01 commands/orch-manual.md 存在且 frontmatter name=orch-manual", fmLines.some((l) => l.trim() === "name: orch-manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
+    ck.ok("C1-01 commands/manual.md 存在且 frontmatter name=manual（v1.2.1 前值 orch-manual）", fmLines.some((l) => l.trim() === "name: manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
   }
   ck.ok("C1-02 强措辞·全文读取句（立即完整读取＋不节选、不跳读）", count(MANUAL, "立即完整读取") >= 1 && count(MANUAL, "不节选、不跳读") >= 1, { read: count(MANUAL, "立即完整读取"), noSkip: count(MANUAL, "不节选、不跳读") });
   ck.ok("C1-03 强措辞·偏离=任务失败句（静默偏离=任务失败）", count(MANUAL, "静默偏离=任务失败") >= 1, count(MANUAL, "静默偏离=任务失败"));
@@ -424,10 +549,10 @@ try {
   ck.ok("C1-07 可证引述句（逐字抄录＋不算引述）", count(MANUAL, "逐字抄录") >= 1 && count(MANUAL, "不算引述") >= 1, { quote: count(MANUAL, "逐字抄录"), noFake: count(MANUAL, "不算引述") });
   ck.ok("C1-08 固定末行（本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁）", count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁") === 1, count(MANUAL, "本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁"));
   {
-    // 铁律速览锁（强化口径第 4 点）：8 条表格行、每条带章号引用，防 SKILL 演进漂移。
+    // 铁律速览锁（强化口径第 4 点；v1.2.1 扩 12 条含 OV-4/5/6/7）：12 条表格行、每条带章号引用，防 SKILL 演进漂移。
     const ironRows = MANUAL.match(/^\| \d+ \|.*\|$/gm) || [];
-    const ironOk = ironRows.length === 8 && ironRows.every((r) => /第 \d+ 章/.test(r));
-    ck.ok("C1-09 铁律速览 8 条且每条带章号引用", ironOk, { rows: ironRows.length, withChap: ironRows.filter((r) => /第 \d+ 章/.test(r)).length });
+    const ironOk = ironRows.length === 12 && ironRows.every((r) => /第 \d+ 章/.test(r));
+    ck.ok("C1-09 铁律速览 12 条且每条带章号引用（v1.2.1 前值 8 条）", ironOk, { rows: ironRows.length, withChap: ironRows.filter((r) => /第 \d+ 章/.test(r)).length });
   }
   {
     // 章节引用一致性：命令文引用的「第 N 章」必须全部是 SKILL 真实章号；自检清单 ≥7 章（派发七步/

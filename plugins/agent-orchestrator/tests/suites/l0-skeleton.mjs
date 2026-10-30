@@ -1,3 +1,4 @@
+// @module l0-skeleton
 /*!
  * suites/l0-skeleton.mjs —— L0 骨架组（0.4.1 回归组 R01 口径的 v0.5 复核 + M-07/SB09 + B07）
  *

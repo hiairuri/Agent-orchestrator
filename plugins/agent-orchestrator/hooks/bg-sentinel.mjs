@@ -108,6 +108,10 @@ const ECHO_MAX_LINES = 256; // >256 行滚动截半
 const PRUNE_AGE_MS = 24 * 3600 * 1000; // fired/echo 条目 24h 物理清理
 const PRUNE_EVERY_MS = 30 * 60 * 1000; // 每 30 分钟 prune 一次
 const FIRED_TAIL_BYTES = 4096; // rollout 末行读取窗口
+// v1.2 M9-1 scoping（W9 阶段 a）：归属判定留痕去重（每 mission×category 至多一条回声，
+// FIFO 帽防跨代累积）。归因补齐/锚恢复 → owned 时移除键，此后再缺席可重留痕。
+const SCOPING_TRACE_CAP = 400;
+const scopingTraced = new Map();
 
 function parseArg(argv, flag) {
   for (let i = 0; i < argv.length; i++) {
@@ -297,6 +301,35 @@ function wakeFailureInfo(m) {
   return { suspected: true, result_at: resultAt == null ? null : resultAt, minutes };
 }
 
+/** v1.2 M9-1 scoping：mission 归因 id（dispatch.session_id 优先，其次
+ * dispatch.spawned_by_session——W3 M3-1 前向归因字段，board schema 寄 dispatch/ONE_LEVEL
+ * 子键）。任一在即「有归因」；均缺 → null（空值三段第 3 段：缺席回落=漏报可见）。 */
+function missionAttributionId(m) {
+  const d = m && m.dispatch && typeof m.dispatch === "object" ? m.dispatch : {};
+  const sid = typeof d.session_id === "string" ? d.session_id.trim() : "";
+  if (sid) return sid;
+  const spawned = typeof d.spawned_by_session === "string" ? d.spawned_by_session.trim() : "";
+  return spawned || null;
+}
+
+/** v1.2 M9-1 scoping 留痕（echo.jsonl 单写方，复用 appendEcho；非开枪——final 恒
+ * false、零 fired 零退出零 board 写）。每 mission×category 去重（内存 Map+FIFO 帽），
+ * 留痕失败绝不拖垮判定（appendEcho 内部全 catch，此处再兜一层）。 */
+function scopingSkipTrace(rootDir, missionId, category, summary) {
+  const key = String(missionId);
+  if (scopingTraced.get(key) === category) return;
+  if (scopingTraced.size >= SCOPING_TRACE_CAP) {
+    const first = scopingTraced.keys().next().value;
+    if (first !== undefined) scopingTraced.delete(first);
+  }
+  scopingTraced.set(key, category);
+  try {
+    appendEcho(rootDir, [{ key, category, final: false }], summary, {});
+  } catch {
+    /* 留痕失败不影响主路径 */
+  }
+}
+
 /**
  * B5: result time fallback chain — last report:* timeline at → updated_at →
  * board.json mtime → null (caller alerts immediately on null).
@@ -333,8 +366,8 @@ function lastActivityMs(m) {
 function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
   if (min < 1) return "刚刚";
-  if (min < 60) return `${Math.floor(min)} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${Math.floor(min % 60)} 分钟前`;
+  if (min < 60) return `${min} 分钟前`;
+  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
 }
 
 /** 读 board：null = 本 tick 无正据（文件缺失/读取/解析失败）——计数并连续跟踪。 */
@@ -1136,10 +1169,35 @@ function classify(board, boardMtimeMs, cfg, rootDir, signals) {
   const missions = Array.isArray(board.missions) ? board.missions : [];
   const isWorkflow = (m) => (m.dispatch && m.dispatch.mode) === "workflow";
   const now = Date.now();
+  // v1.2 M9-1 scoping：本哨兵所守会话锚（coord-session.txt），归属等值判定的本侧。
+  const ownId = coordSessionId(rootDir, signals);
   for (const m of missions) {
     if (!m || typeof m !== "object") continue;
     if (!IN_FLIGHT_STATUSES.includes(m.status) && !RESULT_STATUSES.includes(m.status)) continue; // ready/drafted/skipped/closed 不产生条件
     if (isWorkflow(m)) continue; // B4：workflow 由宿主通知
+    // v1.2 M9-1 scoping 闸（MOD3a-QA 三枪全丢误报靶心）：开枪前判 mission 归属——
+    // 有归因（dispatch.session_id / spawned_by_session 任一在）按与本哨兵锚等值判定；
+    // 等值不成立（他会话）或无法成立（归因缺席/锚缺失）一律零开枪，转留痕可见
+    // （空值三段第 3 段=漏报可见硬约束：scoping-skipped 留痕 + server 组包尾块缺席
+    // 计数；fail-open 与纯 fail-closed 均已否决）。本闸每 tick 重判——归因补齐即自动
+    // 恢复盯守。不对称原则：误判他会话=静默留痕低害，漏枪由 session-start 回归简报兜住。
+    const mid = String(m.id);
+    const attr = missionAttributionId(m);
+    if (!attr || ownId == null || attr !== ownId) {
+      const foreign = Boolean(attr) && ownId != null;
+      scopingSkipTrace(
+        rootDir,
+        mid,
+        foreign ? "scoping-foreign" : "scoping-skipped",
+        foreign
+          ? `scoping-foreign：mission ${mid} 归属 ${attr} ≠ 本哨兵锚——零开枪静默留痕（他会话完成态照常落板+spool，回归由 session-start 简报补报）`
+          : !attr
+            ? `scoping-skipped：mission ${mid} 无归因（dispatch.session_id/spawned_by_session 均缺席）——补齐前不盯守（组包尾块缺席计数可见，补齐自动恢复）`
+            : `scoping-skipped：mission ${mid} 归因 ${attr} 无法比对（本哨兵锚缺失）——锚重发布前不盯守`,
+      );
+      continue;
+    }
+    scopingTraced.delete(mid); // 恢复盯守：清留痕去重键（此后再缺席/转他会话可重留痕）
     const agentId = (m.dispatch && m.dispatch.agent_id) || null;
     const inFlight = IN_FLIGHT_STATUSES.includes(m.status);
     const title = String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30);
@@ -2317,6 +2375,7 @@ function main() {
   let lifetimeAnchor = startedAt; // 寿命 cap 锚：轮换输家顺延时重置
   let lastEvalAt = 0; // 最近一次全量板面评估时刻（待命节流用）
   let lastEvalBoardMtime = -1; // V7-08/R1：最近一次全量评估时的 board.json mtime（standby mtime 门基准）
+  let catchupDone = false; // v1.2 M9-1 REV③：复活补告警每实例生命周期至多一次
 
   const tick = () => {
     const cfg = resolveCfg(); // B6
@@ -2470,6 +2529,30 @@ function main() {
     }
     standby = false; // 有活干（在飞或未签收）→ 恢复 active 值守
     if (stateLabel() !== prevLabel) touchSlot(sentDir, slot, startedAt, tookOver, tookOverPrev, stateLabel(), root);
+
+    // v1.2 M9-1 REV③ 补告警（宽限阈值复核结论：HEARTBEAT_STALE_MS 90s=槽位判死/在岗
+    // 判定刻度 ≠ wake 升级阈值 wake/answer/stall/crash_grace——两族常量无 conflation）：
+    // 复活/自补员后的首扫，对本实例启动前已到期升级（anchorMs < startedAt 且已 matured）
+    // 的条件集中补告警一次，缝合团灭期的告警断档。仅回声留痕——不额外开枪不退出，
+    // 正常开枪路径按自身 eligibility/refire/cap 独立进行；每实例生命周期至多一次。
+    // O10 协同：条件锚一律取自 board timeline（重派 upsert 事件即最新活动锚），首扫
+    // 以板面为据，已豁免重派 mission 不会因复活丢内存态而误判双跑。
+    if (!catchupDone) {
+      const missed = conds.filter((c) => matured(c) && c.anchorMs < startedAt);
+      if (missed.length) {
+        catchupDone = true;
+        const heads = missed
+          .slice(0, 5)
+          .map((c) => `${c.key} ${c.category}`)
+          .join("、");
+        appendEcho(
+          root,
+          [{ key: "__catchup__", category: "catchup", final: false }],
+          `补告警：哨兵缺位期间到期升级 ${missed.length} 件（${heads}${missed.length > 5 ? " 等" : ""}）——复活首扫集中补发一次`,
+          {},
+        );
+      }
+    }
 
     // W6 watcher-signals 消费：watcher 在岗覆盖中的 C1 类别本 tick 静默让位（不重复
     // 开枪）；信号缺失/过期/终态/读失败 → covered=false 走既有兜底（WAKE-02 不回归）。

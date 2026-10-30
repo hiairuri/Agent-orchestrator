@@ -1,3 +1,4 @@
+// @module crv3-present
 /*!
  * suites/crv3-present.mjs —— CRV3-01…03（相交转串行）+ CR-V26/27/28（懒迁移/呈现面/mailbox 帽）
  *   + M-03/M-04/M-05/M-06（懒迁移审计/白名单/豁免同源/warn_scope 分键）

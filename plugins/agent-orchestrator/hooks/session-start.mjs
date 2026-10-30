@@ -44,6 +44,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const MAX_OUTPUT_CHARS = 1500;
 // v0.3.1 (C2): "resumed" joins the open set — a resumed mission whose worker
@@ -52,6 +54,10 @@ const OPEN_STATUSES = ["dispatched", "running", "blocked", "question", "resumed"
 const RESULT_STATUSES = ["done", "failed", "blocked", "question"];
 const BRIEF_TOP_K = 3;
 const BRIEF_MAX_CHARS = 300;
+// v1.2 M9-1 触发面①（复活/自补员）：心跳新鲜刻度与 bg-sentinel/bg-gate 同值 90000
+// （VALUE_TWINS 异名值 twin 语义名=心跳龄判死；本副本独立命名防 twin 表 site 计数漂移）。
+const REVIVE_HB_STALE_MS = 90000;
+const SENTINEL_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "bg-sentinel.mjs");
 
 /* --- lessons digest（v0.8 起唯一副本：server.mjs 同名死码 topLessonsBrief 已删，
      v0.8-DESIGN §3.6；v0.6 V6-57 起本副本多做代理对回退） --- */
@@ -371,6 +377,85 @@ function countUnread(rootDir, missionId) {
   }
 }
 
+/* --- v1.2 M9-1 触发面①（复活/自补员·SessionStart 面） -----------------------
+ * 根因（§6.2b）：哨兵为 hook 独立进程家族，宿主重启即团灭且无复活=后续 mission 无盯守
+ * （「子代理半天未签收不开枪」实锤）。SessionStart 对宿主重启后非交互首会话同样触发
+ * （实锚 T0：M0-2 findings §2/§5——-p 会话 shot B SessionStart hook input 实采，
+ * source:"startup"；插件 hook 在 -p 会话照常执行），故首会话即复活时机。
+ * 补员前置四闸（缺一不拉起）：
+ *   ①W-A0 同闸：ORCH_MANAGED_WORKER 托管 worker 不补员（headless 家族由 dispatch
+ *     触发面②负责，worker 会话短寿命不背补员职责）；
+ *   ②G14 同闸：sess_subagent 前缀子代理会话不补员；
+ *   ③板在场：无 board.json=无可盯守面（纯 hooks 面旧部署维持 bg-gate 提示补员老路径）；
+ *   ④server 管理面在岗：sentinel.cfg.json 在场（server 启动恒写，v0.9 sparse）——无 cfg
+ *     的根不自动补员（防纯夹具/异构根误拉起；派发触发面②与提示路径兜底）。
+ * 家族全灭（任一 fresh 槽位在岗即让位）才拉起，数量=cfg family_size（缺省 3，1..5 钳制）；
+ * 多余实例由槽位 wx 认领仲裁自然让位退出（幂等，重复触发无害）。best-effort 永不 fatal。 */
+function sentinelFreshSlotExists(rootDir) {
+  try {
+    const sentDir = path.join(rootDir, "sentinel");
+    for (const name of fs.readdirSync(sentDir)) {
+      if (!/^instance-\d+\.json$/.test(name)) continue;
+      const f = path.join(sentDir, name);
+      try {
+        const doc = JSON.parse(fs.readFileSync(f, "utf8"));
+        const pid = Number(doc && doc.pid);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        let alive = false;
+        try {
+          process.kill(pid, 0);
+          alive = true;
+        } catch (err) {
+          alive = Boolean(err && err.code === "EPERM");
+        }
+        if (!alive) continue;
+        const hb = Date.parse(String((doc && doc.heartbeatAt) ?? ""));
+        let age = Number.isFinite(hb) ? Date.now() - hb : NaN;
+        if (!Number.isFinite(age)) {
+          try {
+            age = Date.now() - fs.statSync(f).mtimeMs;
+          } catch {
+            continue;
+          }
+        }
+        if (Math.max(0, age) <= REVIVE_HB_STALE_MS) return true;
+      } catch {
+        /* bad slot file → next */
+      }
+    }
+  } catch {
+    /* no sentinel dir → family dead */
+  }
+  return false;
+}
+
+function reviveSentinelFamily(rootDir, sessionId) {
+  if (process.env.ORCH_MANAGED_WORKER) return; // W-A0 同闸
+  const sid = safeSessionId(sessionId);
+  if (!sid || sid.startsWith("sess_subagent")) return; // G14 同闸
+  if (!fs.existsSync(path.join(rootDir, "board.json"))) return; // 无板无可盯守
+  let familySize = 3;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(rootDir, "sentinel.cfg.json"), "utf8"));
+    familySize =
+      cfg && Number.isFinite(cfg.family_size) ? Math.min(5, Math.max(1, Math.round(cfg.family_size))) : 3;
+  } catch {
+    return; // 无 cfg/坏 cfg → server 管理面不在岗，不自动补员（闸④）
+  }
+  if (sentinelFreshSlotExists(rootDir)) return; // 家族在岗（standby 亦在岗）→ 让位
+  for (let k = 0; k < familySize; k++) {
+    try {
+      spawn(process.execPath, [SENTINEL_SCRIPT, "--root", rootDir], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+    } catch {
+      /* best effort：补员失败不阻塞会话启动 */
+    }
+  }
+}
+
 function main() {
   const input = readStdinJson();
   const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
@@ -379,6 +464,9 @@ function main() {
   // v0.10 G5：互信根触发先于板面判定——即使无板/无可恢复任务也要发布唤醒目标对
   // （watcher 无锚 fail-loud；锚缺失=唤醒链断点，见 publishWakeAnchor 注）。
   publishWakeAnchor(rootDir, projectDir, sessionId);
+  // v1.2 M9-1 触发面①：宿主重启后首会话复活哨兵家族（锚已先发布——复活实例天然有锚；
+  // 四闸见 reviveSentinelFamily 注）。
+  reviveSentinelFamily(rootDir, sessionId);
   const board = loadBoard(rootDir);
   if (!board) return;
 
