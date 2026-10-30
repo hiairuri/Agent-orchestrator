@@ -14,8 +14,10 @@
  *     DETAILS_MAX_CHARS=4000 存储帽）。转录自 W-A2 §2 各断言草案；ATW-01 沿 LOCK-03/04
  *   先例以「结构腿+可达行为腿」承接（rename 恒失败黑盒不可达，root-id 目录化探针触发
  *   fallback 路径）。suite 注册行归主控 G 胶水波收口（run-all REGISTRY）。
- *   A-v0120-DSP-01..08（v1.2 M3-1 W3 波：dispatch 三缺陷必修——Q1 播种三段式
- *     model→dms→首 api-key〔O9=a level 原值直通〕+Q2 busy 闸三层兜底〔killed-index/
+ *   A-v0120-DSP-01..08（v1.2 M3-1 W3 波：dispatch 三缺陷必修——Q1 播种两源快速失败
+ *     model→dms〔O9=a level 原值直通；v1.2.3 W2 段③「首 api-key 回落」删除，
+ *     DSP-02/03 改写钉快速失败＋rejected/guidance＋不 spawn，DS-05 钉其缺席〕
+ *     +Q2 busy 闸三层兜底〔killed-index/
  *     fail() 补 index/超龄豁免 O10=a+hint 分叉〕+Q3b 死信摘要〔outcome/timed_out/
  *     exit_code〕+spawned_by_session 归因字段）。impl-plan §批1 M3-1 权威。
  *   A-v0120-NST-01..04（v1.2 M5-1 批 3 波：dispatch 组装出口 mode=nested——不 spawn
@@ -552,7 +554,8 @@ function seedEvent(mid, id, text) {
 }
 
 /* ================= 场景 DSP：v1.2 M3-1 dispatch 三缺陷必修（A-v0120-DSP） ================= */
-/* Q1 播种三段式（model→dms→首 api-key，dms 命中跳覆写）＋Q2 busy 闸三层兜底
+/* Q1 播种两源快速失败（model→dms，缺失快速失败——v1.2.3 W2 段③「首 api-key 回落」删除，
+   dms 命中跳覆写；DSP-02/03 改写钉快速失败＋rejected/guidance＋不 spawn）＋Q2 busy 闸三层兜底
    （killed-index / fail() 补 index / O10=a 超龄豁免＋hint 分叉）＋Q3b 死信摘要
    （outcome/timed_out/exit_code）＋spawned_by_session 归因字段。 */
 {
@@ -589,6 +592,12 @@ function seedEvent(mid, id, text) {
     });
   const resultDirOf = (rt) => path.join(rt, "context", "dispatch-results");
   const wakeDirOf = (rt) => path.join(rt, "context", "wake-queue");
+  // v1.2.3 W2：播种拒绝回执的两条固定指引（draft §P3 逐字；DSP-02/03 字面断言钉，
+  // 与 dispatch-supply.mjs GUIDANCE_* 同源）
+  const DSP_GUIDANCE = [
+    '显式传 model="<providerId>/<modelId>[@level]"（api-key 型 provider）',
+    "请用户在宿主启用目标 api-key provider，使会话 defaultModelSelection 可采信",
+  ];
 
   // ---- DSP-01（Q1①④）：dms 命中 → 选题=dms、level=dms 原值（非 values.at(-1)）、
   //      种子 defaultModelSelection 与真实配置逐字节同值（跳覆写）、真实配置不动 ----
@@ -667,7 +676,9 @@ function seedEvent(mid, id, text) {
     }
   }
 
-  // ---- DSP-02（Q1②）：dms 指向 disabled provider → 回落首 api-key，覆写在回落分支生效 ----
+  // ---- DSP-02（Q1② v1.2.3 W2 改写）：dms 指向 disabled provider → 快速失败
+  //      dms_provider_disabled（rejected 同名＋provider_id=p-stale＋guidance＋不 spawn；
+  //      「回落首 api-key＋覆写自愈」旧行为随段③删除退役，DS-05 钉其缺席）----
   {
     const dir = path.join(dspBase, "dsp2");
     fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
@@ -719,28 +730,37 @@ function seedEvent(mid, id, text) {
     try {
       await dspUpsert(sX, "m-dsp2");
       const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp2", pack_path: dspPack, persona_path: dspPersona }));
-      let seedDms = null;
-      try {
-        seedDms = JSON.parse(fs.readFileSync(r.model_seed.config_path, "utf8")).config.defaultModelSelection;
-      } catch {
-        seedDms = null;
-      }
+      const rt = path.join(dir, "troot");
       ck.ok(
-        "DSP-02 Q1② dms 指向 disabled provider → 回落首个 enabled api-key（p-live/DSP-New），" +
-          "reasoning_level=optionSpecs values.at(-1)=b（levelOf 回落语义），种子 dms 被覆写为有效选型（陈旧 dms 自愈）",
-        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
-          r.model_seed.provider_id === "p-live" && r.model_seed.model_id === "DSP-New" &&
-          r.model_seed.reasoning_level === "b" &&
-          JSON.stringify(seedDms) ===
-            JSON.stringify({ providerId: "p-live", modelId: "DSP-New", options: { reasoningLevel: "b" } }),
-        { model_seed: r.model_seed, seedDms },
+        "DSP-02 Q1② dms 指向 disabled provider → 快速失败 dms_provider_disabled（v1.2.3 W2：reason=rejected.kind " +
+          "同名直通＋provider_id=p-stale＋guidance 两条字面；不再回落首 api-key p-live——禁自动回落，impl-plan §9 处置表）",
+        r.ok === true && r.model_seed && r.model_seed.seeded === false &&
+          r.model_seed.reason === "dms_provider_disabled" &&
+          r.model_seed.rejected && r.model_seed.rejected.kind === "dms_provider_disabled" &&
+          r.model_seed.rejected.provider_id === "p-stale" &&
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(DSP_GUIDANCE),
+        { model_seed: r.model_seed },
+      );
+      ck.ok(
+        "DSP-02 不 spawn＋种子文件不落＋board 留 drafted（§12 拒绝=未派发：桩标记缺席＋result dir 零侧车，" +
+          "p-live 模型不被播种——busy 闸零侧车不拦重派）",
+        !fs.existsSync(path.join(dir, "rollout", "model-io-sess_dsp2.jsonl")) &&
+          (!fs.existsSync(resultDirOf(rt)) || fs.readdirSync(resultDirOf(rt)).length === 0) &&
+          !fs.existsSync(path.join(rt, "context", "dispatch-model-seed", "m-dsp2.json")) &&
+          readBoard(rt).missions.find((m) => m && m.id === "m-dsp2").status === "drafted",
+        {
+          marker: fs.existsSync(path.join(dir, "rollout", "model-io-sess_dsp2.jsonl")),
+          seedWritten: fs.existsSync(path.join(rt, "context", "dispatch-model-seed", "m-dsp2.json")),
+        },
       );
     } finally {
       sX.close();
     }
   }
 
-  // ---- DSP-03（Q1③）：无 dms → 行为与现状一致（回落首 api-key + values.at(-1)，回归锁） ----
+  // ---- DSP-03（Q1③ v1.2.3 W2 改写）：无 dms → 快速失败 selection_missing（rejected 同名＋
+  //      provider_id 缺席=不命中任何 provider＋guidance＋不 spawn；「回落首 api-key」回归锁随
+  //      段③删除退役，DS-05 同语义套件腿）----
   {
     const dir = path.join(dspBase, "dsp3");
     fs.mkdirSync(path.join(dir, "troot"), { recursive: true });
@@ -787,13 +807,27 @@ function seedEvent(mid, id, text) {
     try {
       await dspUpsert(sX, "m-dsp3");
       const r = resultText(await sX.call("dispatch", { mission_id: "m-dsp3", pack_path: dspPack, persona_path: dspPersona }));
+      const rt = path.join(dir, "troot");
       ck.ok(
-        "DSP-03 Q1③ 无 dms 回归锁：选题=首个 enabled api-key（p-only/M-Only）且 reasoning_level=" +
-          "values.at(-1)=y（与 v1.1.2 现状语义逐点一致），种子 dms 由回落分支写入",
-        r.ok === true && r.model_seed && r.model_seed.seeded === true &&
-          r.model_seed.provider_id === "p-only" && r.model_seed.model_id === "M-Only" &&
-          r.model_seed.reasoning_level === "y",
+        "DSP-03 Q1③ 无 dms → 快速失败 selection_missing（v1.2.3 W2 段③退役：reason=rejected.kind 同名直通＋" +
+          "provider_id 缺席=不命中任何 provider（p-only 不被播种）＋guidance 两条字面）",
+        r.ok === true && r.model_seed && r.model_seed.seeded === false &&
+          r.model_seed.reason === "selection_missing" &&
+          r.model_seed.rejected && r.model_seed.rejected.kind === "selection_missing" &&
+          r.model_seed.rejected.provider_id === undefined && r.model_seed.provider_id === undefined &&
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(DSP_GUIDANCE),
         { model_seed: r.model_seed },
+      );
+      ck.ok(
+        "DSP-03 不 spawn＋种子文件不落＋board 留 drafted（§12 拒绝=未派发：桩标记缺席＋result dir 零侧车）",
+        !fs.existsSync(path.join(dir, "rollout", "model-io-sess_dsp3.jsonl")) &&
+          (!fs.existsSync(resultDirOf(rt)) || fs.readdirSync(resultDirOf(rt)).length === 0) &&
+          !fs.existsSync(path.join(rt, "context", "dispatch-model-seed", "m-dsp3.json")) &&
+          readBoard(rt).missions.find((m) => m && m.id === "m-dsp3").status === "drafted",
+        {
+          marker: fs.existsSync(path.join(dir, "rollout", "model-io-sess_dsp3.jsonl")),
+          seedWritten: fs.existsSync(path.join(rt, "context", "dispatch-model-seed", "m-dsp3.json")),
+        },
       );
     } finally {
       sX.close();

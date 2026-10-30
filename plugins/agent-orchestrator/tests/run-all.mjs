@@ -63,6 +63,10 @@ const REGISTRY = [
   { name: "po-static", layer: "L1" },
   { name: "twin-lock", layer: "L1" }, // v1.2 M2-1（A-v0120-TW）：五文件 twin 行为矩阵锁+VALUE_TWINS 值锁+负例腿（M-4 内存副本零源触碰）
   { name: "contract-sync", layer: "L1" }, // v1.2 M1-3（A-v0120-CARD）：状态机卡 ALLOWED_TRANSITIONS fenced 块 vs crv6-statemachine 源实现语义对拍（卡≈码漂移即红）+M1-2 建议两实锚；LM-05 文档卡同步锁同 mission 注册于 lint-manifest（上方 L0 行）
+  // v1.2.3 W1/M1 新增一套（A-v0123-PE，追加于表尾口径）：dispatch-supply=P2 信封双通道
+  //   parseEnvelope PE×6（单行通道A 回归/650B 多行通道B/噪声混布/截断优雅 miss/生产长度
+  //   定型）＋miss→error 侧车链静态腿。断言主句权威 tests/assertions/v1.2.3.md §1。
+  { name: "dispatch-supply", layer: "L1" },
 ];
 
 function argOf(flag) {

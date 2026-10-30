@@ -101,7 +101,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.2.2";
+const SERVER_VERSION = "1.2.3";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -7026,17 +7026,45 @@ function dispatchCaptureOutcome(opts) {
 
 /* ------------------------------------------------------------------ */
 /* v1.1.1-FA: headless model supply (dispatch bug fix, R2 P1 root cure). */
+/* v1.2.3 W2 (2026-10-30): seeding rewritten to two-source fast-fail    */
+/* (explicit model= / session truth; selection-class rejections return  */
+/* a structured rejected+guidance receipt and spawn nothing) — see the  */
+/* pick/seed docstrings below. This block keeps the archaeology that    */
+/* justifies the account no-seed ruling and the -p supply chain.        */
 /*                                                                     */
-/* Archaeology anchors (zcode.cjs 0.17.0, byte offsets):               */
+/* Archaeology anchors (0.17.0 byte offsets kept where still valid —    */
+/* 0.17.1 increments are not public source, offsets may drift):         */
 /*   - throw site @13549646: CliDefaultSelection.prepareInput —        */
 /*     `n = t?.intent?.modelSelection ?? this.get(); if(!n) throw ...` */
-/*     ("Select a model before sending a message").                    */
+/*     ("Select a model before sending a message"). Still the -p death */
+/*     cause whenever no model can be seeded.                           */
 /*   - -p supply chain: y3n runPrompt @15172709 → DAt @14470771        */
-/*     startProcessProviderRegistryRuntime → H1r @1154821 resolves the */
-/*     env pair ZCODE_BUILTIN_PROVIDER_CONFIG_FILE +                   */
-/*     ZCODE_PERSONAL_PROVIDER_CONFIG_FILE (BOTH required, else hard   */
-/*     error) → personal provider config (default provider_config.json */
-/*     next to credentials.json).                                      */
+/*     startProcessProviderRegistryRuntime → H1r @1154821 resolves the  */
+/*     env pair ZCODE_BUILTIN_PROVIDER_CONFIG_FILE +                    */
+/*     ZCODE_PERSONAL_PROVIDER_CONFIG_FILE (BOTH required, else hard    */
+/*     error) → personal provider config (default provider_config.json  */
+/*     next to credentials.json).                                       */
+/*   - ERA mechanism CORRECTED (survey §2.1/§2.3, 2026-10-30): -p has   */
+/*     NO registry child process — NodeProviderRegistryRuntime runs     */
+/*     IN-PROCESS ([TS][BUNDLE]); the earlier "registry spawns a child" */
+/*     attribution was wrong. ERA_NEGOTIATION_FAILED is the MCP         */
+/*     `server/discover` version-negotiation probe (a one-shot sibling  */
+/*     process) failing to connect — a SECONDARY unhandled exception    */
+/*     that fires only AFTER the "Select a model" crash (log timeline   */
+/*     evidence). Version difference flagged: 0.16.2 has NO             */
+/*     server/discover face at all, so the ERA probe window is a        */
+/*     0.17.x-only surface; the .mcp.json protocolVersion:"legacy" line */
+/*     (v1.2.3 M3) removes the probe window entirely.                   */
+/*   - H1 signing chain (survey §3.2; evidence level [BUNDLE], NOT      */
+/*     live-verified): 0.17.1 closed-source additions introduce         */
+/*     ClientRequestSigningV4Manager + X-ZCode-Authorization header +   */
+/*     /api/v1/ultra gateway route, activating for zhipu-account        */
+/*     individual/team-coding-plan access — the most plausible cause of */
+/*     the unusual-activity risk-control rejections.                    */
+/*   - --json envelope change (0.17.1): single-line → multi-line pretty */
+/*     JSON (650B measured fixture; fields sessionId/traceId/turnId/    */
+/*     response/usage/eventCount/projection). Runner-side compat = the  */
+/*     v1.2.3 W1 dual-channel parseEnvelope (channel B accumulates).    */
 /*   - schema @619452/527943: strict zod — `config.defaultModelSelection*/
 /*     = {providerId, modelId, options:{reasoningLevel}}`; ANY unknown */
 /*     key recovers the WHOLE config to empty (silent!), so the seed   */
@@ -7044,13 +7072,16 @@ function dispatchCaptureOutcome(opts) {
 /*   - resolution xet @596667: configured-default (selectable check    */
 /*     Xme @594786 REQUIRES options.reasoningLevel) → registry-fallback*/
 /*     (first selectable model) → none = the prepareInput throw.       */
+/*   - account no-seed ruling (2026-10-30, user): account (zhipu-       */
+/*     account) providers have no desktop entitlement in standalone and */
+/*     NEVER resolve — seeding must reject them explicitly with         */
+/*     actionable guidance instead of guessing; self-contained api-key  */
+/*     providers work (three-model empirical pass, 2026-10-27).         */
 /* Empirics (2026-10-26, this install): a bare -p probe fails in EVERY */
-/* workspace (the R2 "probe workspace works" premise expired); account */
-/* (zhipu-account) providers never resolve standalone — only self-     */
-/* contained api-key providers do. Seeding an env-redirected COPY      */
-/* (original file never touched) with an enabled api-key provider +    */
-/* enabled model + defaultModelSelection was verified end-to-end: the  */
-/* probe returned a full --json envelope (response "ok").              */
+/* workspace (the R2 "probe workspace works" premise expired). Seeding  */
+/* an env-redirected COPY (original file never touched) with an enabled */
+/* api-key provider + enabled model + defaultModelSelection was verified*/
+/* end-to-end: the probe returned a full --json envelope (response "ok").*/
 /* ------------------------------------------------------------------ */
 
 /** Env pair for the CLI's provider-config face (empty string = absent). */
@@ -7061,17 +7092,25 @@ function dispatchProviderConfigEnv() {
 }
 
 /** Pick the seed target model. `modelArg` = "providerId/modelId[@level]".
- *  v1.2 M3-1 Q1 播种三段式：① 显式 model 参数 → ② 会话真值 defaultModelSelection
- *  （provider enabled + api-key 才采信；O9=a：level 原值直通不经 levelOf 重解析，
- *  fromDms 标记驱动 dispatchSeedModelConfig 跳过 dms 覆写）→ ③ 回落：first enabled
- *  api-key provider rule with a usable model — the only provider kind that
- *  resolves in standalone -p (account/zhipu-account needs the desktop
- *  entitlement bridge, per FA empirics). */
+ *  v1.2.3 W2 播种两源快速失败（v1.2 M3-1 三段式的段③「首个 enabled api-key」猜测
+ *  已删除——禁 api-key 自动回落，l-20261027-ad8a34 实证其落拥塞模型致整批全灭）：
+ *  ① 显式 model 参数：api-key 型采信（levelExplicit 标记显式 @level）；account 族
+ *  按 access.type 识别（非 account: 前缀）→ 显式拒绝 rejected.kind=account_not_seedable
+ *  （reason 双写保持 model_arg_unusable 字面）；provider 不存在/其他未知 access
+ *  类型 → unusable（reason=model_arg_unusable 字面保留、无 rejected 字段——非选择
+ *  类，boot-then-die 现行为不变）。
+ *  ② 会话真值 defaultModelSelection：provider enabled + api-key 才采信（O9=a：level
+ *  原值直通不经 levelOf 重解析，fromDms 标记驱动 dispatchSeedModelConfig 跳过 dms
+ *  覆写）；disabled/account/形态非法 → 快速失败 rejected.kind=dms_provider_disabled /
+ *  dms_provider_account / dms_shape_invalid（reason 与 kind 同名直通）。
+ *  两源皆缺 → selection_missing 快速失败（no_apikey_model 字面随段③删除退役）。
+ *  返回形态：成功 {providerId, modelId, reasoningLevel, fromDms?, levelExplicit?}；
+ *  选择类拒绝 {reason, reject:{kind, provider_id?, detail}}；显式负例 {unusable:true}。 */
 function dispatchPickSeedModel(doc, modelArg) {
+  const isAccountAccess = (t) => typeof t === "string" && t !== "api-key" && /account/i.test(t);
   const rules = doc && doc.config && doc.config.providerConfigRules && doc.config.providerConfigRules.providerRules;
-  if (!Array.isArray(rules)) return null;
   const modelRules =
-    (doc.config.modelConfigRules && doc.config.modelConfigRules.providerModelRules) || [];
+    (doc && doc.config && doc.config.modelConfigRules && doc.config.modelConfigRules.providerModelRules) || [];
   const levelOf = (providerId, modelId, explicit) => {
     if (explicit) return explicit;
     const entry = modelRules.find((r) => r && r.providerId === providerId && r.modelId === modelId);
@@ -7089,26 +7128,91 @@ function dispatchPickSeedModel(doc, modelArg) {
   };
   if (modelArg) {
     const m = /^(.+)\/([^/@]+)(?:@(.+))?$/.exec(String(modelArg).trim());
-    if (!m) return null;
-    const rule = rules.find((r) => r && r.providerId === m[1]);
-    if (!rule || !rule.config || !rule.config.access || rule.config.access.type !== "api-key") return null;
-    return { providerId: m[1], modelId: m[2], reasoningLevel: levelOf(m[1], m[2], m[3] || null) };
+    if (!m) return { unusable: true };
+    const rule = Array.isArray(rules) ? rules.find((r) => r && r.providerId === m[1]) : null;
+    if (!rule || !rule.config || !rule.config.access) return { unusable: true };
+    if (rule.config.access.type === "api-key") {
+      return {
+        providerId: m[1],
+        modelId: m[2],
+        reasoningLevel: levelOf(m[1], m[2], m[3] || null),
+        levelExplicit: Boolean(m[3]),
+      };
+    }
+    if (isAccountAccess(rule.config.access.type)) {
+      // v1.2.3 W2: explicit user intent at an unseedable provider — refuse
+      // loudly instead of the old silent null (硬约束② account 禁种 -p).
+      return {
+        reason: "model_arg_unusable", // dual-write: FA-3 predicate stays verbatim
+        reject: {
+          kind: "account_not_seedable",
+          provider_id: m[1],
+          detail:
+            "provider " + m[1] + " 的 access.type=" + String(rule.config.access.type) +
+            "（account 族）在 standalone -p 下无桌面 entitlement、永不可用（禁种裁定 2026-10-30）",
+        },
+      };
+    }
+    return { unusable: true };
   }
-  // Q1 段②（v1.2 M3-1）：会话真值 dms 优先于「首个 api-key」猜测。dms 是宿主自己
-  // 维护的 defaultModelSelection——provider 层校验（enabled + api-key 类型）后采信；
-  // model 层从宽（不查 modelRules enabled——宿主真值不重裁）。level 取 dms 原值
-  // （O9=a）：不经 levelOf 重解析，缺失时 null（种子覆写跳过后该值不进种子文件，
-  // 只做回执元数据）。dms 指向 disabled/非 api-key provider → 穿透到段③回落。
+  // v1.2.3 W2 段②（v1.2 M3-1 语义延续，回落腿已删）：会话真值 dms 是 model= 缺席时
+  // 的唯一采信来源。provider 层校验（enabled + api-key 类型）不满足 → 快速失败，
+  // reason 区分 dms_provider_disabled / dms_provider_account / dms_shape_invalid，
+  // 不再穿透任何猜测段。model 层从宽（不查 modelRules enabled——宿主真值不重裁）。
+  // level 取 dms 原值（O9=a）：不经 levelOf 重解析，缺失时 null（种子覆写跳过后该
+  // 值不进种子文件，只做回执元数据）。
+  if (!Array.isArray(rules)) {
+    return {
+      reason: "selection_missing",
+      reject: { kind: "selection_missing", detail: "providerRules 缺失或非数组，无任何可采信选型来源" },
+    };
+  }
   const sel = doc.config.defaultModelSelection;
-  if (sel && typeof sel === "object" && sel.providerId && sel.modelId) {
+  if (sel != null) {
+    if (typeof sel !== "object" || !sel.providerId || !sel.modelId) {
+      return {
+        reason: "dms_shape_invalid",
+        reject: {
+          kind: "dms_shape_invalid",
+          provider_id: typeof sel === "object" && sel.providerId != null ? String(sel.providerId) : undefined,
+          detail: "会话 defaultModelSelection 形态非法（缺 providerId/modelId 或非对象）",
+        },
+      };
+    }
     const selRule = rules.find((r) => r && r.providerId === sel.providerId);
-    if (
-      selRule &&
-      selRule.enabled !== false &&
-      selRule.config &&
-      selRule.config.access &&
-      selRule.config.access.type === "api-key"
-    ) {
+    if (!selRule || !selRule.config || !selRule.config.access) {
+      return {
+        reason: "dms_shape_invalid",
+        reject: {
+          kind: "dms_shape_invalid",
+          provider_id: String(sel.providerId),
+          detail: "defaultModelSelection 指向的 provider " + String(sel.providerId) + " 在 providerRules 中缺失或缺 access 形态",
+        },
+      };
+    }
+    if (selRule.enabled === false) {
+      return {
+        reason: "dms_provider_disabled",
+        reject: {
+          kind: "dms_provider_disabled",
+          provider_id: String(sel.providerId),
+          detail: "defaultModelSelection 指向的 provider " + String(sel.providerId) + " 已禁用（enabled=false）",
+        },
+      };
+    }
+    if (isAccountAccess(selRule.config.access.type)) {
+      return {
+        reason: "dms_provider_account",
+        reject: {
+          kind: "dms_provider_account",
+          provider_id: String(sel.providerId),
+          detail:
+            "defaultModelSelection 指向 account 族 provider " + String(sel.providerId) +
+            "（access.type=" + String(selRule.config.access.type) + "）——standalone -p 禁种",
+        },
+      };
+    }
+    if (selRule.config.access.type === "api-key") {
       return {
         providerId: String(sel.providerId),
         modelId: String(sel.modelId),
@@ -7117,7 +7221,35 @@ function dispatchPickSeedModel(doc, modelArg) {
         fromDms: true,
       };
     }
+    return {
+      reason: "dms_shape_invalid",
+      reject: {
+        kind: "dms_shape_invalid",
+        provider_id: String(sel.providerId),
+        detail: "defaultModelSelection 指向的 provider access.type=" + String(selRule.config.access.type) + " 非 api-key 且非 account 族",
+      },
+    };
   }
+  return {
+    reason: "selection_missing",
+    reject: {
+      kind: "selection_missing",
+      detail: "无显式 model= 且会话 defaultModelSelection 缺席——不再回落「首个 enabled api-key」（禁自动回落）",
+    },
+  };
+}
+
+/** OPEN-1=B (v1.2.3 W2): enumerate enabled api-key providers with their first
+ *  usable model, capped at `cap` entries — the receipt listing that makes the
+ *  selection-class rejection actionable (informational only; seeding itself
+ *  never falls back to these). Same provider/model expression the deleted
+ *  stage-③ guess used, repurposed as listing source. */
+function dispatchListApikeyProviders(doc, cap = 3) {
+  const rules = doc && doc.config && doc.config.providerConfigRules && doc.config.providerConfigRules.providerRules;
+  if (!Array.isArray(rules)) return [];
+  const modelRules =
+    (doc.config.modelConfigRules && doc.config.modelConfigRules.providerModelRules) || [];
+  const out = [];
   for (const rule of rules) {
     if (!rule || rule.enabled === false) continue;
     if (!rule.config || !rule.config.access || rule.config.access.type !== "api-key") continue;
@@ -7131,10 +7263,10 @@ function dispatchPickSeedModel(doc, modelArg) {
       (Array.isArray(rule.config.personalModelIds) && rule.config.personalModelIds[0]) ||
       null;
     const modelId = (enabledModel && enabledModel.modelId) || listed || null;
-    if (!modelId) continue;
-    return { providerId, modelId: String(modelId), reasoningLevel: levelOf(providerId, String(modelId), null) };
+    out.push(modelId ? providerId + "/" + String(modelId) : providerId);
+    if (out.length >= cap) break;
   }
-  return null;
+  return out;
 }
 
 /** Build the seed copy under <root>/context/dispatch-model-seed/. The
@@ -7157,8 +7289,53 @@ function dispatchSeedModelConfig(missionId, modelArg) {
     return { seeded: false, reason: "personal_config_shape" };
   }
   const pick = dispatchPickSeedModel(doc, modelArg);
-  if (!pick) {
-    return { seeded: false, reason: modelArg ? "model_arg_unusable" : "no_apikey_model" };
+  if (pick && pick.reject) {
+    // v1.2.3 W2: selection-class rejection (§12 form, dispatch EXTRA① confirmed)
+    // — toolDispatchInner forks BEFORE board upsert / prompt sidecar / spawn:
+    // no -p process, no sidecars, mission stays drafted for re-dispatch. The
+    // receipt rides model_seed{seeded:false, reason, rejected, guidance,
+    // available_apikey_providers}. reason dual-write per draft §P3 mapping
+    // (account leg keeps model_arg_unusable verbatim — FA-3 hard anchor);
+    // env-chain/shape/write failures below never carry rejected/guidance
+    // (non-selection class, two guidance lines do not apply).
+    return {
+      seeded: false,
+      reason: pick.reason || pick.reject.kind,
+      rejected: pick.reject,
+      guidance: [
+        '显式传 model="<providerId>/<modelId>[@level]"（api-key 型 provider）',
+        "请用户在宿主启用目标 api-key provider，使会话 defaultModelSelection 可采信",
+      ],
+      available_apikey_providers: dispatchListApikeyProviders(doc, 3),
+    };
+  }
+  if (!pick || pick.unusable) {
+    // model_arg_unusable kept verbatim (explicit-negative semantics, FA-3
+    // sibling leg DS-08: no rejected field, boot-then-die unchanged). The old
+    // no_apikey_model literal is retired with stage-③'s deletion — its scene
+    // (no model=, no dms, fallthrough) now returns selection_missing above.
+    return { seeded: false, reason: "model_arg_unusable" };
+  }
+  // v1.2.3 W2: level_warning — advisory only (提示非门禁): an explicit @level
+  // outside the model's own optionSpecs values is the user's call (裁定③
+  // 显式意志采信；实测 not selectable 是其后果), surfaced so the coordinator can
+  // self-correct. Attached only when optionSpecs are queryable and the explicit
+  // level misses the values domain; dms-sourced levels never warn (宿主真值).
+  let levelWarning = null;
+  if (pick.levelExplicit && pick.reasoningLevel != null) {
+    const entry = ((doc.config.modelConfigRules && doc.config.modelConfigRules.providerModelRules) || []).find(
+      (r) => r && r.providerId === pick.providerId && r.modelId === pick.modelId,
+    );
+    const values =
+      entry && entry.config && entry.config.optionSpecs && entry.config.optionSpecs.reasoningLevel &&
+      Array.isArray(entry.config.optionSpecs.reasoningLevel.values)
+        ? entry.config.optionSpecs.reasoningLevel.values
+        : null;
+    if (values && !values.includes(pick.reasoningLevel)) {
+      levelWarning =
+        "显式 @" + pick.reasoningLevel + " 不在 " + pick.providerId + "/" + pick.modelId +
+        " 的 optionSpecs.reasoningLevel 值域 [" + values.join("/") + "] 内——未拦截（显式意志采信），实测 not selectable 时请改传有效档位";
+    }
   }
   try {
     const seedDoc = JSON.parse(JSON.stringify(doc));
@@ -7220,6 +7397,7 @@ function dispatchSeedModelConfig(missionId, modelArg) {
       model_id: pick.modelId,
       reasoning_level: pick.reasoningLevel,
       config_path: seedPath,
+      ...(levelWarning ? { level_warning: levelWarning } : {}),
     };
   } catch (err) {
     return { seeded: false, reason: "seed_write_failed:" + String((err && err.message) || err).slice(0, 120) };
@@ -7400,6 +7578,26 @@ function toolDispatchInner(args) {
     };
   }
 
+  // v1.2.3 W2 (§12 form, dispatch EXTRA① confirmed): the selection-class seed
+  // pre-check runs BEFORE the prompt sidecar / board upsert / spawn. A
+  // rejection = the mission was never dispatched: ok:true + model_seed
+  // {seeded:false, reason, rejected, guidance, available_apikey_providers},
+  // zero sidecars (the busy gate stays clear for re-dispatch), no -p process
+  // (no ERA surface), board keeps status drafted. Non-selection failures
+  // (env chain / config shape / seed write / explicit-model unusable) keep the
+  // v1.1.1-FA behavior below: upsert + spawn proceed, runner boots anyway.
+  const modelSeed = dispatchSeedModelConfig(missionId, args.model);
+  if (modelSeed.rejected) {
+    return {
+      ok: true,
+      mission_id: missionId,
+      worker: built.worker,
+      channel: built.channel,
+      model_seed: modelSeed,
+      __seed_rejected: true, // wrapper consumes: no capture window for a dispatch that never spawned
+    };
+  }
+
   const logDir = path.join(root, "context", "dispatch-logs");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const promptPath = path.join(logDir, `${missionId}-${stamp}.prompt`);
@@ -7443,11 +7641,12 @@ function toolDispatchInner(args) {
   // 家族；任一 fresh 槽位在岗即让位，幂等。落本 headless 派发面，W5 组装出口后续接同探活）。
   ensureSentinelFamily();
 
-  // v1.1.1-FA: seed the headless model supply BEFORE the spawn (in-lock, small
-  // file IO). Seed failure is NOT fatal — the runner boots anyway and the
-  // combined capture (task 2) turns a fast death into ok:false instead of a
-  // silent ok:true+pending (R2 静默失败).
-  const modelSeed = dispatchSeedModelConfig(missionId, args.model);
+  // v1.1.1-FA: the model seed was computed BEFORE the prompt/upsert above
+  // (in-lock, small file IO; the §12 selection-class fork consumed rejections
+  // there). Seed failure is NOT fatal for the non-selection legs (env chain /
+  // config shape / seed write / explicit-model unusable) — the runner boots
+  // anyway and the combined capture (task 2) turns a fast death into ok:false
+  // instead of a silent ok:true+pending (R2 静默失败).
   const resultsBefore = new Set(
     (() => {
       try {
@@ -7521,6 +7720,12 @@ function toolDispatch(args) {
     delete prepared.__nested;
     return { ...prepared, lock_hold_ms: lockHoldMs };
   }
+  // v1.2.3 W2 (§12)：选择类拒绝=从未派发——无进程无侧车可捕获，跳过 ≤8s 组合捕获，
+  // 锁内即终态回执（ok:true + model_seed{seeded:false, reason, rejected, guidance}）。
+  if (prepared.__seed_rejected) {
+    delete prepared.__seed_rejected;
+    return { ...prepared, lock_hold_ms: lockHoldMs };
+  }
   const rolloutBefore = prepared.__rollout_before;
   const resultsBefore = prepared.__results_before;
   const resultDirAbs = prepared.__result_dir_abs;
@@ -7543,10 +7748,17 @@ function toolDispatch(args) {
     // Q2 O8=a（v1.2 M3-1）hint 按 index 有无分叉：fail()/killed-index 双入口补写后
     // index 通常已落（旧文案「busy 闸不拦重派」为真）；残余无 index 面（强杀先于全部
     // handler / 历史存量）→ 如实说明 + 解锁指引，不再给出与 busy 闸互斥的指引迷路面。
+    // v1.2.3 W2 (PQA3) modelError 分腿：rejected 在场（选择类拒绝）→ 引用
+    // rejected.kind+guidance（防御腿——拒绝回执从不 spawn，现势不可达，留此防文案指涉
+    // 缺席字段形态）；rejected 缺席（env 链/写盘/provider 不存在的 model_arg_unusable）
+    // → 保留 v1.1.1 文案骨架，绝不引用 rejected/guidance。
     const hint = summary.modelError
-      ? "headless 子代理未启动：CLI 在发消息前要求选模型（该机器 -p 无模型供给）。" +
-        "本版 dispatch 已自动播种模型选型副本（见 model_seed 字段）；seeded:false 时请先在桌面/交互模式" +
-        "打开该项目 /model 选型并保存为默认，或升级宿主 CLI（上游 -p 缺 --model 旗标）。修复后直接重派。"
+      ? modelSeed.rejected
+        ? "headless 子代理未启动：模型选型被播种预检拒绝（" + modelSeed.rejected.kind + "）。" +
+          "guidance：" + (modelSeed.guidance || []).join("；") + " 修复后直接重派。"
+        : "headless 子代理未启动：CLI 在发消息前要求选模型（该机器 -p 无模型供给）。" +
+          "本版 dispatch 已自动播种模型选型副本（见 model_seed 字段）；seeded:false 时请先在桌面/交互模式" +
+          "打开该项目 /model 选型并保存为默认，或升级宿主 CLI（上游 -p 缺 --model 旗标）。修复后直接重派。"
       : dispatchHasResultIndex(resultDirAbs, prepared.mission_id)
         ? "headless 子代理未启动（CLI 提前退出）。查 runner 日志（log_path）与 error 侧车（error_path）定位；" +
           "修复后直接重派（结果 index 已落，busy 闸不拦重派）。"
@@ -10182,7 +10394,7 @@ const TOOLS = [
       "- First message order: tail trace (≤10 blocks, ts:/seq: stripped, oldest→newest) → digest section (when present) → persona body → pointer sentence + CONTRACT three lines. The discipline-injection section (11 rules incl. rule 11 tail-block reporting) always rides at offset 0.\n" +
       "- mode=nested (v1.2 M5-1, primary form): no process is spawned — returns {ok, mode:\"nested\", mission_id, token, prompt, pack_path, prompt_path}; feed `prompt` to a host Agent as its first message. Bookkeeping: dispatch.mode=nested + spawned_by_session; agent_id stays null (the coordinator is in-session and receives the result directly, so the sentinel does not watch nested missions by default). Embedded checks (dispatch discipline enforced by the tool face, §8.7): pack CONTRACT token must equal mission.dispatch.token (p2pTokenGate semantics; strict-tokens closes the no-token face) + the yolo scope_paths gate (both modes).\n" +
       "- mode=headless (default, fire-and-forget): detached-spawns hooks/dispatch-runner (`zcode -p <prompt> --json --mode yolo`); yolo gate: worker-class missions need a non-empty scope_paths (scout/reviewer/gleaner exempt); busy gate: a headless mission without a result index rejects a second run (stale-sidecar exemption, ORCH_DISPATCH_BUSY_STALE_MIN). Busy gate forks by mode: a nested-dispatched mission still awaiting its worker result rejects a second assembly (board semantics; the result-dir index is never consumed for nested) — recovery = board upsert status:\"drafted\" then re-dispatch.\n" +
-      "- Model supply (headless only, v1.1.1-FA): before the spawn the server writes a mission-stamped provider-config SEED COPY (env-redirected; the real config is never touched) so headless -p always has a model selection; `model` (\"providerId/modelId[@reasoningLevel]\") overrides the target, default = the session's defaultModelSelection when its provider is an enabled api-key one (v1.2 M3-1 three-stage pick), else the user's first enabled api-key provider/model. Response carries model_seed {seeded, provider_id?, model_id?, reasoning_level?, config_path?} or {seeded:false, reason}. Nested inherits the session model — no seed, no model/timeout_min consumption.\n" +
+      "- Model supply (headless only, v1.1.1-FA; v1.2.3 W2 two-source fast-fail): before the spawn the server writes a mission-stamped provider-config SEED COPY (env-redirected; the real config is never touched) so headless -p always has a model selection; `model` (\"providerId/modelId[@reasoningLevel]\") overrides the target, default = the session's defaultModelSelection when its provider is an enabled api-key one. NO fallback provider is ever guessed (v1.2.3 W2 removed the first-enabled api-key stage): with neither source resolvable the dispatch returns ok:true + model_seed {seeded:false, reason, rejected{kind, provider_id?, detail}, guidance[2], available_apikey_providers(≤3, enabled api-key providers)} and spawns NOTHING — the mission stays drafted for re-dispatch (account-type providers are rejected outright: account_not_seedable). Response carries model_seed {seeded, provider_id?, model_id?, reasoning_level?, config_path?, level_warning?} on success. Nested inherits the session model — no seed, no model/timeout_min consumption.\n" +
       "- Returns fast with {ok, mission_id, worker, log_path, prompt_path, result_dir, model_seed} (headless) or {ok, mode:\"nested\", mission_id, token, prompt, pack_path, prompt_path} (nested); the ≤8s combined capture (headless) then resolves session_id (booted), ok:false + error + hint (runner recorded a fast death — R2 静默失败 eliminated), or session_pending:true (true slow start). Results land in <root>/context/dispatch-results/; completion still arrives through the worker's report.",
     inputSchema: {
       type: "object",
@@ -10206,7 +10418,7 @@ const TOOLS = [
         model: {
           type: "string",
           description:
-            'Optional headless model supply override, "providerId/modelId[@reasoningLevel]" (e.g. "account:bigmodel-individual-coding-plan/GLM-5.3-Flash@low"). Only api-key providers resolve in standalone -p; omit to seed the session default (defaultModelSelection when usable, v1.2 M3-1) else the user\'s first enabled api-key provider/model',
+            'Optional headless model supply override, "providerId/modelId[@reasoningLevel]" (e.g. "bigmodel-api/GLM-5.3-Flash@low" — pass an api-key-type provider; account-type providers like zhipu-account are refused at the seed pre-check with rejected.kind=account_not_seedable + guidance, never seeded). Only api-key providers resolve in standalone -p; omit to seed the session default (defaultModelSelection when usable, v1.2 M3-1); with neither source resolvable the dispatch fast-fails ok:true + model_seed.rejected/guidance and spawns nothing (v1.2.3 W2, no provider guessing)',
         },
         timeout_min: {
           type: "number",

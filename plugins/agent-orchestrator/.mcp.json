@@ -2,6 +2,7 @@
   "mcpServers": {
     "orch": {
       "type": "stdio",
+      "protocolVersion": "legacy",
       "command": "node",
       "args": [
         "${ZCODE_PLUGIN_ROOT}/mcp/server.mjs",

@@ -161,10 +161,49 @@ try {
 
   // ---- 阶段 2：现行 server 同一固定路径夹具重跑（确定性 SHA → 同沙箱 base_commit）
   const repo = freshFixture();
+  // v1.2.3 W2（主控裁决授权，仅 env 适配零断言改动）：显式 fake provider 对隔离环境泄漏——
+  // harness startServer env 合并 process.env，宿主真配置（有 api-key provider、无可用 dms）
+  // 在段③「首 api-key 回落」删除后使无 model= 的 e2e dispatch 落 selection_missing 拒绝
+  // 不 spawn（DS-05 同语义，设计内）；本套件本意测派发机制非种子失败，补有效 dms 腿
+  // （dispatch 无 model= → dms 采信 seeded:true）即恢复 spawn 照旧，跨环境确定性提升。
+  const seedFixDir = path.join(BASE.root, "w2-seed-fixture");
+  fs.mkdirSync(seedFixDir, { recursive: true });
+  const seedFakePersonal = path.join(seedFixDir, "provider_config.json");
+  fs.writeFileSync(
+    seedFakePersonal,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        config: {
+          providerConfigRules: {
+            templateRules: [],
+            providerRules: [
+              { providerId: "p-c2", config: { access: { type: "api-key", apiKey: "sk-c2" }, modelOrder: ["M-C2"] } },
+            ],
+          },
+          modelConfigRules: {
+            providerModelRules: [
+              { modelId: "M-C2", config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["fast", "slow"] } } }, providerId: "p-c2" },
+            ],
+          },
+          defaultModelSelection: { providerId: "p-c2", modelId: "M-C2", options: { reasoningLevel: "fast" } },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const seedFakeBuiltin = path.join(seedFixDir, "zcode-builtin.json");
+  fs.writeFileSync(seedFakeBuiltin, JSON.stringify({ schemaVersion: 1, revision: 1, config: { providerConfigRules: { templateRules: [], providerRules: [] }, modelConfigRules: {} } }, null, 2));
   cur = startServer({
     root: TROOT,
     cwd: PROJ,
-    env: { ZCODE_CLI_PATH: STUB_CLI, ORCH_ROLLOUT_DIR: ROLLOUT_DIR },
+    env: {
+      ZCODE_CLI_PATH: STUB_CLI,
+      ORCH_ROLLOUT_DIR: ROLLOUT_DIR,
+      ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: seedFakePersonal,
+      ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: seedFakeBuiltin,
+    },
   });
   const tl = await cur.tools();
   ck.ok("tools/list = 12（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch）", tl.tools?.length === 12, tl.tools?.length);

@@ -31,6 +31,7 @@
 | `crv6-resilience` | crv6-resilience.mjs | L1 | 韧性族（哨兵/拼接/恢复/心跳/看门狗/GC/注入）+ v1.2 M3-1 dispatch 播种/busy 闸/死信摘要 | A-v060-SG..INJ / A-v0120-DSP |
 | `crv6-statemachine` | crv6-statemachine.mjs | L1 | board 状态机语义（迁移/合并/p2p）+ FA 模型供给播种 | A-v060-SM / P2P / FA |
 | `crv8-memory` | crv8-memory.mjs | L1 | 记忆子系统（分发端补门/两级库捎带/ORCHTEMP 锁）+ v1.2 M8-1 STALE 分级渲染 | INJ / SYNC / GLEAN / A-v0120-STL |
+| `dispatch-supply` | dispatch-supply.mjs | L1 | 派发供给面（v1.2.3 W1/M1：P2 信封双通道 parseEnvelope PE×6——单行通道A回归/650B 多行通道B/噪声混布/截断优雅 miss/生产长度定型＋miss→error 侧车静态腿） | A-v0123-PE（权威=assertions/v1.2.3.md §1） |
 | `glean-launch` | glean-launch.mjs | L1 | 归敛自动拉起（bg-sentinel 黑盒：锁前置启动器/首条消息零包读/冷却锚退出） | 归敛拉起三锁面 |
 | `l0-skeleton` | l0-skeleton.mjs | L0 | L0 骨架静态锁（node --check 全脚本 / 工具面 / hooks.json 事件集 / 版本桩） | A-v041-R01 / M-07 / SB09 / B07 |
 | `lint-manifest` | lint-manifest.mjs | L0 | 发版 lint：manifest 约定路径/引用存在/版本三方一致 + 文档卡同步锁 + 套件结构锁 | LM-01..05 |

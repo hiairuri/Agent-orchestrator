@@ -1684,7 +1684,48 @@ try {
       );
       cleanAll();
       writeAnchor(SID);
-      const s91 = startServer({ root: ROOT, env: { ZCODE_CLI_PATH: stubCli91, ORCH_ROLLOUT_DIR: rollout91 } });
+      // v1.2.3 W2（主控裁决授权，仅 env 适配零断言改动）：显式 fake provider 对隔离环境泄漏
+      // （harness env 合并 process.env，宿主真配置无可用 dms）——段③「首 api-key 回落」删除后
+      // 无 model= 的 e2e dispatch 落 selection_missing 拒绝不 spawn（DS-05 同语义，设计内）；
+      // 本套件 REV-⑥⑦ 本意测探活补员/尾块计数非种子失败，补有效 dms 腿恢复 spawn 照旧。
+      const seedFixDir91 = path.join(BASE.root, "m91-seed-fixture");
+      fs.mkdirSync(seedFixDir91, { recursive: true });
+      const seedFakePersonal91 = path.join(seedFixDir91, "provider_config.json");
+      fs.writeFileSync(
+        seedFakePersonal91,
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            config: {
+              providerConfigRules: {
+                templateRules: [],
+                providerRules: [
+                  { providerId: "p-m91", config: { access: { type: "api-key", apiKey: "sk-m91" }, modelOrder: ["M-M91"] } },
+                ],
+              },
+              modelConfigRules: {
+                providerModelRules: [
+                  { modelId: "M-M91", config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["fast", "slow"] } } }, providerId: "p-m91" },
+                ],
+              },
+              defaultModelSelection: { providerId: "p-m91", modelId: "M-M91", options: { reasoningLevel: "fast" } },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      const seedFakeBuiltin91 = path.join(seedFixDir91, "zcode-builtin.json");
+      fs.writeFileSync(seedFakeBuiltin91, JSON.stringify({ schemaVersion: 1, revision: 1, config: { providerConfigRules: { templateRules: [], providerRules: [] }, modelConfigRules: {} } }, null, 2));
+      const s91 = startServer({
+        root: ROOT,
+        env: {
+          ZCODE_CLI_PATH: stubCli91,
+          ORCH_ROLLOUT_DIR: rollout91,
+          ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: seedFakePersonal91,
+          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: seedFakeBuiltin91,
+        },
+      });
       try {
         // 预置无归因在飞 mission（watchable：running+agent_id）→ 尾块缺席计数=1。
         // 直写 board（外部 upsert 新建 mission 状态门 drafted→running 拒绝，SM 状态机语义）；

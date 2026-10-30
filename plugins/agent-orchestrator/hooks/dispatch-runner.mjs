@@ -37,7 +37,7 @@ import child_process from "node:child_process";
 
 const DEFAULT_CLI = "C:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs";
 const DEFAULT_TIMEOUT_MIN = 240;
-const LOG_TAIL_CHARS = 4000;
+const LOG_TAIL_CHARS = 16384; // v1.2.3 W1: 4000 -> 16384 (OPEN-4=A; 0.17.x multi-line envelopes are KB-scale)
 
 function argOf(argv, flag, def = "") {
   for (let i = 0; i < argv.length; i++) {
@@ -125,7 +125,19 @@ function wakeQueueProduce(opts) {
   return true;
 }
 
-/** Last JSON line that looks like the --json result envelope. */
+/** Last JSON object that looks like the --json result envelope. Two channels:
+ *  - Channel A (0.16.x, unchanged): single-line envelope — backward scan, one
+ *    JSON.parse per `{`-opening line, same predicate.
+ *  - Channel B (0.17.x, v1.2.3 W1/M1): pretty-printed multi-line envelope — only
+ *    when channel A finds nothing: take the LAST `{`-opening line as the single
+ *    candidate start, accumulate lines forward trying JSON.parse after each
+ *    append; success + same predicate => return. Accumulation bound = the whole
+ *    tail window (natural boundary, no new constant).
+ *  Declared residual surfaces (design-internal; the error sidecar is the fallback):
+ *  - a `{`-opening noise line AFTER the envelope latches the single candidate
+ *    start => graceful miss (R2-08 multi-candidate scan deferred, impl-plan §8);
+ *  - envelopes longer than LOG_TAIL_CHARS truncate at the window head => graceful
+ *    miss (PQA4/impl-plan §11: >16KB envelope still misses -> error sidecar). */
 function parseEnvelope(text) {
   const lines = String(text ?? "").split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -134,6 +146,27 @@ function parseEnvelope(text) {
     let obj;
     try {
       obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (obj && typeof obj === "object" && (obj.type === "result" || typeof obj.sessionId === "string")) return obj;
+  }
+  // Channel B: multi-line pretty JSON (0.17.x). Single candidate start = the last
+  // `{`-opening line; accumulate forward, parse after each append (impl-plan §2 M1).
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim().startsWith("{")) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return null;
+  let acc = "";
+  for (let i = start; i < lines.length; i++) {
+    acc += (i > start ? "\n" : "") + lines[i];
+    let obj;
+    try {
+      obj = JSON.parse(acc);
     } catch {
       continue;
     }

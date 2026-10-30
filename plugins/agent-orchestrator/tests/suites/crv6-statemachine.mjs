@@ -813,6 +813,41 @@ try {
   // ================================================================
   {
     const qdir = path.join(T, "context", "wake-queue");
+    // v1.2.3 W1 竞态隔离（主控二次扩授裁决 m-20261030-060549-56b4）：d/e 腿（claim 态受控腿）
+    // 改用独立 server 实例 sWb2+独立根——a 腿 detached wake-kick 绑旧根 T，其 acquireClaim
+    // 超龄回收消费面（WAKE_CLAIM_STALE_MS=120s，v1.1.1 52c081b 引入）会在共享根上与
+    // 「残留字节级原样」断言竞跑（基线 stash 3/3 同红实证；红率 9/10）。sWb2 根零 K 污染
+    // （d/e 腿 claim 全程在场=生产者 EEXIST 静默零 spawn）；生产者 EEXIST 静默面照钉零
+    // 弱化；a/b/c/f/g 腿留原实例（主控裁决）。根=BASE 下 wb2 子目录，收尾由 BASE.cleanup()
+    // 统一清（既有惯例，零新清理面）。
+    const wb2Root = path.join(BASE.root, "wb2-root");
+    fs.mkdirSync(wb2Root, { recursive: true });
+    const sWb2 = startServer({ root: wb2Root });
+    const qdir2 = path.join(wb2Root, "context", "wake-queue");
+    const qevents2 = () =>
+      fs.existsSync(qdir2)
+        ? fs.readdirSync(qdir2).filter((f) => f.endsWith(".json") && f !== "claim.json").sort()
+        : [];
+    const qread2 = (f) => JSON.parse(fs.readFileSync(path.join(qdir2, f), "utf8"));
+    const qclaimText2 = () => {
+      try {
+        return fs.readFileSync(path.join(qdir2, "claim.json"), "utf8");
+      } catch {
+        return null;
+      }
+    };
+    const seedHeadless2 = (id, sessionId) =>
+      sWb2.call("board", {
+        action: "upsert",
+        mission: {
+          id,
+          title: "wb-" + id,
+          status: "dispatched",
+          dispatch: { mode: "headless", agent_id: null, task_id: null, session_id: sessionId },
+        },
+      });
+    const doneReport2 = (id, worker = "gp-wb#1") =>
+      sWb2.call("report", { mission_id: id, worker, kind: "done", summary: "wb 收口" });
     const qevents = () =>
       fs.existsSync(qdir)
         ? fs.readdirSync(qdir).filter((f) => f.endsWith(".json") && f !== "claim.json").sort()
@@ -885,34 +920,39 @@ try {
     );
 
     // ---- WB-SRV-d：毒丸容忍——坏事件文件+坏认领文件在场，生产面不受染（认领 EEXIST=静默
-    //      跳过、claim 字节不动、新事件照落、report 主流程 ok）----
-    fs.mkdirSync(qdir, { recursive: true });
-    fs.writeFileSync(path.join(qdir, "garbage.json"), "{corrupt 毒丸坏件");
-    const poisonClaim = "{corrupt claim 毒丸";
-    fs.writeFileSync(path.join(qdir, "claim.json"), poisonClaim);
-    await seedHeadless("m-wb-poison", "sess_wb_poison");
-    const beforeD = qevents();
-    const rdD = resultText(await doneReport("m-wb-poison", "gp-wb#4"));
-    const freshD = qevents().filter((f) => !beforeD.includes(f));
-    ck.ok(
-      "WB-SRV-d 毒丸容忍（三钉之二）：坏件 garbage.json+坏 claim.json 在场 → 新事件照落恰一、" +
-        "坏 claim 字节级不动（生产者不读既有内容只 wx 写自己文件=天然隔离）、report 主流程 ok 不受阻",
-      rdD.ok === true && freshD.length === 1 && qread(freshD[0]).mission_id === "m-wb-poison" &&
-        qclaimText() === poisonClaim,
-      { fresh: freshD, claimIntact: qclaimText() === poisonClaim, ok: rdD.ok },
-    );
+    //      跳过、claim 字节不动、新事件照落、report 主流程 ok）。
+    //      v1.2.3 W1 竞态隔离（主控扩授裁决）：本腿起搬入 sWb2 隔离面（qdir2），断言主句与
+    //      判据逐字保留（claim 态受控腿脱离旧根 K 消费面）。
+    try {
+      fs.mkdirSync(qdir2, { recursive: true });
+      fs.writeFileSync(path.join(qdir2, "garbage.json"), "{corrupt 毒丸坏件");
+      const poisonClaim = "{corrupt claim 毒丸";
+      fs.writeFileSync(path.join(qdir2, "claim.json"), poisonClaim);
+      await seedHeadless2("m-wb-poison", "sess_wb_poison");
+      const beforeD = qevents2();
+      const rdD = resultText(await doneReport2("m-wb-poison", "gp-wb#4"));
+      const freshD = qevents2().filter((f) => !beforeD.includes(f));
+      ck.ok(
+        "WB-SRV-d 毒丸容忍（三钉之二）：坏件 garbage.json+坏 claim.json 在场 → 新事件照落恰一、" +
+          "坏 claim 字节级不动（生产者不读既有内容只 wx 写自己文件=天然隔离）、report 主流程 ok 不受阻",
+        rdD.ok === true && freshD.length === 1 && qread2(freshD[0]).mission_id === "m-wb-poison" &&
+          qclaimText2() === poisonClaim,
+        { fresh: freshD, claimIntact: qclaimText2() === poisonClaim, ok: rdD.ok },
+      );
 
     // ---- WB-SRV-e：认领残留可识别——合法 claim.json（含 acquired_at）在场=他者持有中 →
-    //      静默不夺不删不 spawn，残留原样保留（认领后 crash 的残留超龄回收=WB 波，本波钉可识别面）----
+    //      静默不夺不删不 spawn，残留原样保留（认领后 crash 的残留超龄回收=WB 波，本波钉可识别面）。
+    //      v1.2.3 W1 竞态隔离（主控扩授裁决）：本腿在 sWb2 隔离面（qdir2）上运行——旧根 K 的
+    //      超龄回收消费面不再与本断言竞跑；断言主句与判据逐字保留零弱化。
     const residueClaim =
       JSON.stringify({ acquired_at: new Date(Date.now() - 3600000).toISOString(), source: "test-residue" }, null, 2) + "\n";
     try {
-      fs.unlinkSync(path.join(qdir, "claim.json"));
+      fs.unlinkSync(path.join(qdir2, "claim.json"));
     } catch { /* 前腿坏 claim 换合法残留 */ }
-    fs.writeFileSync(path.join(qdir, "claim.json"), residueClaim);
-    await seedHeadless("m-wb-residue", "sess_wb_residue");
-    const rdE = resultText(await doneReport("m-wb-residue", "gp-wb#5"));
-    const claimAfter = qclaimText();
+    fs.writeFileSync(path.join(qdir2, "claim.json"), residueClaim);
+    await seedHeadless2("m-wb-residue", "sess_wb_residue");
+    const rdE = resultText(await doneReport2("m-wb-residue", "gp-wb#5"));
+    const claimAfter = qclaimText2();
     let residueFresh = false;
     try {
       residueFresh = Number.isFinite(Date.parse(JSON.parse(claimAfter).acquired_at));
@@ -923,6 +963,9 @@ try {
       rdE.ok === true && claimAfter === residueClaim && residueFresh,
       { claimIntact: claimAfter === residueClaim, parseable: residueFresh },
     );
+    } finally {
+      sWb2.close();
+    }
 
     // ---- WB-SRV-f：并发双写 → 两事件两文件（wx 原子建，禁共享单 jsonl 追加）----
     await seedHeadless("m-wb-c1", "sess_wb_c1");
@@ -1122,7 +1165,14 @@ try {
       });
       try {
         await faUpsert(sX, "m-fa2");
-        const r = resultText(await sX.call("dispatch", { mission_id: "m-fa2", pack_path: faPack, persona_path: faPersona }));
+        // v1.2.3 W2：显式 model 入参补一枚——FA-2 原驱动（无 model= 无 dms）即被删除的
+        // 段③「首 api-key」场景（selection_missing 接管，DS-05 钉其缺席）；断言本体
+        // （播种写盘/复制体翻转/dms 形状/原件不动）逐字保留，选型来源改走段①显式腿，
+        // reasoning_level=values.at(-1) 的 gQi 镜像语义经 levelOf 不变（impl-plan §9
+        // FA-2「保留绿」意图=断言不改；驱动线为段③删除的必要连带，done 偏差声明备案）。
+        const r = resultText(
+          await sX.call("dispatch", { mission_id: "m-fa2", pack_path: faPack, persona_path: faPersona, model: "fa-provider/FA-Model" }),
+        );
         const seedPath = r.model_seed && r.model_seed.config_path;
         let seedDoc = null;
         try {
