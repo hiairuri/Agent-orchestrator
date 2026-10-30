@@ -1,0 +1,114 @@
+{
+  "name": "agent-orchestrator",
+  "version": "1.2.3",
+  "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
+  "description_i18n": {
+    "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
+  },
+  "author": { "name": "agent-orchestrator maintainers" },
+  "keywords": ["orchestration", "subagents", "workflow", "agents", "resume"],
+  "skills": "./skills",
+  "commands": "./commands",
+  "mcpServers": "./.mcp.json",
+  "agents": "./agents",
+  "userConfig": {
+    "storage_dir": {
+      "type": "directory",
+      "title": "存储根目录 / Storage root",
+      "description": "任务板 board.json 与邮箱 spool 的落盘根目录。留空则使用 <项目>/.zcode/orchestrator。该目录可指向项目外位置。/ Storage root for the task board and mailbox. Empty = <project>/.zcode/orchestrator. May point outside the project.",
+      "default": "",
+      "required": false
+    },
+    "background_gate": {
+      "type": "string",
+      "title": "后台闸门策略 / Background gate policy",
+      "description": "前台子代理派发疑似长任务时的处置：remind=放行并提醒（默认）；ask=转人工确认；off=不干预。其他值按 remind 处理。/ How to treat foreground Agent dispatches that look like long tasks: remind (allow + hint, default), ask (ask the user), off (no gate). Unknown values fall back to remind.",
+      "default": "remind",
+      "required": false
+    },
+    "background_gate_exempt_types": {
+      "type": "string",
+      "title": "闸门豁免子代理类型 / Gate-exempt subagent types",
+      "description": "逗号分隔的子代理类型名子串（对 subagent_type 做不区分大小写的包含匹配），命中则不做后台提醒。默认 judge。留空=不豁免。/ Comma-separated substrings of subagent_type exempt from the background gate (case-insensitive contains). Default: judge. Empty = no exemption.",
+      "default": "judge",
+      "required": false
+    },
+    "dispatch_contract": {
+      "type": "string",
+      "title": "派发契约检查 / Dispatch contract check",
+      "description": "派发 [channel]/[token] 契约头校验的处置（独立于 background_gate——后台闸门=off 不影响本检查）：remind=校验失败仅提醒（默认）；ask=仅当 [channel] 值匹配 mission id 生成形状（m-日期-时间-4位十六进制）且校验失败时转人工确认，占位符文本天然不匹配不升级；off=完全静默。其他值按 remind 处理。/ How to treat failed [channel]/[token] dispatch-contract checks (independent of background_gate): remind (warn only, default), ask (escalate to the user ONLY when the [channel] value matches the generated mission-id shape and the check failed; placeholder text never escalates), off (silent). Unknown values fall back to remind.",
+      "default": "remind",
+      "required": false
+    },
+    "wake_sentinel": {
+      "type": "string",
+      "title": "派发哨兵提示开关 / Dispatch sentinel hint",
+      "description": "on=bg-gate 派发提醒在哨兵未在岗且过冷却时附带\"拉起哨兵\"提示（默认）；off=不带该提示（闸门自身提醒不受影响；哨兵仍可随时手动启动）。其他值按 on 处理。/ on (default): the dispatch hint includes the \"launch the wake sentinel\" nudge when no sentinel is on duty; off: omit the nudge (the gate's own reminders are unaffected; the sentinel can always be started manually). Unknown values fall back to on.",
+      "default": "on",
+      "required": false
+    },
+    "wake_timeout_min": {
+      "type": "string",
+      "title": "哨兵超时窗口（分钟）/ Sentinel timeout window",
+      "description": "桥接键（V7-05 起桥接可达）：未显式传 --refire-gap-min 时，经 sentinel.cfg.json 桥接为哨兵两枪最小间隔（分钟）；解析层序 CLI --refire-gap-min > cfg refire_gap_min > 本桥接键 > 哨兵内建默认 5。显式设置才写入 cfg，未设置则键省略。默认 10。/ Bridge key (reachable since V7-05): when --refire-gap-min is not passed explicitly, bridges via sentinel.cfg.json to the sentinel refire gap (minutes); precedence CLI --refire-gap-min > cfg refire_gap_min > this bridge key > sentinel built-in default 5. Written to cfg only when explicitly set. Default 10.",
+      "default": "10",
+      "required": false
+    },
+    "wake_retries": {
+      "type": "string",
+      "title": "哨兵重试次数 / Sentinel retries",
+      "description": "桥接键（V7-05 起桥接可达）：未显式传 --wake-cap 时，经 sentinel.cfg.json 桥接为单条件封顶枪数；解析层序 CLI --wake-cap > cfg wake_cap > 本桥接键 > 哨兵内建默认 3。显式设置才写入 cfg，未设置则键省略。默认 3。/ Bridge key (reachable since V7-05): when --wake-cap is not passed explicitly, bridges via sentinel.cfg.json to the per-condition shot cap; precedence CLI --wake-cap > cfg wake_cap > this bridge key > sentinel built-in default 3. Written to cfg only when explicitly set. Default 3.",
+      "default": "3",
+      "required": false
+    },
+    "wake_poll_sec": {
+      "type": "string",
+      "title": "哨兵轮询间隔（秒）/ Sentinel poll interval",
+      "description": "哨兵检查任务板的间隔秒数。默认 60。经 sentinel.cfg.json 传递给哨兵，可 CLI 覆盖。/ Seconds between sentinel board checks. Default 60. Passed to the sentinel via sentinel.cfg.json; CLI can override.",
+      "default": "60",
+      "required": false
+    },
+    "sentinel_family": {
+      "type": "string",
+      "title": "哨兵家族实例数 / Sentinel family size",
+      "description": "哨兵 v2 家族规模（1-5，默认 3）：同命令连发 N 次后台任务 = N 条独立性命错峰补枪，防完成通知丢失。N=1 无冗余等于旧版单实例（丢一枪即死局）。/ Sentinel v2 family size (1-5, default 3): N independent background instances fire staggered backup shots against lost completion notifications. N=1 has no redundancy (old single-instance behavior).",
+      "default": "3",
+      "required": false
+    },
+    "sentinel_grace_min": {
+      "type": "string",
+      "title": "哨兵首枪宽限（分钟）/ Sentinel first-shot grace",
+      "description": "done 未签收的首枪宽限分钟数（默认 5）。blocked/question 自动取 3（停车等答案最贵）、在飞失联 30、崩溃实锤 10——三类按状态分级派生默认，不受本值影响，均可 CLI/cfg 单独覆盖。/ First-shot grace for unclaimed done results (default 5). blocked/question auto-uses 3, in-flight stall 30, crash 10 — tiered defaults independent of this value, each overridable via CLI/cfg.",
+      "default": "5",
+      "required": false
+    },
+    "context_mirror": {
+      "type": "string",
+      "title": "上下文镜像开关 / Context mirror",
+      "description": "on=UserPromptSubmit/Stop hook 把提示词与回复原文（截断）落盘到 <存储根>/context/，用于跨会话恢复与派发现场摘要（默认）；off=完全停写。注意：提示词与回复原文（截断）会落盘于项目存储根，可随时关闭。其他值按 on 处理。/ on (default): hooks journal truncated prompt/assistant text under the storage root context/ for cross-session resume and dispatch digests; off: stop writing entirely. Prompts and replies (truncated) are stored on disk in the project storage root; turn off anytime. Unknown values fall back to on.",
+      "default": "on",
+      "required": false
+    },
+    "context_mirror_max_chars": {
+      "type": "string",
+      "title": "镜像单条截断长度 / Mirror truncation",
+      "description": "单条记录截断字符数，格式 \"user,assistant\" 或单值两用；默认 \"2000,4000\"。非数字部分回退默认。/ Per-entry truncation as \"user,assistant\" or a single value for both. Default \"2000,4000\". Non-numeric parts fall back to defaults.",
+      "default": "2000,4000",
+      "required": false
+    },
+    "sandbox_default": {
+      "type": "string",
+      "title": "沙箱派发默认策略 / Sandbox default",
+      "description": "context_pack 未显式传 isolation 时的默认值：none=不隔离（默认）；worktree=每次派发默认建 git worktree 沙箱。其他值按 none 处理。运行中仍可按任务显式覆盖。/ Default isolation for context_pack when not given: none (default) or worktree (every dispatch gets a git worktree sandbox). Unknown values fall back to none.",
+      "default": "none",
+      "required": false
+    },
+    "claim_lease_min": {
+      "type": "string",
+      "title": "自领取租约分钟数 / Claim lease minutes",
+      "description": "board claim 自领取的默认租约分钟数（worker 每次 report 自动续租，超时任务回 ready 可再领取）。默认 30，最小 1，非数字回退默认。/ Default lease minutes for board claim self-claiming (renewed on every worker report; expired leases return the mission to ready). Default 30, min 1.",
+      "default": "30",
+      "required": false
+    }
+  }
+}

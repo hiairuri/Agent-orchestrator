@@ -1,0 +1,72 @@
+{
+  "description": "agent-orchestrator lifecycle hooks: cross-session resume notice, stop-time accountability, background-dispatch gate with sentinel hint, and context mirror journaling.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session-start.mjs"],
+            "timeoutMs": 10000,
+            "statusMessage": "检查可恢复的任务板…"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": [
+              "${ZCODE_PLUGIN_ROOT}/hooks/journal.mjs",
+              "--mirror", "${user_config.context_mirror}",
+              "--max-chars", "${user_config.context_mirror_max_chars}"
+            ],
+            "timeoutMs": 10000,
+            "statusMessage": "记录上下文镜像…"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": [
+              "${ZCODE_PLUGIN_ROOT}/hooks/stop-check.mjs",
+              "--mirror", "${user_config.context_mirror}",
+              "--max-chars", "${user_config.context_mirror_max_chars}"
+            ],
+            "timeoutMs": 10000,
+            "statusMessage": "清点未竟任务与邮箱…"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": [
+              "${ZCODE_PLUGIN_ROOT}/hooks/bg-gate.mjs",
+              "--policy", "${user_config.background_gate}",
+              "--exempt", "${user_config.background_gate_exempt_types}",
+              "--sentinel-hint", "${user_config.wake_sentinel}",
+              "--contract", "${user_config.dispatch_contract}"
+            ],
+            "timeoutMs": 10000,
+            "statusMessage": "检查派发是否应转后台…"
+          }
+        ]
+      }
+    ]
+  }
+}
