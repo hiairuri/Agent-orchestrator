@@ -28,7 +28,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { PLUGIN_DIR, DEFAULT_SERVER, Checker } from "../harness/jsonrpc-client.mjs";
+import { PLUGIN_DIR, Checker } from "../harness/jsonrpc-client.mjs";
+import { familySource } from "../harness/source-family.mjs";
 
 const ck = new Checker("contract-sync");
 
@@ -159,7 +160,10 @@ let cardLF = tryOk("CARD-00 状态机卡可读且非空（docs/protocols/card-st
   return s;
 });
 let serverLF = tryOk("CARD-00 server.mjs 可读且非空", () => {
-  const s = LF(fs.readFileSync(DEFAULT_SERVER, "utf8"));
+  // v1.3 切分重基（修复轮 D）：源实现面走 server 族 helper（入口+模块族拼接）——
+  // ALLOWED_TRANSITIONS/STATUSES/语义锚已分迁 server-board/server-core/tool-board，
+  // 「恰一锚计数」在族面上语义不变（拆分若产生重复定义即红=真信号）。
+  const s = LF(familySource(PLUGIN_DIR, path.join("mcp", "server.mjs")));
   if (!s.trim()) throw new Error("server.mjs 空文件");
   return s;
 });

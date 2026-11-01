@@ -132,6 +132,67 @@ try {
     ck.ok("P9-01j no duplicate → key absent (zero-byte-diff default)", noDup(r) && noWarn(r), r.text);
     s.close();
   }
+  // ---------- 场景 D：v1.3 WG G-c（coversPath glob 后缀腿——登记面约定，O16 实证） ----------
+  // 根因权威：白送样本 m-20261030-130452-0f17（scope=["designs/agent-orchestrator-v1.3-planning/**"]，
+  // 实触同目录 impl-plan.md 被误报 warn_scope，spool event 001793337811024 留痕）——两侧同过
+  // F1，分隔符自由面已被吸收，实锤=glob 后缀永不被纯前缀 coversPath 覆盖。修法=glob 腿入
+  // coversPath 单源（负约束：不放宽裸前缀语义，V6-10 designs-evil 保绿）。
+  {
+    const TD = makeTempRoot({ prefix: "orch-crv1-d-", root: argRoot ? path.join(argRoot, "d") : undefined });
+    try {
+      const s = startServer({ root: TD.root });
+      const warnOf = async (id, scope, files) => {
+        await s.call("board", { action: "upsert", mission: { id, title: id, status: "drafted", scope_paths: scope } });
+        const r = await s.call("report", {
+          mission_id: id, worker: "w#gc", kind: "milestone", summary: "s", files_touched: files,
+        });
+        return r.json ? r.json.warn_scope : undefined;
+      };
+      // 臂 1a：清单内分隔符变体零误报——现状已吸收的回归钉，勿当新语义验证腿（R2-1）
+      const w1a = await warnOf("m-gc1a", [" src/ ", "docs\\x"], ["src/a.js", "docs/x/b.md"]);
+      ck.ok("GC-1a 清单内分隔符/空白变体零误报（F1 吸收回归钉）", w1a === undefined, w1a);
+      // 臂 1b：真实修法验证腿（O16 实证形态=glob）——glob 后缀条目覆盖其子树，白送样本形态零误报
+      const w1b = await warnOf(
+        "m-gc1b",
+        ["designs/agent-orchestrator-v1.3-planning/**"],
+        ["designs/agent-orchestrator-v1.3-planning/impl-plan.md"],
+      );
+      ck.ok(
+        "GC-1b glob 后缀条目（白送样本形态）覆盖其子树零误报（warn_scope 键缺席）",
+        w1b === undefined,
+        w1b,
+      );
+      const wStar = await warnOf("m-gc1c", ["**"], ["anything/any.md"]);
+      ck.ok(
+        "GC-1c bare ** = allow-all 同义（SCOPE-04 空条目意图，不再静默零覆盖）",
+        wStar === undefined,
+        wStar,
+      );
+      // 臂 2：清单外仍报（负臂钉放宽边界）
+      const w2 = await warnOf("m-gc2", ["src/"], ["docs/evil.md"]);
+      ck.ok(
+        "GC-2 清单外 docs/evil.md 仍报 warn_scope（审计面零放宽）",
+        Array.isArray(w2) && w2.includes("docs/evil.md"),
+        w2,
+      );
+      // 臂 3：designs-evil 反例保绿——裸前缀与 glob 形态双重不吞兄弟名（负约束 V6-10）
+      const w3a = await warnOf("m-gc3a", ["designs"], ["designs-evil/evil.md", "designs/ok.md"]);
+      ck.ok(
+        "GC-3a 裸前缀 designs 不吞 designs-evil/evil.md（V6-10 反例保绿）",
+        Array.isArray(w3a) && w3a.includes("designs-evil/evil.md") && !w3a.includes("designs/ok.md"),
+        w3a,
+      );
+      const w3b = await warnOf("m-gc3b", ["designs/**"], ["designs-evil/evil2.md", "designs/ok2.md"]);
+      ck.ok(
+        "GC-3b glob 形态 designs/** 同样不吞 designs-evil（glob 腿只加 <dir> 子树，不加宽兄弟名）",
+        Array.isArray(w3b) && w3b.includes("designs-evil/evil2.md") && !w3b.includes("designs/ok2.md"),
+        w3b,
+      );
+      s.close();
+    } finally {
+      TD.cleanup();
+    }
+  }
 } finally {
   TA.cleanup(); TB.cleanup(); TC.cleanup();
 }

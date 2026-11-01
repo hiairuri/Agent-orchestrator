@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { PLUGIN_DIR, DEFAULT_SERVER, PRE, startServer, Checker } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
 import { runCapture } from "../harness/capture.mjs";
+import { familySource } from "../harness/source-family.mjs";
 
 /** function <name>(<any params>) body — column-0 "}" closes it. LF-normalized input. */
 function bodyOfText(sourceLF, fnName) {
@@ -44,8 +45,22 @@ try {
     ck.ok("node --check " + rel, fs.existsSync(p) && spawnSync(process.execPath, ["--check", p]).status === 0);
   }
 
+  // ---- v1.3 W6 F-C6：headless 真跑冒烟脚本防静默删除钉（impl-plan §2 W6 逐字
+  //      「脚本存在+逃生门字符串识别」；脚本落 tests/ 根非 suites/、不入 run-all REGISTRY
+  //      ——外部依赖不入回归门，本钉纯静态零外呼）
+  const smokePath = path.join(PLUGIN_DIR, "tests", "run-headless-smoke.mjs");
+  const smokeExists = fs.existsSync(smokePath);
+  const smokeSrc = smokeExists ? fs.readFileSync(smokePath, "utf8") : "";
+  ck.ok(
+    "W6 headless smoke 脚本存在+逃生门字符串识别（ORCH_SKIP_HEADLESS_SMOKE）",
+    smokeExists && smokeSrc.includes("ORCH_SKIP_HEADLESS_SMOKE"),
+    { exists: smokeExists, escapeHatch: (smokeSrc.match(/ORCH_SKIP_HEADLESS_SMOKE/g) || []).length },
+  );
+
   // ---- 静态红线：SB09/M-07 server.mjs 无 git transfer argv（注释剥离后扫描）
-  const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  // v1.3 切分重基（m-20261101-034720-a7a6）：源码读面=server/bg-sentinel 族（入口+模块族，
+  //   familySource helper）——拆分后单文件读会把零残留 ban 弱化为薄入口假绿，族面保同强度。
+  const src = familySource(PLUGIN_DIR, "mcp/server.mjs");
   const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, "");
   const lines = noBlock.split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"));
   const badArgv = [];
@@ -58,7 +73,7 @@ try {
   ck.ok("SB09/M-07 no git transfer command text", badCmd.length === 0, badCmd.slice(0, 3));
 
   // ---- R01 静态：无 require( ；db 只读（禁写 SQL 关键词）
-  const sentSrc = fs.readFileSync(path.join(PLUGIN_DIR, "hooks", "bg-sentinel.mjs"), "utf8");
+  const sentSrc = familySource(PLUGIN_DIR, "hooks/bg-sentinel.mjs");
   ck.ok("R01 no require( in server/sentinel", !/require\s*\(/.test(src) && !/require\s*\(/.test(sentSrc));
   const writeSql = [src, sentSrc].map((s) => s.match(/INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\S+\s+SET/i)).filter(Boolean);
   ck.ok("R01 db read-only (no write SQL)", writeSql.length === 0, writeSql);

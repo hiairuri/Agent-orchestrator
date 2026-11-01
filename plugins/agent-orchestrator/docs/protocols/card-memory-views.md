@@ -14,20 +14,21 @@
 | 源 | `<memoryRoot>/memory/lessons.jsonl`（事件行 append-only 源）+ 全端/项目两级派生库——**lessons 事件行永不直写**，一切增删经 lessons 工具（归敛 GL 视图层边界） |
 | 写者 | 唯一写者=归敛轮（orch-gleaner，server 物化固定包 glean3 + brief.digest 权威指针）；server 对三视图**只读**（ver-sync 附带面是读后呈现非写） |
 | 权威指针 | 路径一律取 brief 字段（brief.digest.path/sidecar_path）——「权威指针勿手写」（template incident ① root cure） |
-| 归敛闸 | glean_due 信号（gate：idle_hours/new_events 实测；glean.cfg.json 可调，junk 回落）——随 board list 与 orch_memory 附带面透出，主控决定是否拉起归敛（server 不能 spawn） |
+| brief views 块 | **brief 五字段只读视图快照**（v1.3 W3 D 信号腿）：`{orch_md_exists, orch_md_ver, global_agents_md_exists, global_lib_lines, agents_md_marker_exists}`，随 glean-brief.json 每轮 gate-due 重物化（失效语义=物化即最新快照，无独立失效面；全只读零写）；`agents_md_marker_exists` 钉死=**项目根** AGENTS.md orch-mem 标记对存在性（L-8——标记对只在项目根存在，全端 AGENTS.md 整文件归 gleaner 管无标记对）；`global_lib_lines`=全端库 memory/lessons.jsonl 非空行数；动作腿同波双载体同句=GL-20 与 glean-pack 烘焙 RULES「全端 AGENTS.md 或全端库 memory/ 目录缺席=先创建（mkdir -p+有 content 首建才落笔，不落空壳；首建事件报告『视图变更』节单列）」，server 兜底 mkdir 只建 `<memoryRoot>/memory/` 目录不建空壳文件（空壳 mtime 入 digest 指纹=假信号） |
+| 归敛闸 | glean_due 信号（gate：idle_hours/new_events/busy_channel_events 三键实测〔v1.3 常忙腿：时间门不过 ∧ 新增 ≥busy_channel_events 兜底触发，0=关断〕；glean.cfg.json 可调，junk 回落）——随 board list 与 orch_memory 附带面透出，主控决定是否拉起归敛（server 不能 spawn） |
 | M7-1 尾补记落点 | M6 选项 B 考古（lessons.jsonl 更新形态：append-only or 整文件重写）结论由 M7-1 入本卡尾补记（本卡 §6 预留）——该结论决定指纹粒度修正（选项 B）有无实证价值 |
 
 ## 1. 视图一：digest（md + json sidecar）
 
 | 面 | 内容 | 锚点 |
 |---|---|---|
-| 物理形态 | `<memoryRoot>/digest/pack-tail-digest.md`：首行 `generated_at: <ISO8601>` + 正文 ≤12 行/≤1200B（DIGEST_MAX_LINES/BYTES）；sidecar `pack-tail-digest.json`：`{generated_at, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}` | :9988-9989；:9991-9999；GL-32 |
-| 写方 | 归敛轮整文件覆盖写（两件原子覆盖，历史 digest 不另存）；正文=态势面（项目现状一句话+在飞 mission 摘要）+时间面（近期裁决/关键事件 3-5 条）；禁任务相关检索内容 | glean-pack RULES（server 烘焙，:10441）；GL-32/33 |
-| 读方① | context_pack 组包：readProjectDigest→buildDigestSection——**仅当两 legacy 段至少一段会渲染时才替换**（默认包字节不变）；正文按 G4 帽钳制渲染 | :10083-10098 |
-| 读方② | dispatch 组包：dispatchDigestRead——digest 是可选节，读失败永不阻塞 dispatch | :6580-6586 |
-| 读方③ | glean_due 信号消费面（同判定链） | :9984-9985 注释 |
+| 物理形态 | `<memoryRoot>/digest/pack-tail-digest.md`：首行 `generated_at: <ISO8601>` + 正文 ≤12 行/≤1200B（DIGEST_MAX_LINES/BYTES）；sidecar `pack-tail-digest.json`：`{generated_at, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}` | mcp/server-memory.mjs digest 物化面；GL-32 |
+| 写方 | 归敛轮整文件覆盖写（两件原子覆盖，历史 digest 不另存）；正文=态势面（项目现状一句话+在飞 mission 摘要）+时间面（近期裁决/关键事件 3-5 条）；禁任务相关检索内容 | glean-pack RULES（server 烘焙）；GL-32/33 |
+| 读方① | context_pack 组包：readProjectDigest→buildDigestSection——**仅当两 legacy 段至少一段会渲染时才替换**（默认包字节不变）；正文按 G4 帽钳制渲染 | mcp/server-memory.mjs `readProjectDigest`→`buildDigestSection` |
+| 读方② | dispatch 组包：dispatchDigestRead——digest 是可选节，读失败永不阻塞 dispatch | `dispatchDigestRead`（mcp/tool-dispatch.mjs） |
+| 读方③ | glean_due 信号消费面（同判定链） | mcp/server-memory.mjs glean_due 消费注释 |
 
-**五级判定链**（readProjectDigest :10019-10081，fail-safe 契约=DESIGN §3.2/3.3）：判 body 而非 all 行（QA P2-a）——
+**五级判定链**（`readProjectDigest`（mcp/server-memory.mjs），fail-safe 契约=DESIGN §3.2/3.3）：判 body 而非 all 行（QA P2-a）——
 
 1. 文件缺失 → `missing`（读方回退两 legacy 段，不造 STALE 噪音）；
 2. 首行缺 `generated_at` → stale；
@@ -41,12 +42,12 @@
 
 | 面 | 内容 | 锚点 |
 |---|---|---|
-| 物理形态 | `<root>/ORCH.md`（ORCH_MD_FILE）；头 `<!-- orch-memory ver=<N> updated=<ISO8601> -->`（ver 缺失按 0 读） | :748；parseOrchMdHeader :10117-10123 |
-| 同步机制 | **piggyback**：每次**成功** tools/call 结果顶层附可选 `orch_memory.orch_md` 键（与 glean_due 同壳）；error 结果与 tools/list 永不附 | :10100-10108；接线 :10557-10566；orchMemoryAttachment :10511-10523 |
-| 基线 | 进程内存 baseline（session-scoped——stdio server 一进程一会话惯例；进程复用至多晚一拍收敛）；比对=bytes+mtimeMs 双因子（同毫秒写教训） | :10113-10115；:10142-10150 |
-| 决策表 | 未变→零附带（一次 stat 成本）；文件缺席：首见=静默建 absent 基线，曾发过=附 `{reason:"removed"}` 恰一次；stat/read 竞态=保持旧视图下次重评 | :10146-10167 |
-| 附带内容 | `{reason: initial\|changed\|removed, ver, updated_at, bytes, truncated?, content}`；reason=initial（会话首次）或 changed | :10169-10190 |
-| 帽 | 120 行/10KB（ORCH_MD_MAX_LINES/BYTES）先到先裁；超帽 truncated:true+尾行提示「建议拉起归敛」——**server 只限爆半径，收缩权归归敛**（不自动删内容） | :10111-10112；:10177-10188 |
+| 物理形态 | `<root>/ORCH.md`（ORCH_MD_FILE）；头 `<!-- orch-memory ver=<N> updated=<ISO8601> -->`（ver 缺失按 0 读） | ORCH_MD_FILE；`parseOrchMdHeader`（mcp/server-memory.mjs） |
+| 同步机制 | **piggyback 三 surfacing**：每次**成功** tools/call 附可选 `orch_memory.orch_md` 顶层附件键（与 glean_due 同壳）＋ result JSON 顶层 `orch_md` 键（v1.3 W2 content 面第三 surfacing：reason∈{initial,changed,removed} 时注入**同一 att 对象**，stringify 前中央注入一处落点覆盖全部工具；unchanged 不注入零字节差；removed=单行 `{reason:"removed"}`；glean due 不入 content 注入——消费纪律三通道见 SKILL OV-9）；error 结果与 tools/list 永不附 | piggyback 附带面（mcp/server-memory.mjs）；接线+content 注入（mcp/server.mjs tools/call `orchMemoryAttachment` 调用位）；`orchMdAttachment`（mcp/server-memory.mjs） |
+| 基线 | 进程内存 baseline（session-scoped——stdio server 一进程一会话惯例；进程复用至多晚一拍收敛）；比对=bytes+mtimeMs 双因子（同毫秒写教训） | mcp/server-memory.mjs 双因子基线 |
+| 决策表 | 未变→零附带（一次 stat 成本）；文件缺席：首见=静默建 absent 基线，曾发过=附 `{reason:"removed"}` 恰一次；stat/read 竞态=保持旧视图下次重评 | mcp/server-memory.mjs 决策表 |
+| 附带内容 | `{reason: initial\|changed\|removed, ver, updated_at, bytes, truncated?, content}`；reason=initial（会话首次）或 changed | mcp/server-memory.mjs 附带内容 |
+| 帽 | cfg 化 opt-in（v1.3 W4，默认零行为变更）：`<全端目录>/glean.cfg.json` 键 `orch_md_max_lines`〔默认 120〕/`orch_md_max_bytes`〔默认 10240〕逐键 junk 回落，缺省=ORCH_MD_MAX_LINES/BYTES 常量（标识符保留，lint-manifest 钉）；两帽先到先裁；超帽 truncated:true+尾行提示**动态渲染实际帽值**「建议拉起归敛（>N 行/NKB）」——**server 只限爆半径，收缩权归归敛**（不自动删内容）；归敛主写面同源同步：固定包 RULES 帽值句随 cfg 动态渲染＋GL-20 取 brief.cfg（不同步则上调被静默打回） | mcp/server-memory.mjs 帽面（readGleanCfg 帽两键/orchMdAttachment 截断与提示/materializeGleanPack RULES 句）；orchMemoryAttachment 单次 cfg 读贯穿两腿（L-9，禁进程级缓存） |
 
 **失效语义**：视图旧（进程内基线已发、文件后变）→ 下一次成功 tool call 补发（至多晚一拍，自愈）；文件消失→removed 恰一次告知（不重复刷屏）；头 ver 缺失→ver:0 照常附带（内容面无损）；stat 与 read 之间的消失竞态→保持旧视图（保守，下一拍重评）。
 
@@ -86,10 +87,10 @@
 
 代码证据（server.mjs，2026-10-28 实测行号，不作跨版引用）：
 
-1. **唯一写出口=saveLessons（~L2415）**：接收全量列表→逐条 JSON 序列化 join→`atomicWriteFileSync` 整文件原子覆盖写。没有第二条写路径。
+1. **唯一写出口=saveLessons（mcp/server-lessons.mjs）**：接收全量列表→逐条 JSON 序列化 join→`atomicWriteFileSync` 整文件原子覆盖写。没有第二条写路径。
 2. **全文件零 `appendFileSync`**：server.mjs grep 计数=0—— lessons 库不存在任何追加式写入。
-3. **写路径全部走「load→mutate→saveLessons」**：add/stage 的 list.push（~L2978/3036）、report(done, lessons) 候选补员（~L4696）、promote 的 findMergeTarget 原地合并（hits/updated_at/置信度改写）、retire/衰汰与 housekeepLessons 的原地翻状态——都是数组变更后整文件重写。
-4. **锁纪律**：v0.3.1 A4 起全部 lessons 写在根锁内（源注 ~L2848 原话「lessons.jsonl is read-merged-written; the whole tool runs under [root lock]」）。
+3. **写路径全部走「load→mutate→saveLessons」**（写出口=mcp/server-lessons.mjs `saveLessons`；add/stage 的 list.push、report(done, lessons) 候选补员（mcp/tool-report.mjs）、promote 的 `findMergeTarget` 原地合并（hits/updated_at/置信度改写）、retire/衰汰与 `housekeepLessons` 的原地翻状态）——都是数组变更后整文件重写。
+4. **锁纪律**：v0.3.1 A4 起全部 lessons 写在根锁内（源注 mcp/server-lessons.mjs 原话「lessons.jsonl is read-merged-written; the whole tool runs under [root lock]」）。
 5. **口径澄清**：DESIGN 旧增量章的「只增不重排、原子重写」是**列表语义**（条目只追加到队尾、不重排、物理不删除——退役/衰汰只翻 status 行内字段），**不是 IO append 语义**；物理形态每次都是整文件重写。
 
 **结论二：双因子指纹（lessons_lines＋lessons_mtime_ms）在本写形态下有真实区分度，选项 B（指纹粒度修正）无实证价值——销项，不立项。**

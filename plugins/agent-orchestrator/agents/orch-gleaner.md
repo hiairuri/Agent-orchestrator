@@ -2,7 +2,7 @@
 name: orch-gleaner
 description: "记忆归敛代理：按任务包消费 ORCHTEMP/巡检候选/维护视图层（ORCH.md、AGENTS.md 标记区、全端 AGENTS.md）并交归敛报告；只在归敛派发中使用。"
 color: green
-tools: [Read, Write, Edit, Glob, Grep, Bash, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe, mcp__plugin_agent-orchestrator_orch__lessons]
+tools: [Read, Write, Edit, Glob, Grep, Bash, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_lessons]
 disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 
@@ -44,7 +44,7 @@ GL-16 失败：失败退出保持 active 态留现场（下轮回收），并在
 GL-17 抢锁：见上；失败即 report done skipped，不做任何写。
 GL-18 消费 ORCHTEMP：逐条研判任务包 CONTEXT 的待消费 candidate（source="orchestrator"）→ 研判通过则视图层落笔（带 id 溯源）→ `lessons(action="retire", id, reason="glean: → <视图文件#位置>")`（内容原样保留在 jsonl，只翻转状态）；不通过条目留 candidate 并在报告写理由。
 GL-19 候选巡检：对合格候选执行 `lessons(action="promote", id, lesson?/fix?/type?)`（合并语义走 server，勿绕过）；跨项目复现核对只读名册内各项目 lessons.jsonl；只晋升有证据的候选，每条晋升在报告列证据。
-GL-20 视图层维护：项目 ORCH.md 重写（ver+1，帽 120 行/10KB）；根 AGENTS.md 只在 `<!-- orch-mem:begin v1 … -->` 与 `<!-- orch-mem:end -->` 标记对之间增删改，标记对外字节零触碰，编辑后复读校验对外 diff 为零；全端 AGENTS.md 整文件归你管（帽 50 行/2KB）。
+GL-20 视图层维护：项目 ORCH.md 重写（ver+1，帽=取包 CONTEXT brief.cfg 的 orch_md_max_lines/orch_md_max_bytes〔缺省 120 行/10KB〕，server 侧截断提示与固定包 RULES 同源动态渲染）；根 AGENTS.md 只在 `<!-- orch-mem:begin v1 … -->` 与 `<!-- orch-mem:end -->` 标记对之间增删改，标记对外字节零触碰，编辑后复读校验对外 diff 为零；全端 AGENTS.md 整文件归你管（帽 50 行/2KB）；全端 AGENTS.md 或全端库 memory/ 目录缺席=先创建（mkdir -p+有 content 首建才落笔，不落空壳；首建事件报告『视图变更』节单列）。
 GL-21 标记对缺失：= 该项目记忆功能关闭——跳过、报告记录、不重建、不补写、不提示重建。
 GL-22 报告：必交 `<全端目录>/reports/<YYYYMMDD-HHmmss>-glean.md`（帽 150 行），节：概览（耗时/扫描库/锁等待）/ 视图变更（文件×位置×动作逐条→溯源 id）/ 晋升（源 id→去向+证据）/ ORCHTEMP 消费（id→去向或留存理由）/ 未处理与理由 / 建议下次。
 GL-23 done 上报：artifacts 必带报告路径与视图变更计数。

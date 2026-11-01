@@ -239,6 +239,33 @@ try {
     );
   }
 
+  /* ---- G0-b 高水位交互（v1.3 W1 常忙腿面）：常忙腿武装但水印吃满事件增量 → 不拉起零副作用 ---- */
+  {
+    const doneRecentWmFull =
+      JSON.stringify({
+        v: 1,
+        state: "done",
+        pid: null,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        watermarks: { global_lines: 2, projects: {} },
+      }) + "\n";
+    const c = makeCase("g0-busy-wm-highwater", {
+      lockRaw: doneRecentWmFull,
+      globalLessons: '{"id":"a"}\n{"id":"b"}\n',
+      gcfg: { idle_hours: 9999, new_events: 0, lock_stale_hours: 1.5, busy_channel_events: 2 },
+    });
+    const s = startSentinel(c);
+    await sleep(3500);
+    s.kill();
+    await sleep(200);
+    ck.ok(
+      "G0-b 常忙腿武装（busy=2）但水印吃满增量（global 2-2+proj 0 → net 0 < 2）→ 不拉起、原锁字节不动、无戳无状态",
+      stubRecords(c).length === 0 && readText(c.lockFile) === doneRecentWmFull && !fs.existsSync(c.stampFile) && !fs.existsSync(c.stateFile),
+      { recs: stubRecords(c).length, lockUnchanged: readText(c.lockFile) === doneRecentWmFull, stamp: fs.existsSync(c.stampFile) },
+    );
+  }
+
   /* ---- G1 条件满足 + 锁 active（活 PID）→ 不拉起且原锁字节不动 ---- */
   {
     const activeRaw =
@@ -311,6 +338,10 @@ try {
         msg.includes("除此之外不要改锁"),
     );
     ck.ok("G3 首条消息含红线「不要写 board.json」", msg.includes("不要写 board.json"));
+    ck.ok(
+      "G3 首条消息含「缺席先创建」句钉（GL-20 全端视图缺席=先创建句，v1.3 W3 persona 内联通道）",
+      msg.includes("缺席=先创建"),
+    );
     ck.ok(
       "G3 首条消息无「读取任务包」类指令（persona+内联即全部世界）",
       !msg.includes("Read 任务包") && !msg.includes("读取任务包") && !msg.includes("读任务包"),
@@ -393,27 +424,30 @@ try {
     await sleep(200);
   }
 
-  /* ---- 库级准备：剥入口把 bg-sentinel 当库导入（黑盒测不到 spawn options/竞态/超时）---- */
-  const SRC = fs.readFileSync(SENTINEL, "utf8").replace(/\r\n/g, "\n");
-  const TAIL = "try {\n  main();\n} catch {\n  process.exit(0);\n}";
-  const tailIdx = SRC.lastIndexOf(TAIL);
-  ck.ok("G5-pre 哨兵入口可剥（探针结构无漂移）", tailIdx > 0, `tailIdx=${tailIdx}`);
-  let lib = null;
-  // 库副本放到 <tmp>/lib/hooks/ 并镜像 <tmp>/lib/agents/（persona 解析按 <模块>/../agents 定位），
+  /* ---- 库级准备：把 bg-sentinel 当库导入（黑盒测不到 spawn options/竞态/超时）----
+     v1.3 切分重基（m-20261101-034720-a7a6）：旧形态=读入口单文件剥尾（try{main()}catch 段）
+     +手工补 export 面成单文件 lib；拆分后函数面迁入 hooks/bg-sentinel/glean-launch.mjs
+     （纯模块、无入口自跑段，export 面即旧手工 export 面超集）。新形态=族模块镜像
+     （readdir 动态取 *.mjs 整目录复制，不硬编码名单）+直导入该模块；导入失败=探针结构漂移红。 */
+  // 库副本镜像到 <tmp>/lib/hooks/bg-sentinel/ 并镜像 <tmp>/lib/agents/（persona 解析按
+  // <模块>/../../agents 定位——模块较旧单文件下移一级，l-20261101-4e9828 接线口径），
   // 保证单元腿与生产入口读取同一份 persona，不污染插件目录。
   const LIBDIR = path.join(BASE.root, "lib");
-  fs.mkdirSync(path.join(LIBDIR, "hooks"), { recursive: true });
+  fs.mkdirSync(path.join(LIBDIR, "hooks", "bg-sentinel"), { recursive: true });
   fs.mkdirSync(path.join(LIBDIR, "agents"), { recursive: true });
   fs.copyFileSync(path.join(PLUGIN_DIR, "agents", "orch-gleaner.md"), path.join(LIBDIR, "agents", "orch-gleaner.md"));
-  const LIB = path.join(LIBDIR, "hooks", "sentinel-glean-lib.mjs");
-  if (tailIdx > 0) {
-    fs.writeFileSync(
-      LIB,
-      SRC.slice(0, tailIdx) +
-        "\nexport { tryLaunchGlean, acquireGleanLock, finishGleanLease, releaseGleanLock, gleanGateCheck, readGleanCfg, gleanMemoryRoot, buildGleanMessage, readGleanerPersona, housekeepGleanLaunch, maybeSuperviseGlean, gleanCooldownState, stampGleanCooldown, writeGleanState, readGleanState, clearGleanState, flipGleanLockDone, restoreGleanSnapshot };\n",
-    );
-    lib = await import(pathToFileURL(LIB).href);
+  const SENTINEL_MODDIR = path.join(PLUGIN_DIR, "hooks", "bg-sentinel");
+  for (const f of fs.readdirSync(SENTINEL_MODDIR).sort()) {
+    if (f.endsWith(".mjs")) fs.copyFileSync(path.join(SENTINEL_MODDIR, f), path.join(LIBDIR, "hooks", "bg-sentinel", f));
   }
+  const LIB = path.join(LIBDIR, "hooks", "bg-sentinel", "glean-launch.mjs");
+  let lib = null;
+  try {
+    lib = await import(pathToFileURL(LIB).href);
+  } catch {
+    lib = null;
+  }
+  ck.ok("G5-pre 哨兵入口可剥（探针结构无漂移）", lib != null, lib ? "family mirror import ok" : "family mirror import failed");
 
   if (lib) {
     /* ---- G5a spawn 异常 → 短冷却 + 锁回退 + stderr ---- */
@@ -500,6 +534,10 @@ try {
       );
       const msg = String((cap && cap.args[2]) || "");
       ck.ok("G5b 首条消息含 persona 关键句（记忆归敛代理 + GL 规则）", msg.includes("记忆归敛代理") && msg.includes("GL-12"));
+      ck.ok(
+        "G5b 首条消息含「缺席先创建」句钉（GL-20 全端视图缺席=先创建句，v1.3 W3 persona 内联通道）",
+        msg.includes("缺席=先创建"),
+      );
       ck.ok(
         "G5b 首条消息内联关键句：全端/工作区/锁纪律/红线，且无任务包读取指令",
         msg.includes(c.MEM) &&
@@ -673,12 +711,13 @@ if (acq.ok) setTimeout(() => { finishGleanLease(acq); process.exit(0); }, 500); 
           watermarks: { global_lines: 0, projects: {} },
         }) + "\n";
       fs.writeFileSync(c.lockFile, recentDone);
-      const g1 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 48, new_events: 10, lock_stale_hours: 1.5 }, Date.now());
+      // v1.3 W1：G8 判定表字面三键化（48/10 + busy 40），判定格同口径扩常忙腿
+      const g1 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 48, new_events: 10, lock_stale_hours: 1.5, busy_channel_events: 40 }, Date.now());
       ck.ok("G8 时间门：刚归敛（idle 0 < 48h）→ stage=time 不 due", g1.due === false && g1.stage === "time", g1);
       fs.writeFileSync(c.lockFile, LOCK_DONE_OLD);
-      const g2 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 10, lock_stale_hours: 1.5 }, Date.now());
+      const g2 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 10, lock_stale_hours: 1.5, busy_channel_events: 40 }, Date.now());
       ck.ok("G8 事件门：2 events < 10 → stage=events 不 due", g2.due === false && g2.stage === "events" && g2.events === 2, g2);
-      const g3 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 2, lock_stale_hours: 1.5 }, Date.now());
+      const g3 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 2, lock_stale_hours: 1.5, busy_channel_events: 40 }, Date.now());
       ck.ok("G8 双门槛都过 → due（idle ∞ ∧ events 2）", g3.due === true && g3.events === 2, g3);
       const busyRaw =
         JSON.stringify({
@@ -690,8 +729,14 @@ if (acq.ok) setTimeout(() => { finishGleanLease(acq); process.exit(0); }, 500); 
           watermarks: { global_lines: 2, projects: {} },
         }) + "\n";
       fs.writeFileSync(c.lockFile, busyRaw);
-      const g4 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 0, lock_stale_hours: 1.5 }, Date.now());
+      const g4 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 0, new_events: 0, lock_stale_hours: 1.5, busy_channel_events: 40 }, Date.now());
       ck.ok("G8 锁门：active 活 PID → busy，不 due", g4.due === false && g4.busy === true, { due: g4.due, stage: g4.stage, busy: g4.busy });
+      // v1.3 W1 G8 常忙腿两例：①时间门不过+events≥busy → due（via=busy）②busy=0 → 恒走旧双门
+      fs.writeFileSync(c.lockFile, recentDone);
+      const g5 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 9999, new_events: 99, lock_stale_hours: 1.5, busy_channel_events: 2 }, Date.now());
+      ck.ok("G8 常忙腿①：时间门不过（idle 0 < 9999h）∧ events 2 ≥ busy 2 → due via busy", g5.due === true && g5.via === "busy" && g5.events === 2, g5);
+      const g6 = lib.gleanGateCheck(c.MEM, c.ROOT, { idle_hours: 9999, new_events: 99, lock_stale_hours: 1.5, busy_channel_events: 0 }, Date.now());
+      ck.ok("G8 常忙腿②：busy=0 关断（events 2 ≥ 0 也不放行）→ stage=time 不 due（回退语义）", g6.due === false && g6.stage === "time" && g6.via === undefined, g6);
       const tempProj = path.join(BASE.root, "g8-carveout", "proj");
       const tempRoot = path.join(tempProj, ".zcode", "orchestrator");
       fs.mkdirSync(tempRoot, { recursive: true });

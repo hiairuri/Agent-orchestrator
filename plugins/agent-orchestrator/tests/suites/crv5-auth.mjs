@@ -17,7 +17,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { startServer, Checker, DEFAULT_SERVER, PRE } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, DEFAULT_SERVER, PRE, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
+import { familySource } from "../harness/source-family.mjs";
 import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo } from "../harness/git-fixture.mjs";
 
@@ -101,7 +102,9 @@ try {
   {
     const r = await sandboxApplyFlow("m-sc4", { oob: [""], files: { "docs/extra.md": "free\n" } });
     ck.ok("SCOPE-04a oob=[\"\"] 空串全放行 → apply ok", r.isError !== true && resultText(r).ok === true, r.text.slice(0, 120));
-    const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    // v1.3 切分重基（修复轮 D）：coversPath（含 allow-all JSDoc）已迁 mcp/server-core.mjs，
+    // 读取面走 server 族 helper，字面锁与期望值零改动。
+    const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
     ck.ok("SCOPE-04b 空串全放行语义已在 coversPath JSDoc 显式文档化", src.includes("allow-all"), "");
   }
   // ---- SCOPE-02：checkScopeAudit 同语义——designs-evil 不再被 designs 吞掉
@@ -494,7 +497,8 @@ function startStrictServer(extraArgs, { root, env = {} }) {
     ss.close();
   }
   // 07e：默认 off 的静态锚——源码含旗标字面量（默认值由上方全部主 server 探针行为承载）
-  const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  // v1.3 切分重基（修复轮 D）：旗标注册已迁 mcp/server-boot.mjs，读取面走 server 族 helper。
+  const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
   ck.ok("AUTH-07e 静态：--strict-tokens 旗标已注册（默认 off 由既有探针零变更承载）", src.includes('"--strict-tokens"'), "");
 }
 
@@ -507,8 +511,10 @@ function startStrictServer(extraArgs, { root, env = {} }) {
 // 恒写不回归」锁已废——恒写默认正是二次 shadow 面，v0.9-DESIGN §5；主控仲裁 A 扩写集
 // 批准改写，限本场景两断言，登记见 v0.9.x.md A-v090-CLN-05 行）。
 {
-  const srvSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
-  const sentSrc = fs.readFileSync(path.join(path.dirname(DEFAULT_SERVER), "..", "hooks", "bg-sentinel.mjs"), "utf8");
+  // v1.3 切分重基（修复轮 D）：双文件常量锁读取面走族 helper（server 族=numArgOpt 条件写迁
+  // mcp/server-boot.mjs；bg-sentinel 族=桥接连线+内建 5/3 留在入口），断言与期望值零改动。
+  const srvSrc = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
+  const sentSrc = familySource(PLUGIN_DIR, path.join("hooks", "bg-sentinel.mjs"));
   const spawnForCfg = (extraArgs, rootDir) => {
     fs.mkdirSync(rootDir, { recursive: true });
     return spawn(process.execPath, [DEFAULT_SERVER, "--root", rootDir, ...extraArgs], {

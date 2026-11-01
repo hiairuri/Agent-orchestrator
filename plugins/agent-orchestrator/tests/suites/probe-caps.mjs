@@ -30,7 +30,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { startServer, Checker, DEFAULT_SERVER, PRE } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, PLUGIN_DIR, PRE } from "../harness/jsonrpc-client.mjs";
+import { familySource } from "../harness/source-family.mjs";
 import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
 
 const ck = new Checker("probe-caps");
@@ -95,7 +96,9 @@ try {
       JSON.stringify(acts) === JSON.stringify(["db.query", "file.head", "file.grep", "bin.inspect"]) &&
       Array.isArray(pr.inputSchema.required) && pr.inputSchema.required.includes("action"), acts);
     ck.ok("PROBE-01c probe 双面可用：不入 MCP_DISALLOWED（语义复核机械钉）", (() => {
-      const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+      // v1.3 切分重基（修复轮 D）：MCP_DISALLOWED 已迁 mcp/tool-spawn.mjs，读取面走 server 族
+      // helper（族内恰一定义，lazy 截取语义不变），断言与期望值零改动。
+      const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
       const m = src.match(/const MCP_DISALLOWED = \[([\s\S]*?)\];/);
       return !!m && !m[1].includes('"probe"') && !m[1].includes("probe");
     })());

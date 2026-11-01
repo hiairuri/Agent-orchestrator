@@ -34,6 +34,7 @@ import path from "node:path";
 import { PLUGIN_DIR, Checker, startServer } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot } from "../harness/temp-root.mjs";
 import { captureBackground, runNode } from "../harness/capture.mjs";
+import { familySource } from "../harness/source-family.mjs";
 
 const ck = new Checker("root-contract");
 const HOOKS = path.join(PLUGIN_DIR, "hooks");
@@ -454,11 +455,21 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
       .map((l) => l.trim())
       .filter(Boolean)
       .join("\n");
+  // v1.3 切分重基（m-20261101-034720-a7a6）：bg-sentinel 侧 root 块迁入 core.mjs 后函数需 export
+  // 供族内模块消费——`export ` 前缀系模块化接线关键字（5 处恰 35 字节，非行为分叉），五处同文
+  // 比较基线统一剔除；关键字外任何字节漂移仍红（逐字一致锁强度不弱化）。
+  const stripModuleForm = (s) => s.replace(/\bexport function /g, "function ");
   const rawByHook = {};
   const execHash = {};
   for (const name of HOOK_NAMES) {
-    const src = fs.readFileSync(path.join(HOOKS, name + ".mjs"), "utf8").replace(/\r\n/g, "\n");
-    const block = extractRootBlock(src);
+    // v1.3 切分重基（m-20261101-034720-a7a6）：bg-sentinel 拆为薄入口+8 模块，root 块迁入
+    //   hooks/bg-sentinel/core.mjs——该钩读面=族（入口+模块族拼接，familySource helper），
+    //   其余四钩未拆分单文件读不变；块抽取锚与逐字一致判据零改。
+    const src = (name === "bg-sentinel"
+      ? familySource(PLUGIN_DIR, "hooks/bg-sentinel.mjs")
+      : fs.readFileSync(path.join(HOOKS, name + ".mjs"), "utf8")
+    ).replace(/\r\n/g, "\n");
+    const block = stripModuleForm(extractRootBlock(src));
     rawByHook[name] = block;
     execHash[name] =
       block == null ? "MISSING" : crypto.createHash("sha256").update(execOnly(block)).digest("hex");

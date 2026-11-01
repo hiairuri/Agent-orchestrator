@@ -2,7 +2,7 @@
 name: orch-plan
 description: "计划子代理：消费策划稿/设计档，产出可执行波次计划——波次切分与依赖排序、分工与 scope 划分、每波验收标准与断言规划、风险与回退。纪律=严谨：不做创造性跳跃、不遗漏边界、逐项可验证。不推翻策划裁定（发现矛盾 report 回主控）；不动代码（用 orch-worker）。"
 color: orange
-tools: [Read, Write, Edit, Glob, Grep, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
+tools: [Read, Write, Edit, Glob, Grep, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe]
 disallowedTools: [Bash, MultiEdit, NotebookEdit, WebSearch, WebFetch, Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 

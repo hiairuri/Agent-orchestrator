@@ -46,6 +46,12 @@
  *   no_apikey_model 随段③退役（selection_missing 接管）；非选择类（env 链/写盘/
  *   provider 不存在）boot-then-die 现行为不变、无 rejected 字段（PQA3）。
  *
+ * v1.3 W5 增量（识别面臂 a）：DS-09×3（account: 前缀＋规则不可见 → 选择类拒绝回执
+ *   account_not_seedable＋guidance＋available_apikey_providers＋不 spawn＋留 drafted；
+ *   design §13.1① fold/O15=a，M-1 主裁落本套件）。臂 b/c=DS-02/DS-08 保绿核对
+ *   （规则可见原腿＋非前缀 unusable 腿零改写，现绿即核）。断言登记=
+ *   tests/assertions/v1.3.0.md W5 节。
+ *
  * 运行方式：node tests/suites/dispatch-supply.mjs [--root <临时根父目录>]
  *   （PE 段无 temp root、零子进程；DS 段 startServer 子进程开销=既有套件常态）
  * 断言主句权威 = tests/assertions/v1.2.3.md §1（W1/M1=PE×6；W2/M2=DS×8＋ST-02；W3/M3=ST-01）。
@@ -56,6 +62,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PLUGIN_DIR, DEFAULT_SERVER, Checker, startServer } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, missionOf, parseRootArg } from "../harness/temp-root.mjs";
+import { familySource } from "../harness/source-family.mjs";
 
 /** function <name>(<any params>) body — column-0 "}" closes it. LF-normalized input. */
 function bodyOfText(sourceLF, fnName) {
@@ -827,9 +834,74 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
       }
     }
 
-    // ---- ST-02-first-enabled-erased（验收⑩）：server.mjs「first enabled」字样归零静态锁
+    // ---- DS-09-account-prefix-blindspot-selection-rejected（v1.3 W5 识别面臂 a，
+    //      design §13.1① fold/O15=a）：显式 model 带 account: 前缀且规则不可见（
+    //      providerRules 只载 personal 面）→ 选择类拒绝回执 account_not_seedable＋
+    //      guidance 两条＋available_apikey_providers 在场＋不 spawn＋留 drafted
+    //      （fork before spawn=可重派）。识别面臂 b=DS-02 规则可见原腿保绿、臂 c=DS-08
+    //      非前缀 unusable 保绿——本波零改写，DS-02/08 现绿即保绿核对（M-1 主裁）。
     {
-      const serverSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
+      const dir = subDir("ds09");
+      const sid = "sess_ds09";
+      dsStub(path.join(dir, "stub.mjs"), sid);
+      const rt = trootOf(dir);
+      fs.writeFileSync(
+        path.join(dir, "provider_config.json"),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            config: {
+              providerConfigRules: {
+                providerRules: [
+                  { providerId: "p-k1", config: { access: { type: "api-key", apiKey: "sk-1" }, modelOrder: ["M-K1"] } },
+                ],
+              },
+              modelConfigRules: {
+                providerModelRules: [
+                  { modelId: "M-K1", config: { enabled: true, optionSpecs: { reasoningLevel: { values: ["a", "b"] } } }, providerId: "p-k1" },
+                ],
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      const sX = startDs(dir);
+      try {
+        await dsUpsert(sX, "m-ds09");
+        const r = JSON.parse((await sX.call("dispatch", { mission_id: "m-ds09", pack_path: dsPack, persona_path: dsPersona, model: "account:zhipu-account/GLM-5.3" })).text);
+        ck.ok(
+          "DS-09 account: 前缀＋规则不可见 → 选择类拒绝回执：seeded=false＋reason=account_not_seedable＋rejected.kind 同名＋provider_id 实名前缀（识别面臂 a：前缀盲区预判，不落 unusable 静默腿）",
+          r.ok === true && r.model_seed && r.model_seed.seeded === false &&
+            r.model_seed.reason === "account_not_seedable" &&
+            r.model_seed.rejected && r.model_seed.rejected.kind === "account_not_seedable" &&
+            r.model_seed.rejected.provider_id === "account:zhipu-account",
+          { model_seed: r.model_seed },
+        );
+        ck.ok(
+          "DS-09 拒绝回执三件在场：guidance 两条字面＋available_apikey_providers（enabled api-key 清单）＋detail 实名 personal 读取域不可见机理",
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify([GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER]) &&
+            Array.isArray(r.model_seed.available_apikey_providers) &&
+            r.model_seed.available_apikey_providers.length > 0 &&
+            typeof r.model_seed.rejected.detail === "string" && r.model_seed.rejected.detail.includes("personal"),
+          { guidance: r.model_seed.guidance, listed: r.model_seed.available_apikey_providers },
+        );
+        ck.ok(
+          "DS-09 fork before spawn：不 spawn 三锚（桩标记缺席＋result/logs 零侧车）＋种子不落＋mission 留 drafted（拒绝=未派发可重派）",
+          noSpawnLeg(dir, rt, sid) && !fs.existsSync(seedFileOf(rt, "m-ds09")) &&
+            missionOf(rt, "m-ds09").status === "drafted",
+          { noSpawn: noSpawnLeg(dir, rt, sid), status: missionOf(rt, "m-ds09").status },
+        );
+      } finally {
+        sX.close();
+      }
+    }
+
+    // ---- ST-02-first-enabled-erased（验收⑩）：server.mjs「first enabled」字样归零静态锁
+    // v1.3 切分重基（m-20261101-034720-a7a6）：零残留 ban 读面=server 族（薄入口单读=假绿弱化）
+    {
+      const serverSrc = familySource(PLUGIN_DIR, "mcp/server.mjs");
       ck.ok(
         "ST-02 server.mjs「first enabled」字样归零（段③首 api-key 猜测删除的源码静态锁，P3 验收⑩）",
         !serverSrc.includes("first enabled"),

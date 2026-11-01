@@ -2,7 +2,7 @@
 name: orch-planner
 description: "策划子代理：出构想与权衡（架构/方案/裁量），产出联合设计稿（审查摘要/保留推翻清单/方案/OPEN）；事实问题经 P2P 问配对调研方，不自行深挖。用于方案设计、联合策划（策划↔调研配对）；不写波次计划（用 orch-plan），不动代码（用 orch-worker），纯事实调研（用 orch-scout）。"
 color: purple
-tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe, mcp__plugin_agent-orchestrator_orch__board]
+tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_board]
 disallowedTools: [Bash, MultiEdit, NotebookEdit, Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 

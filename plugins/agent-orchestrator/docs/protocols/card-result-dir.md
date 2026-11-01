@@ -1,6 +1,6 @@
 # 契约卡④：dispatch result-dir 三件套（分形态两节）
 
-- **归属模块**：mcp/server.mjs（dispatch 工具同步段+组合捕获+busy 闸）+ hooks/dispatch-runner.mjs（detached 子进程，唯一 result 文件写者）；wake-queue 旁挂目录归本卡（runner 同文 twin 在 server 侧 :4331 起有一份，零共享依赖纪律）
+- **归属模块**：mcp/server.mjs（dispatch 工具同步段+组合捕获+busy 闸）+ hooks/dispatch-runner.mjs（detached 子进程，唯一 result 文件写者）；wake-queue 旁挂目录归本卡（runner 同文 twin 在 mcp/tool-report.mjs `wakeQueueDirOf` 一份，零共享依赖纪律）
 - **脆度评级**（面广度×后果重度双轴）：**低-中**——协议年轻（v1.1.2 新落、v1.2 M3-1 又补三层兜底）、消费方仅 server 的闸/捕获面；但「index 缺失=在飞」的 busy 闸语义一旦失效即双跑或永久锁，后果中重
 - **历史事故回链**：R2 静默失败（ok:true+pending 掩盖快死→≤8s 组合捕获消除）、runner 早期失败只写 error 不写 index=busy 闸永久锁（v1.2 M3-1 Q2 双入口堵死）、taskkill /F 强杀无 index（O10 超龄豁免兜底）、l-20261026-792cf9（手写 mode=headless 零侧车形态——判据不取「侧车全无」腿的由来）、l-20261027-cc2f89（PROVIDER_BUSINESS_ERROR 1302 死亡实锤 error.json 侧车价值）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码，M3-1 已落）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -15,13 +15,13 @@ result-dir 三件套按拉起形态分两节：**headless**（§1-§5，runner �
 
 | 项 | 内容 | 锚点 |
 |---|---|---|
-| 结果目录 | `<root>/context/dispatch-results/`（server :7073 与 runner `--result-dir` 双方共识） | :7073 |
-| **index.json** | `<mission_id>-<startedMs>.index.json`（startedMs=epochMs）；mission→结果的寻址 sidecar，**busy 闸的唯一判据文件名族**（`^<id>-\d+\.index\.json$`，正则转义 id） | 写：runner finish()/writeKilledIndex/fail()；闸：dispatchHasResultIndex :6642-6652 |
-| **error.json** | `<mission_id>-<ISO-stamp>.error.json`（stamp=startedAt 去冒号点）——注意与 index 的 stamp **不同构**（ISO-stamp vs epochMs）：diff 扫描两正则各自匹配，互不干扰 | fail() :266；finish() :378；errorRe :6756-6757 |
+| 结果目录 | `<root>/context/dispatch-results/`（server 与 runner `--result-dir` 双方共识） | mcp/tool-dispatch.mjs results 目录共识 |
+| **index.json** | `<mission_id>-<startedMs>.index.json`（startedMs=epochMs）；mission→结果的寻址 sidecar，**busy 闸的唯一判据文件名族**（`^<id>-\d+\.index\.json$`，正则转义 id） | 写：runner finish()/writeKilledIndex/fail()；闸：`dispatchHasResultIndex`（mcp/tool-dispatch.mjs） |
+| **error.json** | `<mission_id>-<ISO-stamp>.error.json`（stamp=startedAt 去冒号点）——注意与 index 的 stamp **不同构**（ISO-stamp vs epochMs）：diff 扫描两正则各自匹配，互不干扰 | fail() :266；finish() :378（hooks/dispatch-runner.mjs）；errorRe（mcp/tool-dispatch.mjs `dispatchScanNewResults`） |
 | **result.json** | `<sessionId>.json`——信封+mission/exit 元数据（有 sessionId 才写） | finish() :366-376 |
-| 日志旁挂 | `<root>/context/dispatch-logs/<id>-<stamp>.prompt`（server 同步段先写）+ `.runner.log`（runner 起手即写）——**「dispatch 同步段真实跑过」的时间锚**（O10 判据素材） | :7141-7145；runner :318-325 |
-| 模型种子旁挂 | `<root>/context/dispatch-model-seed/<mission_id>.json`（env 重定向副本，原配置零触碰） | dispatchSeedModelConfig :7037-7041 |
-| wake-queue 旁挂 | `<root>/context/wake-queue/`（=result-dir 同级 `path.dirname(resultDir)+/wake-queue`）——完成即唤事件族，归本卡 §5 | wakeQueueDirOf runner :63-65；server twin :4336 |
+| 日志旁挂 | `<root>/context/dispatch-logs/<id>-<stamp>.prompt`（server 同步段先写）+ `.runner.log`（runner 起手即写）——**「dispatch 同步段真实跑过」的时间锚**（O10 判据素材） | mcp/tool-dispatch.mjs 同步段先写；runner :318-325 |
+| 模型种子旁挂 | `<root>/context/dispatch-model-seed/<mission_id>.json`（env 重定向副本，原配置零触碰） | `dispatchSeedModelConfig`（mcp/tool-dispatch.mjs） |
+| wake-queue 旁挂 | `<root>/context/wake-queue/`（=result-dir 同级 `path.dirname(resultDir)+/wake-queue`）——完成即唤事件族，归本卡 §5 | `wakeQueueDirOf` runner :63-65；server twin（mcp/tool-report.mjs） |
 
 写者承诺：三件均 atomicWriteJson（temp+rename）；目录 mkdir recursive 自建。
 
@@ -47,11 +47,11 @@ result-dir 三件套按拉起形态分两节：**headless**（§1-§5，runner �
 
 | 读方 | 时机 | 行为 |
 |---|---|---|
-| busy 闸（toolDispatchInner） | dispatch 前 | dispatchHasResultIndex：该 mission 任一 index 在场=上轮已收场→放行；缺席→盘点侧车（dispatchMissionSidecars：results∪logs 两目录 `<id>-` 前缀 mtime）全超龄（>ORCH_DISPATCH_BUSY_STALE_MIN，默认 120min）→豁免放行附 warning；否则拒双跑——:7080-7096 |
-| ≤8s 组合捕获（dispatchCaptureOutcome） | dispatch 后（锁外） | 100ms tick 双面轮询：rollout diff（新 model-io 文件 stem=已 boot）优先；results diff（dispatchScanNewResults）读新 index/error——index 携 session_id→成功回执；否则 failed+error 摘要；超窗→session_pending:true（真慢启动契约）——:6821-6850 |
-| diff 扫描防残留（dispatchScanNewResults） | 捕获内 | 只认 pre-spawn 快照（resultsBefore，锁内采集）之后新出现的文件——上轮残留侧车不干扰本轮判定——:6748-6787 |
-| hint 分叉（toolDispatch failed 分支） | 快死回执 | index 已落→「直接重派（busy 闸不拦）」；index 未落（强杀残余/历史存量）→如实说明+删侧车或等超龄豁免——O8=a 迷路面消除——:7267-7283 |
-| failure 摘要（dispatchFailureSummary） | failed 回执 | error.json 的 log_tail（≤4000 字符）末行 `Error:` 原样上浮（≤300 字符）；`/Select a model/i` 命中→modelError 分支 hint（播种面指引）——:6800-6813 |
+| busy 闸（toolDispatchInner） | dispatch 前 | dispatchHasResultIndex：该 mission 任一 index 在场=上轮已收场→放行；缺席→盘点侧车（dispatchMissionSidecars：results∪logs 两目录 `<id>-` 前缀 mtime）全超龄（>ORCH_DISPATCH_BUSY_STALE_MIN，默认 120min）→豁免放行附 warning；否则拒双跑——mcp/tool-dispatch.mjs busy 闸 |
+| ≤8s 组合捕获（dispatchCaptureOutcome） | dispatch 后（锁外） | 100ms tick 双面轮询：rollout diff（新 model-io 文件 stem=已 boot）优先；results diff（dispatchScanNewResults）读新 index/error——index 携 session_id→成功回执；否则 failed+error 摘要；超窗→session_pending:true（真慢启动契约）——mcp/tool-dispatch.mjs `dispatchCaptureOutcome` |
+| diff 扫描防残留（dispatchScanNewResults） | 捕获内 | 只认 pre-spawn 快照（resultsBefore，锁内采集）之后新出现的文件——上轮残留侧车不干扰本轮判定——mcp/tool-dispatch.mjs `dispatchScanNewResults` |
+| hint 分叉（toolDispatch failed 分支） | 快死回执 | index 已落→「直接重派（busy 闸不拦）」；index 未落（强杀残余/历史存量）→如实说明+删侧车或等超龄豁免——O8=a 迷路面消除——mcp/tool-dispatch.mjs hint 分叉 |
+| failure 摘要（dispatchFailureSummary） | failed 回执 | error.json 的 log_tail（≤4000 字符）末行 `Error:` 原样上浮（≤300 字符）；`/Select a model/i` 命中→modelError 分支 hint（播种面指引）——mcp/tool-dispatch.mjs `dispatchFailureSummary` |
 | W9 触发面②（已落） | dispatch 派发钩子 | M9-1 落 headless 同步段 `ensureSentinelFamily()`（「无哨兵不派发」探活）；M5-1 组装出口（nested 分支）同接同函数——探活复用，两形态一致 |
 
 ## 4. 失效语义（headless）
@@ -74,7 +74,7 @@ result-dir 三件套按拉起形态分两节：**headless**（§1-§5，runner �
 |---|---|---|
 | 事件文件 | `<wake-queue>/<ms>-<mission_id>.json` wx 独占创建（EEXIST=他人已记，该方认领）；字段含 mission_id/worker/session_id/result_path/**outcome/timed_out/exit_code（Q3b）**/created_at/source | runner :67-95 |
 | claim.json | 单赢家认领（wx，acquired_at）；认领者 detached spawn wake-kick 后 unlink；认领后 spawn 前 crash 残留带 acquired_at 可识别（超龄回收归 WB 波裁定） | runner :96-125 |
-| 生产者① | server report（kind=done 且 mode==="headless"）——:4643-4661 |  |
+| 生产者① | server report（kind=done 且 mode==="headless"）——mcp/tool-report.mjs toolReport |  |
 | 生产者② | runner finish()（收场即产，无论信封成败）——:412-425 |  |
 | 毒丸容忍 | 只 wx 写自己的文件、不读目录既有内容——坏件天然隔离 | runner :62 注释 |
 
