@@ -17,7 +17,11 @@
  *   `// @module <name>` 标签且 <name> ≡ 文件词干（孤儿套件机械检出：无标签/双标签/名称失配即红）；
  *   规则 2 = tests/module-index.md 表行 ≡ suites/*.mjs 文件集（双向全等+无重复）；
  *   规则 3 = run-all.mjs REGISTRY 条目名单 ≡ suites/*.mjs 文件集（双向全等+无重复）。
- *   三条只锁集合全等，套件总数字面数不作门（impl-plan M-5/O6=a 口径）。
+ *   三条只锁集合全等，套件总数字面数不作门（impl-plan M-5/O6=a 口径）；
+ *   LM-06（v1.3 切分 S1，A-v130-SPLIT-*）——族面锁三腿：SCAN（α 读 API×入口字面共现 /
+ *   β 入口字面逃逸网，判定域排除两扫描器本体=β 零自指）+ DEP（mcp 族依赖单向四规则+层映射
+ *   表双向全等）+ CAP（行数帽双域：软帽域豁免 2 件触发器钉 / 硬帽域 9+52 族面文件 ≤900）
+ *   + FAMILIES 登记全景钉（8 族防静默收缩）；文案权威=split-impl-design §10 总表。
  *
  * 口径：L0 纯静态读文件，零网络零临时根（--root 参数接受但忽略，兼容 run-all 透传）。
  *   hooks.json 事件集内容已由 l0-skeleton 静态断言覆盖，本套不重复断言事件集（findings §5 遗留 3）。
@@ -28,6 +32,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PLUGIN_DIR, DEFAULT_SERVER, Checker } from "../harness/jsonrpc-client.mjs";
+import { familySource, familyFiles, LAYER_OF, L2_HORIZONTAL_EDGES } from "../harness/source-family.mjs";
 
 const ck = new Checker("lint-manifest");
 
@@ -103,8 +108,10 @@ if (manifest) {
   }
 
   // ---- LM-03：版本三方一致（plugin.json == server.mjs SERVER_VERSION == marketplace.json）
+  // v1.3 切分重基（m-20261101-034720-a7a6）：SERVER_VERSION 随模块迁移（server-core.mjs），
+  //   提取面=server 族（入口+模块族，familySource helper；主控裁决 EXTRA-2 口径），锚/真值语义不变。
   const pjv = manifest.version;
-  const serverSrc = fs.readFileSync(DEFAULT_SERVER, "utf8");
+  const serverSrc = familySource(PLUGIN_DIR, "mcp/server.mjs");
   const sm = serverSrc.match(/const\s+SERVER_VERSION\s*=\s*["']([^"']+)["']/);
   ck.ok("LM-03 SERVER_VERSION 常量可从 server.mjs 提取", !!(sm && sm[1]), sm && sm[1]);
 
@@ -132,24 +139,40 @@ if (manifest) {
 //   M6-1 四卡 card-spool/result-dir/probe/memory-views + M7-1 三卡 card-sandbox/watcher/bg-sentinel-map，
 //   现锚表 11 卡全量；卡改名/换锚 → 表行失配即红=提醒同步）。卡≈码语义级对拍（ALLOWED_TRANSITIONS 逐腿）归 contract-sync.mjs。
 const LM05_PROTOCOLS_DIR = path.join(PLUGIN_DIR, "docs", "protocols");
+// v1.3 S2 锚迁移（m-20261101-072952-aa35；定位协议与逐 id 归属裁定=designs/…/qa/split-anchor-map.md）：
+//   原 12 entry-pinned targets（9×mcp/server.mjs + 3×hooks/bg-sentinel.mjs，111 ids）按模块归属拆行
+//   （同模块 ids 合并一行；多命中以 def-shape 定义点消歧；零命中=0）；11 非 server/bg targets
+//   （watcher×4/bg-gate×2/session-start/stop-check/journal/dispatch-runner——未拆分单文件）原样归属不动。
 const LM05_CARD_ANCHORS = [
   {
     card: "card-state-machine.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["ALLOWED_TRANSITIONS", "MERGEABLE_KEYS", "ONE_LEVEL", "STATUSES", "upsertMission", "sweepGraph", "mergeMission"] },
+      { rel: "mcp/server-board.mjs", ids: ["ALLOWED_TRANSITIONS", "MERGEABLE_KEYS", "ONE_LEVEL", "upsertMission", "sweepGraph", "mergeMission"] },
+      { rel: "mcp/server-core.mjs", ids: ["STATUSES"] },
     ],
   },
   {
     card: "card-board.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["MERGEABLE_KEYS", "ONE_LEVEL", "p2pTokenGate", "BOARD_VERSION", "loadBoard", "saveBoard", "withRootLock", "compactMissionRow", "P2P_TERMINAL_STATUSES", "P2P_ASK_PRECONDITION_STATUSES"] },
+      { rel: "mcp/server-board.mjs", ids: ["MERGEABLE_KEYS", "ONE_LEVEL", "loadBoard", "saveBoard", "compactMissionRow"] },
+      { rel: "mcp/server-core.mjs", ids: ["BOARD_VERSION", "withRootLock"] },
+      { rel: "mcp/server-p2p.mjs", ids: ["p2pTokenGate", "P2P_TERMINAL_STATUSES", "P2P_ASK_PRECONDITION_STATUSES"] },
     ],
   },
   {
     card: "card-sentinel.md",
     targets: [
-      { rel: "hooks/bg-sentinel.mjs", ids: ["HEARTBEAT_STALE_MS", "claimSlot", "touchSlot", "releaseSlot", "pruneStaleSlots", "claimTeardown", "readCfg", "claimShots", "firedEligible", "pruneFired", "claimQuarantine", "readQuarantine", "appendEcho", "pruneEcho", "ECHO_MAX_LINES", "coordSessionId", "watcherCoverage", "writeGleanState", "readGleanState", "clearGleanState"] },
-      { rel: "mcp/server.mjs", ids: ["sentinelHealth", "SENTINEL_HEARTBEAT_STALE_MS", "writeSentinelCfg"] },
+      // readCfg 锚已退役（主控裁定 2026-11-01，裁①）：bg 入口主循环本地闭包（bg-sentinel.mjs L175 B6
+      //   每 tick 重读），模块族零命中无模块级归属；cfg 契约面由 sentinel-teardown T11 A-v090-CLN-05
+      //   专锁兜底（全 sparse+零漂移对拍）；卡面锚=hooks/bg-sentinel.mjs 入口（split-anchor-map §4 三态记退役）
+      { rel: "hooks/bg-sentinel/core.mjs", ids: ["HEARTBEAT_STALE_MS", "ECHO_MAX_LINES"] },
+      { rel: "hooks/bg-sentinel/family.mjs", ids: ["claimSlot", "touchSlot", "releaseSlot", "pruneStaleSlots", "claimTeardown", "claimQuarantine", "readQuarantine"] },
+      { rel: "hooks/bg-sentinel/fired.mjs", ids: ["claimShots", "firedEligible", "pruneFired"] },
+      { rel: "hooks/bg-sentinel/echo.mjs", ids: ["appendEcho", "pruneEcho"] },
+      { rel: "hooks/bg-sentinel/signals.mjs", ids: ["coordSessionId", "watcherCoverage"] },
+      { rel: "hooks/bg-sentinel/glean-launch.mjs", ids: ["writeGleanState", "readGleanState", "clearGleanState"] },
+      { rel: "mcp/server-sentinel.mjs", ids: ["sentinelHealth", "SENTINEL_HEARTBEAT_STALE_MS"] },
+      { rel: "mcp/server-boot.mjs", ids: ["writeSentinelCfg"] },
       { rel: "hooks/bg-gate.mjs", ids: ["sentinelAlive", "HEARTBEAT_STALE_MS"] },
       { rel: "hooks/session-start.mjs", ids: ["publishWakeAnchor"] },
     ],
@@ -157,9 +180,9 @@ const LM05_CARD_ANCHORS = [
   {
     card: "card-root-txt.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["ensureRootId", "rootIdOf", "isTempDirPath", "isTempRoot"] },
+      { rel: "mcp/server-core.mjs", ids: ["ensureRootId", "rootIdOf", "isTempDirPath", "isTempRoot"] },
+      { rel: "hooks/bg-sentinel/core.mjs", ids: ["locateRoot", "rootIdOf"] },
       { rel: "hooks/bg-gate.mjs", ids: ["locateRoot", "rootIdOf"] },
-      { rel: "hooks/bg-sentinel.mjs", ids: ["locateRoot", "rootIdOf"] },
       { rel: "hooks/journal.mjs", ids: ["locateRoot", "rootIdOf"] },
       { rel: "hooks/session-start.mjs", ids: ["locateRoot", "rootIdOf"] },
       { rel: "hooks/stop-check.mjs", ids: ["locateRoot", "rootIdOf"] },
@@ -170,32 +193,37 @@ const LM05_CARD_ANCHORS = [
   {
     card: "card-spool.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["missionSpoolDir", "unreadDirOf", "readEventFile", "consumeEventFile", "countUnreadSafe", "DETAILS_MAX_CHARS", "details_path", "details_head", "details_hint"] },
+      { rel: "mcp/server-stores.mjs", ids: ["missionSpoolDir", "unreadDirOf", "readEventFile", "consumeEventFile", "countUnreadSafe"] },
+      { rel: "mcp/server-core.mjs", ids: ["DETAILS_MAX_CHARS"] },
+      { rel: "mcp/tool-mailbox.mjs", ids: ["details_path", "details_head", "details_hint"] },
     ],
   },
   {
     card: "card-result-dir.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["dispatchHasResultIndex", "dispatchScanNewResults", "dispatchCaptureOutcome", "DISPATCH_DEFAULT_TIMEOUT_MIN", "ORCH_DISPATCH_BUSY_STALE_MIN"] },
+      { rel: "mcp/tool-dispatch.mjs", ids: ["dispatchHasResultIndex", "dispatchScanNewResults", "dispatchCaptureOutcome", "DISPATCH_DEFAULT_TIMEOUT_MIN", "ORCH_DISPATCH_BUSY_STALE_MIN"] },
       { rel: "hooks/dispatch-runner.mjs", ids: ["writeKilledIndex", "runner_early_fail", "outcome", "timed_out", "exit_code", "killed"] },
     ],
   },
   {
     card: "card-probe.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["probeValidateSql", "probeDecodeToken", "probeEnvelope", "probeLooksBinary", "PROBE_MAX_ROWS", "PROBE_CACHE_MAX_ENTRIES", "probeCache"] },
+      { rel: "mcp/tool-probe.mjs", ids: ["probeValidateSql", "probeDecodeToken", "probeEnvelope", "probeLooksBinary", "probeCache"] },
+      { rel: "mcp/server-core.mjs", ids: ["PROBE_MAX_ROWS", "PROBE_CACHE_MAX_ENTRIES"] },
     ],
   },
   {
     card: "card-memory-views.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["readProjectDigest", "digestSourcesNow", "parseOrchMdHeader", "orchMdAttachment", "DIGEST_MAX_LINES", "ORCH_MD_MAX_LINES", "digestGradedStaleReason", "DIGEST_DRIFT_N"] },
+      { rel: "mcp/server-memory.mjs", ids: ["readProjectDigest", "digestSourcesNow", "parseOrchMdHeader", "orchMdAttachment", "DIGEST_MAX_LINES", "ORCH_MD_MAX_LINES", "digestGradedStaleReason", "DIGEST_DRIFT_N"] },
     ],
   },
   {
     card: "card-sandbox.md",
     targets: [
-      { rel: "mcp/server.mjs", ids: ["materializeSandbox", "applyGateAndIntent", "applyGitPipeline", "applySettleBoard", "applyTeardown", "toolSandboxApply", "toolSandboxDiscard", "discardGate", "discardGitTriple", "discardSettleBoard", "assertMergeTreeSupport", "parseMergeTreeConflicts", "applyIntentFresh", "buildSandboxLines", "coversPath", "scopePairConflict"] },
+      { rel: "mcp/server-git.mjs", ids: ["materializeSandbox", "assertMergeTreeSupport", "parseMergeTreeConflicts", "buildSandboxLines", "scopePairConflict"] },
+      { rel: "mcp/server-core.mjs", ids: ["coversPath"] },
+      { rel: "mcp/tool-sandbox.mjs", ids: ["applyGateAndIntent", "applyGitPipeline", "applySettleBoard", "applyTeardown", "toolSandboxApply", "toolSandboxDiscard", "discardGate", "discardGitTriple", "discardSettleBoard", "applyIntentFresh"] },
     ],
   },
   {
@@ -210,7 +238,12 @@ const LM05_CARD_ANCHORS = [
   {
     card: "card-bg-sentinel-map.md",
     targets: [
-      { rel: "hooks/bg-sentinel.mjs", ids: ["locateRoot", "rootIdOf", "readBoardSafe", "watcherCoverage", "claimSlot", "touchSlot", "releaseSlot", "pruneStaleSlots", "claimQuarantine", "readQuarantine", "claimShots", "firedEligible", "pruneFired", "appendEcho", "pruneEcho", "ECHO_MAX_LINES", "writeGleanState", "readGleanState", "clearGleanState", "gleanStampFile"] },
+      { rel: "hooks/bg-sentinel/core.mjs", ids: ["locateRoot", "rootIdOf", "readBoardSafe", "ECHO_MAX_LINES"] },
+      { rel: "hooks/bg-sentinel/family.mjs", ids: ["claimSlot", "touchSlot", "releaseSlot", "pruneStaleSlots", "claimQuarantine", "readQuarantine"] },
+      { rel: "hooks/bg-sentinel/fired.mjs", ids: ["claimShots", "firedEligible", "pruneFired"] },
+      { rel: "hooks/bg-sentinel/echo.mjs", ids: ["appendEcho", "pruneEcho"] },
+      { rel: "hooks/bg-sentinel/signals.mjs", ids: ["watcherCoverage"] },
+      { rel: "hooks/bg-sentinel/glean-launch.mjs", ids: ["writeGleanState", "readGleanState", "clearGleanState", "gleanStampFile"] },
     ],
   },
 ];
@@ -229,6 +262,9 @@ ck.ok("LM-05 契约卡族在册下限（card-*.md ≥11 张=v1.2 M7-2 汇聚时�
   lm05Cards.length >= 11, { got: lm05Cards });
 
 // 腿②：逐卡「存在非空 + 锚标识符源码 grep 可见」（聚合断言，缺锚清单进 extra）
+// v1.3 切分重基（m-20261101-034720-a7a6）：锚随巨型文件拆分迁入模块——归属源码读面=族
+//   （mcp/server.mjs 与 hooks/bg-sentinel.mjs 两入口走 familySource=入口+模块族拼接，
+//   其余归属文件未拆分保持单文件读）；grep 可见与恰一语义不变（族拼接≈原单文件+接线行）。
 for (const entry of LM05_CARD_ANCHORS) {
   const problems = [];
   let cardSrc = "";
@@ -237,7 +273,7 @@ for (const entry of LM05_CARD_ANCHORS) {
   if (cardSrc && cardSrc.trim()) {
     for (const t of entry.targets) {
       let tsrc = "";
-      try { tsrc = fs.readFileSync(path.join(PLUGIN_DIR, t.rel), "utf8"); } catch { problems.push(t.rel + " 不可读"); continue; }
+      try { tsrc = familySource(PLUGIN_DIR, t.rel); } catch { problems.push(t.rel + " 不可读"); continue; }
       for (const id of t.ids) {
         if (!new RegExp("\\b" + id + "\\b").test(tsrc)) problems.push(t.rel + " 缺锚 " + id);
       }
@@ -246,6 +282,44 @@ for (const entry of LM05_CARD_ANCHORS) {
   const nIds = entry.targets.reduce((a, t) => a + t.ids.length, 0);
   ck.ok(`LM-05 ${entry.card} 在册且 ${nIds} 个锚标识符源码 grep 可见（卡≈码同步锁）`,
     problems.length === 0, { problems: problems.slice(0, 12) });
+}
+
+// ---- v1.3 S2 锚迁移两钉（m-20261101-072952-aa35；断言文案逐字=split-impl-design §10 总表 S2 段） ----
+// ANCHOR-MOD：两族入口 rel 残留=0——12 entry-pinned targets 已按 S2 迁移映射拆为模块级 rel 行
+//   （split-anchor-map.md：恰一直接归属/多命中 def-shape 定义点消歧/零命中=0）；11 单文件 targets
+//   （watcher×4/bg-gate×2/session-start/stop-check/journal/dispatch-runner）不在判域。
+{
+  const LM05_ENTRY_RELS = ["mcp/server.mjs", "hooks/bg-sentinel.mjs"];
+  const residue = [];
+  for (const entry of LM05_CARD_ANCHORS) {
+    for (const t of entry.targets) {
+      if (LM05_ENTRY_RELS.includes(t.rel)) residue.push(entry.card + " -> " + t.rel + "（" + t.ids.length + " ids：" + t.ids.join(",") + "）");
+    }
+  }
+  ck.ok("LM-05 锚表归属升级核对：两族入口 rel 残留=0（12 targets 全模块级；11 单文件 targets 不在判域）",
+    residue.length === 0, { residue });
+}
+// CARD-DEAD：卡面死行号锚退役核对——四位数以上行号锚模式（:N / :N-M 单值·区间 / LN / LN-M 带文件·L 前缀）
+//   +白名单=0；模块头 provenance 首行（「**行号声明（卡头）**」块引行）豁免——行数计量非锚，合法溯源。
+//   白名单显式标注「非旧 server/bg 单体坐标」的现役他文件坐标（设计档 §3.3 模式四）。
+const LM05_CARD_DEAD_RE = /(?::\d{4,}(?:-\d{4,})?)|(?:\bL\d{4,}(?:-\d{4,})?)/;
+const LM05_CARD_DEAD_PROVENANCE_RE = /^\s*>\s*\*\*行号声明/;
+const LM05_CARD_DEAD_WHITELIST = [];
+{
+  const deadHits = [];
+  for (const f of lm05Cards) {
+    let lines = [];
+    try { lines = fs.readFileSync(path.join(LM05_PROTOCOLS_DIR, f), "utf8").split(/\r?\n/); } catch { continue; }
+    for (let i = 0; i < lines.length; i++) {
+      if (LM05_CARD_DEAD_PROVENANCE_RE.test(lines[i])) continue; // 模块头 provenance 首行豁免
+      const m = lines[i].match(new RegExp(LM05_CARD_DEAD_RE.source, "g"));
+      if (m && !LM05_CARD_DEAD_WHITELIST.some((w) => w.card === f && w.line === i + 1)) {
+        deadHits.push(f + ":" + (i + 1) + "（" + m.slice(0, 3).join(" ") + (m.length > 3 ? " +" + (m.length - 3) : "") + "）");
+      }
+    }
+  }
+  ck.ok("卡面死行号锚退役核对：docs/protocols/card-*.md 四位数以上行号锚模式+白名单=0（模块头 provenance 首行豁免）",
+    deadHits.length === 0, { hits: deadHits.slice(0, 12), total: deadHits.length, whitelist: LM05_CARD_DEAD_WHITELIST.length });
 }
 
 // ---- LM-04：套件结构锁（v1.2 M7-2，三条；impl-plan §批2 M7-2「@module 恰一/module-index≡suites 文件集/REGISTRY≡suites 名单」）
@@ -337,6 +411,233 @@ try {
   for (const s of lm04Stems) if (!regSet.has(s)) problems.push("REGISTRY 缺注册: " + s);
   ck.ok("LM-04 规则3（REGISTRY≡suites 名单）：run-all.mjs REGISTRY ≡ suites/*.mjs 双向全等",
     lm04Stems.length > 0 && regNames.length > 0 && problems.length === 0, { suites: lm04Stems.length, registry: regNames.length, problems: problems.slice(0, 12) });
+}
+
+// ---- LM-06：v1.3 切分族面锁三腿+登记全景钉（S1 m-20261101-070724-6958；A-v130-SPLIT-*，
+//      断言文案逐字=split-impl-design §10 总表 / impl-plan-split §2 S1；计划QA R2 M-1 双补随落） ----
+// 机械口径（§2.4）：登记值一律 src.split("\n").length - 1 入册（本仓 .mjs 全尾换行，与 wc -l 等价），
+//   F-1 wc -l 值保留为 wcSource 对照注记（S1 步 1③ 实测两口径 ±0）。
+/** 机械口径行数（三处消费：CAP 腿 A/腿 B/校准重测） */
+const mechLines = (p) => fs.readFileSync(p, "utf8").split("\n").length - 1;
+
+// SCAN 判定域（M-1 补②成文位）：tests/ 递归 *.mjs，**排除两扫描器本体**——
+//   tests/harness/source-family.mjs 与 tests/suites/lint-manifest.mjs 两文件自身在册
+//   LM06_SCAN_ENTRIES/锚表 rel/族登记键等入口字面（自指面），不入域=β 零自指（S1 波门）。
+//   域收窄系实现面细化（§6 处置表「改写 0」口径），断言文案零改动；断言台账 .md 由 *.mjs 收集面天然排除。
+const LM06_SCAN_EXCLUDED = ["tests/harness/source-family.mjs", "tests/suites/lint-manifest.mjs"];
+const LM06_SCAN_ENTRIES = ["mcp/server.mjs", "hooks/bg-sentinel.mjs"];
+// 入口字面正则（动态构造防漂移）：正反斜杠分隔均认（win32 path.join 产反斜杠形态等价）
+const LM06_ENTRY_LIT_RE = new RegExp(
+  LM06_SCAN_ENTRIES.map((e) => e.replace(/\./g, "\\.").replace(/\//g, "[/\\\\]")).join("|"),
+);
+const LM06_SCAN_READ_API = /(?:readFileSync|readFileSyncUtf8|readFile|readText|readTextSync|readSync|createReadStream|promises\.readFile|fs\.read(?:File|FileSync)?\s*\()/;
+// 判据α：读 API 与入口字面同行/同调用域共现（F-2.1 判据的 multi-API 扩版——覆盖 async/裸 read 变体）
+const LM06_SCAN_ALPHA = new RegExp(
+  LM06_SCAN_READ_API.source +
+  String.raw`[^;]{0,200}?(?:` + LM06_ENTRY_LIT_RE.source + String.raw`)|(?:` + LM06_ENTRY_LIT_RE.source + String.raw`)[^;]{0,200}?` +
+  LM06_SCAN_READ_API.source
+);
+// 判据α族面调用豁免：familySource/familyFiles 实参形态（twin-lock famSrc 包装同豁免，S1 校准增补）
+const LM06_SCAN_FAMCALL = new RegExp(
+  String.raw`(?:family(?:Source|Files)|famSrc)\s*\([^)]*?(?:` + LM06_ENTRY_LIT_RE.source + String.raw`)`
+);
+// 判据β合法归类形态集（S1 步 1② 按 F-2.3 九类清单校准落装；实锚与零误报核验记录=tests/assertions/
+//   v1.3.0.md §0 S1 小节。红=按校准记录定位误报类增补正则，而非膨胀白名单〔设计档 §2.1 终审口径〕）
+const LM06_SCAN_BETA_OK = [
+  LM06_SCAN_FAMCALL,                                             // 族面调用（含 famSrc 包装；实锚 twin-lock L334 等）
+  /spawn(?:Sync)?\s*\(/,                                          // spawn 执行面（进程启动参数非文件读；现行零字面共线，防御网保留）
+  /path\.dirname\s*\(\s*(?:DEFAULT_SERVER|SERVER_PATH)/,          // 路径推导（读第三文件；pack-w2 L77 面）
+  /exportFileFromGit|gitShow|git\s+show/,                         // git 历史基线面（condense/pack-materialize/injection 实锚）
+  /scope_paths|packPath|resultDir|context_pack|pO1\./,            // 字符串 payload（pack 物化断言域；S1 校准扩 context_pack/pO1.——pack-materialize L122/124/126 实锚）
+  /^\s*(?:\/\/|\*|\/\*)/,                                         // 注释行（twin-lock 头注/git-fixture L91 实锚）
+  /^\s*ck\.ok\(\s*["'`]/,                                         // 断言文案内提及（F-2.3 文档字面类扩展，trust-root L59 实锚；读面由判据α独立兜底）
+  /\brel:\s*["'][^"']*["']/,                                      // 锚表 rel 登记面（twin-lock L55-77 键面实锚；rel 键形态正则兼容 S2 模块级两态）
+  /^\s*["'][^"']*["'](?:\s*,\s*["'][^"']*["'])*\s*,?\s*$/,        // 数组元素字面行（M-1 补①：l0-skeleton SCRIPTS L31-32 实锚）
+  /^\s*(?:export\s+)?(?:const|let|var)\s+\w+\s*=[^;]*["'][^"']*["']/, // 常量字面定义行（M-1 补①纵深：LM06_SCAN_ENTRIES 同形态；读面共现仍由 α 拦）
+  /^\s*["'](?:mcp\/server\.mjs|hooks\/bg-sentinel\.mjs)["']\s*:\s*\{\s*modDir:/, // 族登记表本体（source-family.mjs 排除在域外，域外锚 regex 直测形态验证；防御类）
+];
+const LM06_SCAN_WHITELIST = [
+  { file: "tests/suites/po-static.mjs", why: "bytesOf 披露面：裸 read() 字节计数仅入 ledger 输出行，无源语义断言（F-2.2/S1 白名单终审项）" },
+];
+
+// SCAN 域文件收集（tests/ 递归 *.mjs）
+const lm06Files = [];
+(function walkLm06(d) {
+  let entries;
+  try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+  for (const ent of entries) {
+    const p = path.join(d, ent.name);
+    if (ent.isDirectory()) walkLm06(p);
+    else if (ent.name.endsWith(".mjs")) lm06Files.push(p);
+  }
+})(path.join(PLUGIN_DIR, "tests"));
+const lm06Rel = (p) => path.relative(PLUGIN_DIR, p).split("\\").join("/");
+
+// 判据α/β 双扫（逐行；域排除两扫描器本体，白名单文件免 α 判定）
+{
+  const hitsAlpha = [];
+  const hitsBeta = [];
+  for (const f of lm06Files) {
+    const rel = lm06Rel(f);
+    if (LM06_SCAN_EXCLUDED.includes(rel)) continue; // M-1 补②：扫描器本体不入判定域
+    const wl = LM06_SCAN_WHITELIST.some((w) => w.file === rel);
+    let lines = [];
+    try { lines = fs.readFileSync(f, "utf8").split("\n"); } catch { continue; }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!LM06_ENTRY_LIT_RE.test(line)) continue;
+      const famCall = LM06_SCAN_FAMCALL.test(line);
+      if (!wl && !famCall && LM06_SCAN_ALPHA.test(line)) hitsAlpha.push(rel + ":" + (i + 1));
+      const classified = famCall || wl || LM06_SCAN_ALPHA.test(line) || LM06_SCAN_BETA_OK.some((re) => re.test(line));
+      if (!classified) hitsBeta.push(rel + ":" + (i + 1));
+    }
+  }
+  // 判据α：扫 tests/ 递归 *.mjs（排除断言台账 .md），命中行=α 正则命中且非 FAMCALL 形态且不在白名单
+  ck.ok(`LM-06-SCAN 判据α（读 API×两族入口字面共现，族面调用与白名单外）：tests/ 可执行 .mjs 命中=0（白名单 n=${LM06_SCAN_WHITELIST.length}）`,
+    hitsAlpha.length === 0, { hits: hitsAlpha.slice(0, 12) });
+  // 判据β：全文件入口字面行集合 − (族面调用∪β_OK 归类∪白名单∪判据α命中) = 未归类行
+  ck.ok("LM-06-SCAN 判据β（两族入口字面逃逸网）：未归类入口字面行=0",
+    hitsBeta.length === 0, { hits: hitsBeta.slice(0, 12), betaOkClasses: "famcall/spawn/dirname/git/payload/comment/ckok-doc/rel-reg/array-const-literal/const-literal/family-reg/whitelist" });
+}
+
+// ---- LM-06-DEP：mcp 族依赖单向四规则+层映射表（域=mcp/ 全 22 文件；v2 §3.1 归一版；
+//      import 提取=/from\s+["']\.\/([a-z0-9-]+)\.mjs["']/g（相对导入；动态 import 零族内命中
+//      =既有事实〔server-core await import("node:sqlite")系 node 内建〕，side-effect import
+//      零命中=既有事实，S1 步 1① async 读面扫描零入口源语义读复核随 N2-③一并） ----
+{
+  const LM06_DEP_IMPORT_RE = /from\s+["']\.\/([a-z0-9-]+)\.mjs["']/g;
+  const deps = {}; // { fileName: [importedFileNames] }，域=mcp/ 全 22 文件
+  let mcpStems = [];
+  try {
+    mcpStems = fs.readdirSync(path.join(PLUGIN_DIR, "mcp"))
+      .filter((f) => f.endsWith(".mjs")).map((f) => f.replace(/\.mjs$/, "")).sort();
+    for (const stem of mcpStems) {
+      deps[stem] = [...fs.readFileSync(path.join(PLUGIN_DIR, "mcp", stem + ".mjs"), "utf8")
+        .matchAll(LM06_DEP_IMPORT_RE)].map((m) => m[1]);
+    }
+  } catch { /* mcp/ 缺失=结构性红，四规则与 MAP 全落红 */ }
+
+  // 规则①：模块不 import 入口（入口下行 import memory=合法例外，不在本规则域）
+  const r1Offenders = Object.entries(deps)
+    .filter(([f]) => f !== "server.mjs").filter(([, ds]) => ds.includes("server.mjs")).map(([f]) => f);
+  ck.ok("LM-06-DEP 规则①（禁触入口）：mcp 族 21 模块 import 目标零 ./server.mjs",
+    r1Offenders.length === 0, { offenders: r1Offenders.slice(0, 12) });
+
+  // 规则②：判层用 LAYER_OF（键带 .mjs 后缀，§2.0 逐字；查表按 stem+".mjs" 归一）——
+  //   上行（b 层 import a 层且 a>b）零容忍；同层=横向，L2 横向仅登记集放行
+  const inRegistry = (e) => L2_HORIZONTAL_EDGES.some(([a, b]) => a === e[0] && b === e[1]);
+  const layerOf = (stem) => LAYER_OF[stem + ".mjs"];
+  const violatesUp = [];
+  const horizontalAll = [];
+  for (const [f, ds] of Object.entries(deps)) {
+    for (const g of ds) {
+      const lf = layerOf(f);
+      const lg = layerOf(g);
+      if (lf === undefined || lg === undefined) continue;
+      if (lg > lf) violatesUp.push(f + "->" + g);
+      // 同层=横向：仅 L2→L2 受登记集门（L1→L1 互为域内合法=split-design §4 层级模型/F-4.1 实测；
+      //   L3 单文件 L4 入口无同层面）
+      else if (lf === 2 && lg === 2) horizontalAll.push([f, g]);
+    }
+  }
+  const extraHorizontal = horizontalAll.filter((e) => !inRegistry(e)).map((e) => e[0] + "->" + e[1]);
+  ck.ok("LM-06-DEP 规则②（禁上行+横向登记）：L1 零 import L2/L3 且 L2 零 import L3；L2 横向边仅登记集",
+    violatesUp.length === 0 && extraHorizontal.length === 0, { violatesUp: violatesUp.slice(0, 12), extraHorizontal: extraHorizontal.slice(0, 12) });
+
+  // 规则③：依赖图拓扑排序可行（Kahn 入度消元，全节点出清=无环）
+  const topoSort = (depMap) => {
+    const nodes = new Set([...Object.keys(depMap), ...Object.values(depMap).flat()]);
+    const indeg = new Map();
+    const adj = new Map();
+    for (const n of nodes) { indeg.set(n, 0); adj.set(n, []); }
+    for (const [f, ds] of Object.entries(depMap)) {
+      for (const g of ds) { indeg.set(g, indeg.get(g) + 1); adj.get(f).push(g); }
+    }
+    const q = [...nodes].filter((n) => indeg.get(n) === 0);
+    let popped = 0;
+    while (q.length) {
+      const n = q.shift();
+      popped++;
+      for (const g of adj.get(n)) { indeg.set(g, indeg.get(g) - 1); if (indeg.get(g) === 0) q.push(g); }
+    }
+    return { ok: popped === nodes.size, cycle: popped === nodes.size ? null : [...nodes].filter((n) => indeg.get(n) > 0).slice(0, 12) };
+  };
+  const topo = topoSort(deps);
+  ck.ok("LM-06-DEP 规则③（无环）：mcp 族模块依赖图拓扑排序可行", topo.ok, { cycle: topo.cycle });
+
+  // 规则④：族隔离（bg-sentinel 族 8 子模块+入口 import 目标零 mcp/ 路径；入口随域内加验=加强不弱化）
+  const hooksViolations = [];
+  const lm06HooksRels = ["hooks/bg-sentinel.mjs",
+    ...fs.readdirSync(path.join(PLUGIN_DIR, "hooks", "bg-sentinel"))
+      .filter((f) => f.endsWith(".mjs")).map((f) => "hooks/bg-sentinel/" + f)];
+  for (const rel of lm06HooksRels) {
+    let src = "";
+    try { src = fs.readFileSync(path.join(PLUGIN_DIR, rel), "utf8"); } catch { hooksViolations.push(rel + " 不可读"); continue; }
+    for (const m of src.matchAll(/(?:from\s+|import\s+)["']([^"']+)["']/g)) {
+      if (/(^|\/)mcp\//.test(m[1])) hooksViolations.push(rel + " import " + m[1]);
+    }
+  }
+  ck.ok("LM-06-DEP 规则④（族隔离）：hooks/bg-sentinel/*.mjs import 相对目标零 mcp/ 路径",
+    hooksViolations.length === 0, { violations: hooksViolations.slice(0, 12) });
+
+  // MAP：层映射表 ≡ mcp 族文件集（LAYER_OF 22 键与 readdir(mcp/) 双向全等；键带 .mjs 后缀按 stem 归一比对；
+  //   新模块漏登记=红）
+  const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x)) && b.every((x) => a.includes(x));
+  const layerKeys = Object.keys(LAYER_OF);
+  const layerStems = layerKeys.map((k) => k.replace(/\.mjs$/, ""));
+  ck.ok("LM-06-DEP 层映射表≡mcp 族文件集（LAYER_OF 22 键双向全等）", sameSet(layerStems, mcpStems),
+    { missing: mcpStems.filter((s) => !layerStems.includes(s)), extra: layerKeys.filter((k) => !mcpStems.includes(k.replace(/\.mjs$/, ""))) });
+}
+
+// ---- LM-06-CAP：行数帽双域（G-帽裁定 a：软帽域豁免 2 件+触发器+200 / 硬帽域全量 ≤900） ----
+const LM06_CAP_SOFT = 900;
+const LM06_CAP_EXEMPT = [
+  // 登记值=机械口径行数（§2.4，S1 步 1③ 全量重测定格，与 F-1 wc -l 值 ±0）；触发器=+200 量级（split-design OS-4）
+  { rel: "mcp/tool-dispatch.mjs", lines: 1428, wcSource: "F-1.1", note: "八波 W5/WG 施工域；≥1628 即红=二拆另案评估入口（21cba5 形态预案见 split-impl-design §8）" },
+  { rel: "mcp/server-lessons.mjs", lines: 932, wcSource: "F-1.1", note: "lessons 域写意图跨三模块（F-4.2）；≥1132 即红同上" },
+];
+// 硬帽域口径钉（偏差声明）：设计档 §2.3 草案常量系宽面 glob（hooks/*.mjs、tests/suites/*.mjs），
+//   实测会把两件非族面存量拽入域内（hooks/stop-check.mjs=921、tests/suites/glean-launch.mjs=976
+//   ——F-1 盘点域与 G-帽裁定均未涉，宽面即日红非裁定意图）。§10 逐字文案钉死的域语义=
+//   「hooks 族 9 文件+六套件族 52 文件」=族面文件集，本落装以 7 族 rel 经 familyFiles 取文件集
+//   （readdir 动态，新模块自动入域）实现；宽面 glob 草案弃用，偏差随 done 上报主控。
+const LM06_CAP_HARD_FAMILIES = ["hooks/bg-sentinel.mjs", "tests/suites/crv8-memory.mjs", "tests/suites/crv6-resilience.mjs",
+  "tests/suites/crv6-statemachine.mjs", "tests/suites/crv2-pack.mjs", "tests/suites/watcher-core.mjs",
+  "tests/suites/sentinel-teardown.mjs"];
+{
+  // 腿 A：豁免触发器钉（红=二拆另案评估入口，不拦小步增长）
+  const measured = {};
+  let exemptOk = true;
+  for (const e of LM06_CAP_EXEMPT) {
+    let v = null;
+    try { v = mechLines(path.join(PLUGIN_DIR, e.rel)); } catch { v = null; }
+    measured[e.rel] = v;
+    if (!(v !== null && v < e.lines + 200)) exemptOk = false;
+  }
+  ck.ok("LM-06-CAP 腿 A（豁免触发器钉）：豁免表逐件机械口径行数<登记值+200", exemptOk, { measured });
+  // 腿 B：硬帽域 ≤900（glean-launch 900 恰线观察件在域内=增长即红）
+  const hardFiles = new Map();
+  for (const rel of LM06_CAP_HARD_FAMILIES) for (const p of familyFiles(PLUGIN_DIR, rel)) hardFiles.set(lm06Rel(p), p);
+  const hardViolations = [];
+  let gleanWatch = null;
+  for (const [rel, p] of hardFiles) {
+    let v = null;
+    try { v = mechLines(p); } catch { hardViolations.push(rel + " 不可读"); continue; }
+    if (v > LM06_CAP_SOFT) hardViolations.push(rel + "=" + v);
+    if (rel === "hooks/bg-sentinel/glean-launch.mjs") gleanWatch = v;
+  }
+  ck.ok("LM-06-CAP 腿 B（硬帽域≤900）：hooks 族 9 文件+六套件族 52 文件实测行数≤900",
+    hardViolations.length === 0, { violations: hardViolations.slice(0, 12), files: hardFiles.size, watch: "glean-launch=" + gleanWatch });
+}
+
+// ---- LM-06 FAMILIES 登记全景钉（OS-2 机械化；防登记面被静默收缩） ----
+{
+  const famSrcText = fs.readFileSync(path.join(PLUGIN_DIR, "tests", "harness", "source-family.mjs"), "utf8");
+  const famKeys = [...famSrcText.matchAll(/"([^"]+)"\s*:\s*\{\s*modDir:/g)].map((m) => m[1]);
+  const expected = [...LM06_SCAN_ENTRIES, ...LM06_CAP_HARD_FAMILIES.filter((k) => !LM06_SCAN_ENTRIES.includes(k))];
+  ck.ok("LM-06 FAMILIES 登记全景：FAMILIES 键集≡8 族",
+    famKeys.length === 8 && expected.every((k) => famKeys.includes(k)) && famKeys.every((k) => expected.includes(k)),
+    { got: famKeys });
 }
 
 const { pass, fail } = ck.summary();

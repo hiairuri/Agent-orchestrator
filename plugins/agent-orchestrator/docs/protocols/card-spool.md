@@ -11,34 +11,34 @@
 
 | 项 | 内容 | 锚点 |
 |---|---|---|
-| 根目录 | `<root>/spool/<mission_id>/`——mission_id 经 safeSegment 消毒后作目录名 | missionSpoolDir :3331 |
-| 三目录族 | `unread/`（未消费，report 落箱）、`read/`（已消费，rename 目标）、`answers/`（主控答复，mailbox answer 写） | unreadDirOf/readDirOf :3334-3335；answers mkdir :5006 |
-| 文件名协议 | `<15位零填充epochMs>-<8hex>.json`——eventId=`String(Date.now()).padStart(15,"0")+"-"+hex(4)`（hex(4)=4 字节→8 字符）；权威注释=文件头布局注释 | :28-30；eventId :4473 |
-| answers 文件名 | `<4位零填充seq>-answer.json`，seq 从目录内既有最大值 +1 起算 | :5008-5011；:5025 |
+| 根目录 | `<root>/spool/<mission_id>/`——mission_id 经 safeSegment 消毒后作目录名 | `missionSpoolDir`（mcp/server-stores.mjs） |
+| 三目录族 | `unread/`（未消费，report 落箱）、`read/`（已消费，rename 目标）、`answers/`（主控答复，mailbox answer 写） | `unreadDirOf`/`readDirOf`（mcp/server-stores.mjs）；answers mkdir（mcp/tool-mailbox.mjs answer） |
+| 文件名协议 | `<15位零填充epochMs>-<8hex>.json`——eventId=`String(Date.now()).padStart(15,"0")+"-"+hex(4)`（hex(4)=4 字节→8 字符）；权威注释=文件头布局注释 | eventId（mcp/tool-report.mjs newEvent 段） |
+| answers 文件名 | `<4位零填充seq>-answer.json`，seq 从目录内既有最大值 +1 起算 | mcp/tool-mailbox.mjs answer（seq 起算+冲突递增） |
 | **「N 文件」口径** | DR1 survey 的「8 文件」口径在本目录族无文可核（grep 零命中，DP2a 证据缺口②）：实测口径=**3 目录族 × 单一文件名协议**（answers 为 4 位 seq 变体）——本卡即权威口径 | 本卡 §1 |
 
-**目录列举行为**（读方通用）：listSpoolMissions 只取目录条目（stat 非目录跳过，IO 错误返空——:3337-3352）；listUnreadFiles 只取 `.json` 结尾并按名排序（`.bad` 隔离件天然出列，:3354-3366）。
+**目录列举行为**（读方通用）：listSpoolMissions 只取目录条目（stat 非目录跳过，IO 错误返空——mcp/server-stores.mjs `listSpoolMissions`）；listUnreadFiles 只取 `.json` 结尾并按名排序（`.bad` 隔离件天然出列，mcp/server-stores.mjs `listUnreadFiles`）。
 
 ## 2. 写方（唯一写方=server 进程，落箱+改板同临界区）
 
 | 写点 | 写什么 | 锚点 |
 |---|---|---|
-| report（落箱） | 事件信封整文件 atomicWriteFileSync 到 `unread/`；**落箱+board 更新+lessons append 一个根锁临界区**（v0.3.1 A1）——不存在「事件落了板没动」的中间态 | :4436-4440；:4490-4491 |
-| report 的两个旁路 | closed mission（C5）与成对鉴权不过（W-A1 方案 a）：事件**已落箱存档**、board 零改动、lessons 不记——落箱先于两判定，证据永不丢 | :4493-4507；:4509-4534 |
-| mailbox answer | `answers/<seq>-answer.json`，flag:"wx" 独占创建，冲突 seq 递增（A3）——并发写者永不覆盖既有答复；answer 文件写+板更新同根锁临界区 | :4994-5037 |
-| mailbox gc | 陈旧 unread 归档（mtime<cutff 的 unread 件经 consumeEventFile 移入 read/，计数 archivedUnread）；gc 归档**只移动不删 unread**，删除面仅 read/ | :5081-5128 |
+| report（落箱） | 事件信封整文件 atomicWriteFileSync 到 `unread/`；**落箱+board 更新+lessons append 一个根锁临界区**（v0.3.1 A1）——不存在「事件落了板没动」的中间态 | mcp/tool-report.mjs toolReport（落箱临界区） |
+| report 的两个旁路 | closed mission（C5）与成对鉴权不过（W-A1 方案 a）：事件**已落箱存档**、board 零改动、lessons 不记——落箱先于两判定，证据永不丢 | mcp/tool-report.mjs（C5/成对鉴权旁路） |
+| mailbox answer | `answers/<seq>-answer.json`，flag:"wx" 独占创建，冲突 seq 递增（A3）——并发写者永不覆盖既有答复；answer 文件写+板更新同根锁临界区 | mcp/tool-mailbox.mjs mailbox answer |
+| mailbox gc | 陈旧 unread 归档（mtime<cutff 的 unread 件经 consumeEventFile 移入 read/，计数 archivedUnread）；gc 归档**只移动不删 unread**，删除面仅 read/ | mcp/tool-mailbox.mjs mailbox gc |
 
-**落箱前置门**（先于落箱，拒绝=零事件）：fail-closed token 门（V6-09：expectedToken 存在则必携且精确匹配；--strict-tokens 连无 token mission 也拒，V6-19A）——鉴权与 board 字段面的接缝见 `card-board.md` §4。summary>200 存储侧截断并附 truncatedNote；details>DETAILS_MAX_CHARS(4000) 存储侧截断（V6-18）+响应 warn_details（INJ-04）——长 payload 应写文件走 artifacts，storage face 无帽不等于无界（:4412-4434；:4817-4819）。
+**落箱前置门**（先于落箱，拒绝=零事件）：fail-closed token 门（V6-09：expectedToken 存在则必携且精确匹配；--strict-tokens 连无 token mission 也拒，V6-19A）——鉴权与 board 字段面的接缝见 `card-board.md` §4。summary>200 存储侧截断并附 truncatedNote；details>DETAILS_MAX_CHARS(4000) 存储侧截断（V6-18）+响应 warn_details（INJ-04）——长 payload 应写文件走 artifacts，storage face 无帽不等于无界（mcp/tool-report.mjs 落箱前置门+存储侧截断）。
 
 ## 3. 事件信封字段表
 
-newEvent 形状（:4474-4489）。**无 JSON schema 校验=裸 JSON**（schema 面=本表+消费方容错）：
+newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验=裸 JSON**（schema 面=本表+消费方容错）：
 
 | 字段 | 类型 | 语义 |
 |---|---|---|
 | v | number（恒 1） | 信封版本标记 |
 | id | string | =文件名 stem（`<15位>-<8hex>`）；mailbox 呈现与排序键 |
-| at | ISO | 落箱时刻（nowIso()）；eventAgeMs 的读源，负 elapsed 钳 0（B7 同族，:3417-3421） |
+| at | ISO | 落箱时刻（nowIso()）；eventAgeMs 的读源，负 elapsed 钳 0（B7 同族，mcp/server-stores.mjs `eventAgeMs`） |
 | mission_id | string | 经 safeSegment 消毒的定位键 |
 | worker | string | report 入参原样（调用方字符串非凭证——凭证是 token） |
 | agent_id | string\|null | 直拷自 mission.dispatch.agent_id（缺=null）——接缝字段见 card-board §4 |
@@ -65,7 +65,7 @@ newEvent 形状（:4474-4489）。**无 JSON schema 校验=裸 JSON**（schema �
 | V6-49 隔离面 | 任何 readEventFile 调用 | parse 失败/非对象 → rename `<file>.bad` 隔离（字节保留可取证）后返 null；**读 IO 错误（rename 竞态）返 null 但不隔离**；防「永久假 unread」 |
 | wake 链（report 内） | kind=done 且 dispatch.mode==="headless" | wakeQueueProduce 落 `<root>/context/wake-queue/<ms>-<mission_id>.json`（wx）+认领 kick——队列在 context/ 不在 spool，接缝见 `card-result-dir.md` |
 
-**消费呈现**（v1.1 W3 A5-E）：mailbox read 的 details 指针化——`details_head`（≤160=T1_HEAD_CAP）+`details_path`（消费后 read/ 文件路径）+`details_hint`；全文证据恒在 spool，DETAILS_MAX_CHARS 存储帽不动（presentMailboxDetails :4879-4897）。peek 从不携 details（字节级不变）。
+**消费呈现**（v1.1 W3 A5-E）：mailbox read 的 details 指针化——`details_head`（≤160=T1_HEAD_CAP）+`details_path`（消费后 read/ 文件路径）+`details_hint`；全文证据恒在 spool，DETAILS_MAX_CHARS 存储帽不动（`presentMailboxDetails`（mcp/tool-mailbox.mjs））。peek 从不携 details（字节级不变）。
 
 ## 5. 失效语义（缺文件/损坏/半写/竞态/时钟漂移 × 读方行为）
 

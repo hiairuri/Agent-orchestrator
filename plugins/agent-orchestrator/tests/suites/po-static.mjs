@@ -58,6 +58,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Checker, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
+import { familyFiles, familySource } from "../harness/source-family.mjs";
 
 const ck = new Checker("po-static");
 const read = (rel) => fs.readFileSync(path.join(PLUGIN_DIR, rel), "utf8");
@@ -70,7 +71,11 @@ const list = (rel) =>
 const count = (hay, needle) => hay.split(needle).length - 1;
 const countRe = (hay, re) => (hay.match(re) || []).length;
 
-const SERVER = read(path.join("mcp", "server.mjs"));
+// v1.3 切分重基（m-20261101-034720-a7a6）：server.mjs 拆为薄入口+21 模块，全部 server.mjs
+//   源码字面钉（W4_PINS/M10-04/M10-05/D11-03/W4-03/W4-05b/W3/W6）扫描面=server 族
+//   （入口+模块族拼接，familySource helper；族文件清单 readdir 动态取）。
+//   计数锁语义不变：族拼接≈原单文件（字节级搬移）+import/export 接线行，钉面计数同口径。
+const SERVER = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
 const SKILL = read(path.join("skills", "agent-orchestrator", "SKILL.md"));
 const WORKER = read(path.join("agents", "orch-worker.md"));
 const STOP_CHECK = read(path.join("hooks", "stop-check.mjs"));
@@ -111,8 +116,9 @@ try {
   // 「会坏什么/好不好」旧口语句已规则化（ARCHETYPES.reviewer），v0.11 期豁免注记撤销——
   // W1-03 扫描域扩 server.mjs，且旧句开场串在产品面全仓 grep=0（回潮防钉）。
   ck.ok("M10-04 ban 不硬扛/不造假（server，⑤ 残句清零）", count(SERVER, "不硬扛") === 0 && count(SERVER, "不造假") === 0, { ying: count(SERVER, "不硬扛"), zaojia: count(SERVER, "不造假") });
-  // W1-03 族（commands/ + agents/ 全部正文文件〔v1.1.1-C1 起 commands 6 个，动态 readdir 不钉数〕+ v1.1 B3 扩域 server.mjs）
-  const W1_FILES = [...list("commands"), ...list("agents"), path.join(PLUGIN_DIR, "mcp", "server.mjs")];
+  // W1-03 族（commands/ + agents/ 全部正文文件〔v1.1.1-C1 起 commands 6 个，动态 readdir 不钉数〕+ v1.1 B3 扩域 server.mjs；
+  //   v1.3 重基：server 扩域面=server 族全文件（familyFiles 动态清单））
+  const W1_FILES = [...list("commands"), ...list("agents"), ...familyFiles(PLUGIN_DIR, path.join("mcp", "server.mjs"))];
   const W1_RE = /不硬扛|不造假|不编造|不算违约|带病硬写|成败即分叉|宁缺勿滥|能答的答|会坏什么|好不好|证据说话/;
   const w1Hits = W1_FILES.map((p) => [p, countRe(fs.readFileSync(p, "utf8"), W1_RE)]).filter(([, n]) => n > 0);
   ck.ok("M10-04 W1-03 态度句族零残留（commands+agents 全文件+server.mjs〔v1.1 W1 B3 扩域〕）", w1Hits.length === 0, w1Hits);
@@ -561,6 +567,21 @@ try {
     const real = new Set((SKILL_LF.match(/^## (\d+)\./gm) || []).map((s) => Number(s.replace(/^## (\d+)\..*$/, "$1"))));
     const missing = chapRefs.filter((n) => !real.has(n));
     ck.ok("C1-05 章节引用与 SKILL 一致（自检清单 ≥7 章且引用章号均真实存在）", chapRefs.length >= 7 && missing.length === 0, { refs: chapRefs, missing });
+  }
+
+  // ---------- A-v0130-W6：headless 真跑冒烟脚本防静默删除钉（v1.3 W6 F-C6；impl-plan §2 W6 逐字
+  //   「脚本存在+逃生门字符串识别」；§6.D-2 红线第三腿=tests/ 根落位非 suites/（LM-04 套件集锁
+  //   不触）；纯静态零外呼——真跑本体不入回归门，外部依赖缺席面由脚本自身 skip+留痕承载） ----------
+  {
+    const smokeRel = path.join("tests", "run-headless-smoke.mjs");
+    const smokeP = path.join(PLUGIN_DIR, smokeRel);
+    const exists = fs.existsSync(smokeP);
+    const src = exists ? fs.readFileSync(smokeP, "utf8") : "";
+    ck.ok(
+      "W6 headless smoke 脚本存在+逃生门字符串识别（ORCH_SKIP_HEADLESS_SMOKE；tests/ 根落位非 suites/）",
+      exists && count(src, "ORCH_SKIP_HEADLESS_SMOKE") >= 1 && !fs.existsSync(path.join(PLUGIN_DIR, "tests", "suites", "run-headless-smoke.mjs")),
+      { exists, escapeHatch: count(src, "ORCH_SKIP_HEADLESS_SMOKE") },
+    );
   }
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------

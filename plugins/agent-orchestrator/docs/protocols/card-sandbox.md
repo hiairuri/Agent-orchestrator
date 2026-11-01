@@ -2,7 +2,7 @@
 
 > **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码逐行核对，worker v12-m71；server.mjs 约 10657 行量级）。行号**不作跨版引用**；跨版定位以函数名锚为准（l-20261022-6a14d6）。
 >
-> - **归属模块**：M4 sandbox（mcp/server.mjs 沙箱写面：`materializeSandbox` ~L1575、`toolSandboxApply` ~L7355、`toolSandboxDiscard` ~L7744）＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，~L6184-6250）
+> - **归属模块**：M4 sandbox（mcp/server.mjs 沙箱写面：`materializeSandbox`（mcp/server-git.mjs）、`toolSandboxApply`/`toolSandboxDiscard`（mcp/tool-sandbox.mjs））＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，mcp/tool-pack.mjs）
 > - **脆度双轴评级**：面广度=中（两收口工具+组包三参）；**后果重度=第一梯队**（apply 的 merge 直接动主仓主线，git 历史不可逆——门禁链是唯一防线，故 apply 侧门禁最厚）
 > - **历史事故回链**：V6-08（两阶段 intent+幂等三态，治锁内长 git 崩窗）/V6-13（git 管线出锁，治锁占用风暴）/V6-35（teardown 后置降级，治 merge 已落仍抛）/V6-42 AUTH-08（qa 裸 verdict 纸门→四查链）/V6-10（coversPath 单一来源）/ENV-01（两慢 merge 场景套内重试稳定化，crv5-apply-envelope）
 > - **scope 注记**：本卡属 M4「不立项增强」（G1 同构裁定 K-6）；本卡只记现状契约。scope_paths 面写 allowlist 演进（v1.0 manifest 起取代 oob_allowlist 主口径）由 M2/M3 卡族承载，本卡按现状并记两参。
@@ -15,10 +15,10 @@
 
 | 阶段 | 执行者 | 关键函数锚 | 产物 |
 |---|---|---|---|
-| create | context_pack（isolation=worktree 时） | `materializeSandbox`（server ~L1575，调用点 ~L6220，根锁内） | worktree＋分支＋`pack.sandbox` 记录＋SANDBOX 节 |
+| create | context_pack（isolation=worktree 时） | `materializeSandbox`（mcp/server-git.mjs，调用点 mcp/tool-pack.mjs，根锁内） | worktree＋分支＋`pack.sandbox` 记录＋SANDBOX 节 |
 | 施工 | worker（沙箱内） | —（SANDBOX 节红线约束） | 分支上提交＋diff 存证 artifacts |
-| 收口 A | 主控 | `toolSandboxApply`（~L7355，三阶段） | merge 落主线＋board closed 自动签收 |
-| 收口 B | 主控 | `toolSandboxDiscard`（~L7744，三阶段） | 分支/worktree 弃置，board 状态不动 |
+| 收口 A | 主控 | `toolSandboxApply`（mcp/tool-sandbox.mjs，三阶段） | merge 落主线＋board closed 自动签收 |
+| 收口 B | 主控 | `toolSandboxDiscard`（mcp/tool-sandbox.mjs，三阶段） | 分支/worktree 弃置，board 状态不动 |
 
 ## 1. create：materializeSandbox
 
@@ -26,12 +26,12 @@
 |---|---|
 | **写方** | server 独占（context_pack isolation=worktree 分支；根锁内执行） |
 | **读方** | worker（worktree 内施工）；server（apply/discard 按 pack.sandbox 记录定位） |
-| **门（fail-loud）** | 非 git 项目（rev-parse 失败/不在工作树）→ `ToolError('非 git 项目…')`；空仓（无 HEAD）→ 拒；git 缺失（ENOENT）→ 拒；merge-tree 预检不支持（旧版 git，`assertMergeTreeSupport` ~L1161 探测+进程内缓存）→ 拒——沙箱写面在这四种环境下一律降级 isolation="none" 由主控显式选择，server 不静默降级 |
+| **门（fail-loud）** | 非 git 项目（rev-parse 失败/不在工作树）→ `ToolError('非 git 项目…')`；空仓（无 HEAD）→ 拒；git 缺失（ENOENT）→ 拒；merge-tree 预检不支持（旧版 git，`assertMergeTreeSupport`（mcp/server-git.mjs）探测+进程内缓存）→ 拒——沙箱写面在这四种环境下一律降级 isolation="none" 由主控显式选择，server 不静默降级 |
 | **自愈** | `worktree prune` 先行清 stale 元数据；worktree 三态复用：分支存在且已注册→幂等复用（重打包安全）；分支存在未注册→attach；否则 `worktree add -b orch/<mission_id>` 新建于 `<root>/sandboxes/<mission_id>` |
-| **字段** | `pack.sandbox` 全字段（~L1630）：`isolation:"worktree"`／`root`（worktree 绝对路径）／`branch`（`orch/<完整 mission_id>`）／`base_commit`／`junction_shared:boolean`／`oob_allowlist`（normalize 后清单）／`created_at`／`apply_intent_at:null`（V6-08 两阶段 intent 位）／`applied_at:null`／`applied_commit:null`／`discarded_at:null`。timeline 追加 `sandbox:create` 事件 |
+| **字段** | `pack.sandbox` 全字段（mcp/server-git.mjs `materializeSandbox`）：`isolation:"worktree"`／`root`（worktree 绝对路径）／`branch`（`orch/<完整 mission_id>`）／`base_commit`／`junction_shared:boolean`／`oob_allowlist`（normalize 后清单）／`created_at`／`apply_intent_at:null`（V6-08 两阶段 intent 位）／`applied_at:null`／`applied_commit:null`／`discarded_at:null`。timeline 追加 `sandbox:create` 事件 |
 | **失效语义** | node_modules junction：主仓 node_modules 存在且参=share 时 symlink（junction）创建；已链接=复用；创建失败（跨卷等）=**`junction_shared:false` 静默降级**（永不 fail 派发）；沙箱记录经 `assertInside(root, wtDir)` 路径包含校验（逃逸=拒） |
 
-**SANDBOX 节物化**（`buildSandboxLines` ~L1656，逐行）：工作区路径+分支+基点；包内项目路径已改写声明（未改写残留按同相对路径到工作区读）；红线行「绝不写原项目路径——写穿主仓会被主仓 status 巡检与 reviewer 越界审查检出，整单丢弃（sandbox_discard）」；node_modules 行（junction 共享=只读使用、禁 install/upgrade/delete、需装依赖先删链接独立安装并报告注明）；done 上报必附 `git diff --stat <base>` 与 `git diff --name-only <base>` 输出各存文件进 artifacts（**diff 存证要求**，reviewer 审查输入）。
+**SANDBOX 节物化**（`buildSandboxLines`（mcp/server-git.mjs），逐行）：工作区路径+分支+基点；包内项目路径已改写声明（未改写残留按同相对路径到工作区读）；红线行「绝不写原项目路径——写穿主仓会被主仓 status 巡检与 reviewer 越界审查检出，整单丢弃（sandbox_discard）」；node_modules 行（junction 共享=只读使用、禁 install/upgrade/delete、需装依赖先删链接独立安装并报告注明）；done 上报必附 `git diff --stat <base>` 与 `git diff --name-only <base>` 输出各存文件进 artifacts（**diff 存证要求**，reviewer 审查输入）。
 
 ## 2. apply：toolSandboxApply 三阶段（V6-08/13/35）
 
@@ -85,9 +85,9 @@
 
 | 粒度 | 机制 | 锚 |
 |---|---|---|
-| 默认档 | scope 与在飞 mission 写集相交 → 登记放行＋`scope_warnings` 附「三选一」hint（不拒绝） | `scopePairConflict`（server ~L1369-1445） |
-| strict 档 | `patch.strict_scope === true` → 相交即 `ToolError`「strict_scope 拒绝登记…（board 未改动）」 | ~L1429-1436 |
-| 观测面 | board list 顶层 `scope_conflicts`（在飞相交对，帽内条数）供主控巡检 | ~L1445 起 |
+| 默认档 | scope 与在飞 mission 写集相交 → 登记放行＋`scope_warnings` 附「三选一」hint（不拒绝） | `scopePairConflict`（mcp/server-git.mjs） |
+| strict 档 | `patch.strict_scope === true` → 相交即 `ToolError`「strict_scope 拒绝登记…（board 未改动）」 | strict 档拒绝（mcp/server-git.mjs `scopePairConflict`） |
+| 观测面 | board list 顶层 `scope_conflicts`（在飞相交对，帽内条数）供主控巡检 | 观测面（mcp/server-git.mjs `scopePairConflict`） |
 
 与沙箱越界检出的分工：登记冲突管「派发前写集声明」，coversPath 越界 diff 管「施工后实际改动」——两道独立，缺一不可互替。
 

@@ -11,19 +11,20 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo, makeOobChange } from "../harness/git-fixture.mjs";
+import { familySource } from "../harness/source-family.mjs";
 
 const ck = new Checker("sb-normalize");
 const T = makeTempRoot({ prefix: "orch-sb-", root: parseRootArg() || undefined });
 const fwd = (p) => String(p).split(path.sep).join("/");
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const server = DEFAULT_SERVER || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "mcp", "server.mjs");
 
 // ---------- U 组：从 server.mjs 源码抽取 F1 本体做单元断言（M-01/M-02 单元面）
-const src = fs.readFileSync(server, "utf8");
+// v1.3 切分重基（m-20261101-034720-a7a6）：normalizePathList 随模块迁移（server-core.mjs），
+//   抽取读面=server 族（入口+模块族拼接，familySource helper），抽取锚与本体不变。
+const src = familySource(PLUGIN_DIR, "mcp/server.mjs");
 const mF1 = src.match(/function normalizePathList\(value\) \{[\s\S]*?\n\}/);
 if (!mF1) { ck.ok("U0 未找到 normalizePathList", false); ck.summary(); process.exit(1); }
 const normalizePathList = new Function(`return (${mF1[0]});`)();

@@ -2,7 +2,7 @@
 name: orch-scout
 description: "只读调研子代理：查代码/文档/网络，产出带证据（path:line 或引用）的结论，不改任何文件。用于主控派发的调研、查证、选项比较；结论经 report 工具回报。需要它动手改代码时改用 orch-worker。"
 color: blue
-tools: [Read, Glob, Grep, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
+tools: [Read, Glob, Grep, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe]
 disallowedTools: [Write, Edit, MultiEdit, NotebookEdit, Bash, Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__lessons, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch]
 ---
 

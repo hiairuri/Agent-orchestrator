@@ -26,7 +26,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { startServer, Checker, DEFAULT_SERVER } from "../harness/jsonrpc-client.mjs";
+import { startServer, Checker, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
+import { familySource } from "../harness/source-family.mjs";
 import { makeTempRoot, parseRootArg, blankMission } from "../harness/temp-root.mjs";
 import { makeRepo } from "../harness/git-fixture.mjs";
 
@@ -95,7 +96,8 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       r2.text.split("\n").find((l) => l.includes("docs/")),
     );
     // ---- QUOT-03：静态防回退——gitRun 唯一出口注入 quotepath=false
-    const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+    // v1.3 切分重基（修复轮 D）：gitRun 已迁 mcp/server-git.mjs，读取面走 server 族 helper。
+    const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
     ck.ok("QUOT-03 静态：gitRun 源码含 -c core.quotepath=false", src.includes('"-c", "core.quotepath=false"'), "");
   } finally {
     s.close();
@@ -169,8 +171,10 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       ck.ok("LOCK-02b 正常持有者 release 后锁清除", gone);
     }
     // ---- LOCK-03/04（结构面）：wx 重试与「无 owner 文档不宣布持锁」的服务端保证
+    // v1.3 切分重基（修复轮 D）：根锁 wx/撤销/release 结构段已迁 mcp/server-core.mjs，
+    // 读取面走 server 族 helper（四锚同模块保序），断言与期望值零改动。
     {
-      const src = fs.readFileSync(DEFAULT_SERVER, "utf8");
+      const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
       ck.ok("LOCK-04a 结构：owner 文档 wx 写失败重试 3 次", /for \(let wxAttempt = 0; wxAttempt < 3/.test(src), "");
       ck.ok("LOCK-04b 结构：wx 仍失败撤销本次 mkdir（undo our mkdir only）", src.includes("undo our mkdir only"), "");
       ck.ok("LOCK-03c 结构：撤销分支遵守 deadline 并抛存储忙", /ownerWritten[\s\S]{0,600}存储忙，请重试（root lock 等待超时）/.test(src), "");
@@ -522,7 +526,9 @@ const resultText = (r) => r.json ?? { _raw: r.text };
         r6c.isError !== true && j6c.worktree_removed === true && Boolean(sb6cAfter.applied_at) && Boolean(sb6cAfter.discarded_at),
         r6c.text.slice(0, 140),
       );
-      const src6 = fs.readFileSync(DEFAULT_SERVER, "utf8");
+      // v1.3 切分重基（修复轮 D）：discard 竞态仲裁已迁 mcp/tool-sandbox.mjs，读取面走
+      // server 族 helper（模块族含 tool-*），字面锁与期望值零改动。
+      const src6 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
       ck.ok(
         "ENV-06d 结构：真竞态仲裁在源（applied_at 新现 → discard 中止，!p1.sawApplied 守卫 + 「discard 中止」报错）",
         src6.includes("!p1.sawApplied") && src6.includes("discard 中止：mission 已被并发 apply 收口"),
@@ -588,6 +594,99 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       return lck;
     };
     await withRetryOnce("ENV-07", runEnv07);
+  }
+}
+
+/* ================= 场景 I：G-B（v1.3 WG G-b：apply 授权并集读 + 回执明示来源） ================= */
+{
+  const PROJG = path.join(BASE.root, "proj-gb");
+  const TG = path.join(BASE.root, "root-gb");
+  makeRepo({ dir: PROJG, files: { "README.md": "readme\n", "src/a.txt": "a\n", "docs/a.md": "# A\n" } });
+  const s = startServer({ root: TG, cwd: PROJG });
+  const gitIn = (cwd, args) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+    if (r.status !== 0) throw new Error("git " + args.join(" ") + " failed: " + (r.stderr || r.stdout));
+    return r.stdout;
+  };
+  /** G-b 夹具：pack（oob_allowlist 冻结）→ 沙箱提交 → 评审链种子 → 板面增补 scope_paths（可选）→ apply */
+  const gbFlow = async (mid, { packOob, boardScope, files }) => {
+    const pack = await s.call("context_pack", {
+      mission_id: mid,
+      title: mid + " G-b 并集读探针",
+      task: "验证 apply allow 并集读",
+      isolation: "worktree",
+      ...(packOob === undefined ? {} : { oob_allowlist: packOob }),
+    });
+    if (pack.isError) throw new Error("context_pack failed: " + pack.text);
+    const wt = path.join(TG, "sandboxes", mid);
+    for (const [rel, content] of Object.entries(files)) {
+      fs.mkdirSync(path.join(wt, path.dirname(rel)), { recursive: true });
+      fs.writeFileSync(path.join(wt, rel), content);
+    }
+    gitIn(wt, ["add", "-A"]);
+    gitIn(wt, ["commit", "-m", "probe " + mid]);
+    // 评审链种子（V6-42 四查同款，直写板种子——v0.6 A4 夹具适配口径）
+    const bp = path.join(TG, "board.json");
+    const bf = JSON.parse(fs.readFileSync(bp, "utf8"));
+    bf.missions.push(
+      blankMission({
+        id: mid + "-rev",
+        agent_type: "agent-orchestrator:orch-reviewer",
+        status: "done",
+        qa: { verdict: "pass", mission_id: mid },
+      }),
+    );
+    const fm = bf.missions.find((x) => x && x.id === mid);
+    fm.status = "done";
+    fm.qa = { verdict: "pass", reviewed_by: mid + "-rev", reviewed_at: new Date().toISOString() };
+    fs.writeFileSync(bp, JSON.stringify(bf, null, 2) + "\n");
+    // 增补通道=R2-4 钉死：board upsert 改 mission.scope_paths（顶层 MERGEABLE 键直改）；
+    // pack.sandbox 深 patch 系 ONE_LEVEL 整对象替换=破坏性通道，禁当增补通道（边界注）。
+    if (boardScope !== undefined) {
+      const up = await s.call("board", { action: "upsert", mission: { id: mid, scope_paths: boardScope } });
+      if (up.isError) throw new Error("board upsert supplement failed: " + up.text);
+    }
+    return s.call("sandbox_apply", { mission_id: mid });
+  };
+  try {
+    // ---- G-B-1：board 改 scope_paths 增补 → apply 认增补（回执明示 allow 实际来源） ----
+    const r1 = await gbFlow("m-gb1", {
+      packOob: ["src"],
+      boardScope: ["src", "docs"],
+      files: { "docs/gb1.md": "supplemented\n" },
+    });
+    const j1 = resultText(r1);
+    ck.ok(
+      "G-B-1a board upsert 增补 scope_paths 后 apply 认增补（docs/gb1.md 放行合流）",
+      r1.isError !== true && j1.ok === true && j1.status === "closed",
+      r1.text.slice(0, 160),
+    );
+    ck.ok(
+      "G-B-1b 回执明示 allow 实际来源：allow_sources={pack_oob_allowlist:1, board_scope_paths_added:1}（防双源残留观感）",
+      j1.allow_sources && j1.allow_sources.pack_oob_allowlist === 1 && j1.allow_sources.board_scope_paths_added === 1,
+      j1.allow_sources,
+    );
+    // ---- G-B-2：未增补 → 行为不变（pack 冻结清单单独生效，零 board 增补腿） ----
+    const r2 = await gbFlow("m-gb2", { packOob: ["src"], files: { "src/gb2.js": "export const v = 2;\n" } });
+    const j2 = resultText(r2);
+    ck.ok(
+      "G-B-2 未增补 → 行为不变：pack 清单内 src/gb2.js 照旧放行，回执 board_scope_paths_added=0",
+      r2.isError !== true && j2.ok === true && j2.allow_sources && j2.allow_sources.pack_oob_allowlist === 1 && j2.allow_sources.board_scope_paths_added === 0,
+      { ok: j2.ok, allow: j2.allow_sources, err: r2.text.slice(0, 120) },
+    );
+    // ---- G-B-3：清单外仍拒（负臂保基线：pack+board 并集之外零放行） ----
+    const r3 = await gbFlow("m-gb3", {
+      packOob: ["src"],
+      boardScope: ["src", "docs"],
+      files: { "hooks/gb3-evil.js": "evil\n" },
+    });
+    ck.ok(
+      "G-B-3 清单外 hooks/gb3-evil.js 仍拒（越界文案含双源计数，增补不放宽边界；并集去重后 board 净增补=docs 1 项）",
+      r3.isError === true && r3.text.includes("越界") && r3.text.includes("hooks/gb3-evil.js") && r3.text.includes("board scope_paths 增补 1 项"),
+      r3.text.slice(0, 200),
+    );
+  } finally {
+    s.close();
   }
 }
 

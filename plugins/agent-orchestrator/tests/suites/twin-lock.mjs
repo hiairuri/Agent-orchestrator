@@ -41,6 +41,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PLUGIN_DIR, Checker } from "../harness/jsonrpc-client.mjs";
 import { makeTempRoot, parseRootArg } from "../harness/temp-root.mjs";
+import { familySource } from "../harness/source-family.mjs";
+
+// v1.3 切分重基（m-20261101-034720-a7a6）：server/bg-sentinel 两文件已拆为薄入口+模块族，
+//   本套全部按旧单文件读源的面（TWIN_FILES 抽取/VALUE_TWINS 值锁/STRING_TWINS/TW-CT/NEG 腿）
+//   统一切到族扫描（familySource=入口+模块族拼接，LF 归一）；session-start/stop-check/poller
+//   未拆分，helper 单文件读零感知。锚唯一性与计数锁语义不变（族拼接≈原单文件+接线行；
+//   模块化引入的 export 前缀由值锁正则 (?:export )? 容忍，恰一定义口径不变）。
+const famSrc = (rel) => familySource(PLUGIN_DIR, rel, { lf: true });
 
 // ---- TWIN_SPEC 声明表（五文件 twin 分布；fns/consts 按文件实际持有声明） ----
 const TWIN_FILES = [
@@ -158,7 +166,7 @@ try {
       anchorProblems.push(f.rel + ": missing");
       continue;
     }
-    const src = LF(fs.readFileSync(p, "utf8"));
+    const src = famSrc(f.rel);
     SRC[f.label] = src;
     for (const fn of f.fns) {
       const n = src.split("function " + fn + "(").length - 1;
@@ -280,10 +288,11 @@ try {
   twinCase("TW-FA-06 fmtAge(null)/(NaN)/(Infinity) → 空串三连", FA_FILES,
     (mod) => [mod.fmtAge(null), mod.fmtAge(NaN), mod.fmtAge(Infinity)], ["", "", ""]);
 
-  // ---- VALUE_TWINS 七 site 值锁（逐 site 恰一定义 + 字面值；v1.2.2 扩 +4 滞回 20/10） ----
+  // ---- VALUE_TWINS 七 site 值锁（逐 site 恰一定义 + 字面值；v1.2.2 扩 +4 滞回 20/10）
+  // v1.3 重基：族 rel 读面走 famSrc；定义行正则容忍模块化 export 前缀（恰一定义语义不变）。
   VALUE_TWINS.forEach((vt, i) => {
-    const src = LF(fs.readFileSync(path.join(PLUGIN_DIR, vt.rel), "utf8"));
-    const re = new RegExp("(?:^|\\n)const " + vt.name + " = (\\d+);", "g");
+    const src = famSrc(vt.rel);
+    const re = new RegExp("(?:^|\\n)(?:export )?const " + vt.name + " = (\\d+);", "g");
     const hits = src.match(re) || [];
     const vals = hits.map((h) => (h.match(new RegExp("const " + vt.name + " = (\\d+);")) || [])[1]);
     ck.ok(
@@ -306,8 +315,8 @@ try {
     let vb = null;
     let detail = "";
     try {
-      va = captureString(LF(fs.readFileSync(path.join(PLUGIN_DIR, st.a.rel), "utf8")), st.a.name);
-      vb = captureString(LF(fs.readFileSync(path.join(PLUGIN_DIR, st.b.rel), "utf8")), st.b.name);
+      va = captureString(famSrc(st.a.rel), st.a.name);
+      vb = captureString(famSrc(st.b.rel), st.b.name);
       detail = va + " vs " + vb;
     } catch (e) {
       detail = String((e && e.message) || e).slice(0, 120);
@@ -322,7 +331,7 @@ try {
   // ---- TW-CT 转投契约腿（v1.2.2，QA-R1 M-5/G-3）：包节头字面 × 解析器前缀双 site 同文件在位——
   // 节头改名而无解析随改=转投静默吞教训（RV-3 型），CT 红即检出。负例腿红证内建（零源触碰）。 ----
   {
-    const serverLF = LF(fs.readFileSync(path.join(PLUGIN_DIR, "mcp/server.mjs"), "utf8"));
+    const serverLF = famSrc("mcp/server.mjs");
     const ctPackHeader = (serverLF.match(/"## LESSONS（[^"]*"/g) || []).length;
     const ctParserPrefix = (serverLF.match(/\^## LESSONS/g) || []).length;
     ck.ok(

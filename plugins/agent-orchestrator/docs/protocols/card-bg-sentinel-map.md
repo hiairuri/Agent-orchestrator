@@ -29,23 +29,23 @@
 
 | 行锚 | 分节（分节注释标题） | 职责 | 关键函数/文件锚 |
 |---|---|---|---|
-| L148 | root-id 契约校验定根 | 存储根定位（五脚本 verbatim twin，server 站 server 侧） | `locateRoot`/`rootIdOf`（root-contract 套件锁） |
-| L267 | board / wake-failure helpers | 板只读+唤醒失败判据；server.mjs & hooks verbatim twin | `readBoardSafe` 族（twin-lock 五文件矩阵） |
-| L363 | 信号模块 | rollout 心跳/tool_usage/双空闲链（主控活性判定） | 信号读取族 |
-| L520 | watcher-signals 消费 | watcher 优先唤醒通道的在岗判定面（v0.8 W6 闭环） | `watcherCoverage` |
-| L569 | 家族槽位 | 槽位 wx 认领/心跳/接管/释放/清理 | `claimSlot`/`touchSlot`/`releaseSlot`/`pruneStaleSlots` |
-| L693 | 家族轮换选举 | 寿命 cap 单赢家，每寿命周期至多一条通知 | 轮换选举族 |
-| L747 | 观测型隔离 | quarantine.json 标记+家族级告警抑制（V7-04 lite） | `claimQuarantine`/`readQuarantine` |
-| L814 | fired 协议 | 开枪仲裁（错峰防重+封顶+放弃终态） | `claimShots`/`firedEligible`/`pruneFired` |
-| L922 | 回声 | 三通道：本地 echo.jsonl+平台邮箱信封+OS toast 兜底 | `appendEcho`/`pruneEcho`/`ECHO_MAX_LINES` |
-| L1059 | 哨兵 drain | 完成即唤队列滞留消费（滞留两 tick 判定） | drain 族 |
-| L1130 | 条件分类 classify | 板事件龄期条件分级，C3>C1>C2，每 mission 至多一条 | classify 族 |
-| L1240 | 告警汇总 | 四类文案分组（含「疑似崩溃」「放弃通告」段） | 告警组族 |
-| L1311 | 归敛自动拉起 | 门槛复刻+锁前置+headless 拉起（glean） | `writeGleanState`/`readGleanState`/`clearGleanState` |
-| L1460 | 冷却戳 | JSON 冷却戳（时刻+TTL+种类；长冷却 24h/短冷却 1h 两档，用户裁定） | `gleanStampFile` |
-| L1536 | 租约 wx 守卫 | 「读-比-写」串行化，多实例家族只成一 | 租约守卫族 |
-| L1702 | 在跑子进程状态文件 | `sentinel/glean-launch-state.json`（在飞 glean 子进程状态） | glean-launch-state 读写族 |
-| L2195 | 主循环 | tick 编排（cfg 重读/槽位/分类/开枪/回声/自毁判定） | `main` |
+| hooks/bg-sentinel/core.mjs `locateRoot` | root-id 契约校验定根 | 存储根定位（五脚本 verbatim twin，server 站 server 侧） | `locateRoot`/`rootIdOf`（root-contract 套件锁） |
+| hooks/bg-sentinel/core.mjs `readBoardSafe` | board / wake-failure helpers | 板只读+唤醒失败判据；server.mjs & hooks verbatim twin | `readBoardSafe` 族（twin-lock 五文件矩阵） |
+| hooks/bg-sentinel/signals.mjs | 信号模块 | rollout 心跳/tool_usage/双空闲链（主控活性判定） | 信号读取族 |
+| hooks/bg-sentinel/signals.mjs `watcherCoverage` | watcher-signals 消费 | watcher 优先唤醒通道的在岗判定面（v0.8 W6 闭环） | `watcherCoverage` |
+| hooks/bg-sentinel/family.mjs | 家族槽位 | 槽位 wx 认领/心跳/接管/释放/清理 | `claimSlot`/`touchSlot`/`releaseSlot`/`pruneStaleSlots` |
+| hooks/bg-sentinel/family.mjs | 家族轮换选举 | 寿命 cap 单赢家，每寿命周期至多一条通知 | 轮换选举族 |
+| hooks/bg-sentinel/family.mjs | 观测型隔离 | quarantine.json 标记+家族级告警抑制（V7-04 lite） | `claimQuarantine`/`readQuarantine` |
+| hooks/bg-sentinel/fired.mjs | fired 协议 | 开枪仲裁（错峰防重+封顶+放弃终态） | `claimShots`/`firedEligible`/`pruneFired` |
+| hooks/bg-sentinel/echo.mjs | 回声 | 三通道：本地 echo.jsonl+平台邮箱信封+OS toast 兜底 | `appendEcho`/`pruneEcho`/`ECHO_MAX_LINES` |
+| hooks/bg-sentinel/wake-kick.mjs | 哨兵 drain | 完成即唤队列滞留消费（滞留两 tick 判定） | drain 族 |
+| hooks/bg-sentinel/classify.mjs | 条件分类 classify | 板事件龄期条件分级，C3>C1>C2，每 mission 至多一条 | classify 族 |
+| hooks/bg-sentinel/classify.mjs | 告警汇总 | 四类文案分组（含「疑似崩溃」「放弃通告」段） | 告警组族 |
+| hooks/bg-sentinel/glean-launch.mjs | 归敛自动拉起 | 门槛复刻+锁前置+headless 拉起（glean） | `writeGleanState`/`readGleanState`/`clearGleanState` |
+| hooks/bg-sentinel/glean-launch.mjs `gleanStampFile` | 冷却戳 | JSON 冷却戳（时刻+TTL+种类；长冷却 24h/短冷却 1h 两档，用户裁定） | `gleanStampFile` |
+| hooks/bg-sentinel/family.mjs | 租约 wx 守卫 | 「读-比-写」串行化，多实例家族只成一 | 租约守卫族 |
+| hooks/bg-sentinel/glean-launch.mjs | 在跑子进程状态文件 | `sentinel/glean-launch-state.json`（在飞 glean 子进程状态） | glean-launch-state 读写族 |
+| hooks/bg-sentinel.mjs（入口主循环） | 主循环 | tick 编排（cfg 重读/槽位/分类/开枪/回声/自毁判定） | `main` |
 
 **职责族计数**：上表即多族确认（DP1「多职责族」判断成立；族数随演进增减，以分节注释为准——本卡不钉族数，计数恒为台账非门禁）。
 
@@ -53,7 +53,7 @@
 
 ## 3. twin 面（跨文件一致性义务）
 
-- **verbatim twin 三处**：root-id 定根（L148）与 board/wake-failure helpers（L267）系 server.mjs 与 hooks 多脚本 verbatim 同文——**改任一副本必须五处同波改**，行为矩阵由 twin-lock 套件锁定（五文件：server/session-start/stop-check/bg-sentinel/poller）。
+- **verbatim twin 三处**：root-id 定根（core.mjs `locateRoot`）与 board/wake-failure helpers（core.mjs `readBoardSafe`）系 server.mjs 与 hooks 多脚本 verbatim 同文——**改任一副本必须五处同波改**，行为矩阵由 twin-lock 套件锁定（五文件：server/session-start/stop-check/bg-sentinel/poller）。
 - **异名值 twin**：心跳判死阈值在本文件、server（SENTINEL_HEARTBEAT_STALE_MS）、bg-gate（HEARTBEAT_STALE_MS）三处异名同值——VALUE_TWINS 值锁逐 site 锁定（三处定义=死锁风险点，P5 一致性锁首要对象）。
 - **fmtAge**：分叉点已统一到 server 版裸 `min` 形态（行为等价，W0 速赢落定）；后续新增 twin 函数走 twin-lock TWIN_SPEC 声明表登记。
 
@@ -69,7 +69,7 @@
 - **sentinel-teardown**（黑盒生命周期，T1-T10 加速参数驱动）：槽位/接管/fired/回声/teardown/standby/复活全链——本卡 §2 各节的黑盒验证主面。
 - **bggate**（bg-gate 契约）：哨兵在岗判定/契约头/remind 面（M4-1 GATE 组落此）。
 - **twin-lock**：五文件行为矩阵+VALUE_TWINS 值锁（本卡 §3）。
-- **root-contract**：L148 定根契约。
+- **root-contract**：定根契约（hooks/bg-sentinel/core.mjs `locateRoot`）。
 - **函数名锚（LM-05 候选行素材）**：见 §2 表末列（均 bg-sentinel.mjs，2026-10-28 grep 实证可见；card-sentinel.md 已在册覆盖大半）。
 
 ## 6. 维护规则

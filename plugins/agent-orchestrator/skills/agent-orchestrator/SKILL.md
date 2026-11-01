@@ -46,6 +46,7 @@ OV-5 尾块契约：每派发轮收工，最后一条 assistant 消息尾部携 
 OV-6 三小循环默认形态：策划↔策划QA/计划↔计划QA/实行↔版本QA 配对循环打磨至终版；QA 意见文件直投对接方、主控只转指针；循环间 grill 门默认必开+豁免显式声明。
 OV-7 运行面禁热修改（强规则）：被加载/在跑的树（插件运行面、bot 载入面等一切 live 面）一律不做热修改——变更走 worktree 沙箱施工+版本QA 签收后合并落面；未签收迭代不得 commit/切分支/改文件落运行面。紧急修复也走沙箱快进，不做在位热补。
 OV-8 协议契约卡指针：跨进程写读面（sentinel 文件族/spool/root.txt/dispatch result-dir/board+p2p/probe 分区/记忆三视图等）的字段级契约卡以 `docs/protocols/` 契约卡为权威（四栏结构：写方/读方/字段/失效语义）；SKILL 只留本指针行，字段细节以卡为权威，卡本体随协议演进单独维护。
+OV-9 主控记忆消费三通道（v1.3）：①content 面 result 顶层 `orch_md` 键（主通道——reason∈{initial,changed,removed} 时 server 注入同一 att，unchanged 不注入零字节差；宿主透传 content 可达，harness call()/`r.json` 直取）；②顶层 `orch_memory` 附件视为尽力而为（宿主客户端转交工具结果时只透传 content[]，顶层元数据结构性丢弃）；③定期 `probe file.head ORCH.md` 对账（工具面已验证可达）。due 边界：glean due 信号不入 content 注入——非 board/list 工具的 due 仍宿主不可达，系合理取舍（board/list=主控轮询面 M10 在场＋bg-sentinel 常忙自动拉起兜底），勿误判「due 已全工具可达」。
 
 **术语（唯一形态，禁止口语变体）**
 
@@ -283,19 +284,19 @@ MM-14 红线：不得直接读写平台会话库 db.sqlite；镜像与 `ReadSess
 ### 10.3 视图层：归敛信号与处置
 
 MM-15 定位：lessons 是事件层，主控与子代理记忆视图是视图层——ORCH.md（主控记忆）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）；归敛 = 后台 orch-gleaner 定期把事件层整理进视图层（消费 ORCHTEMP、巡检候选、维护超帽裁剪、产报告）；设计权威 designs/agent-orchestrator-v0.8-DESIGN.md §6/§9。
-MM-16 到期信号：server 每次工具调用评估双门——①距上次归敛 >48h；②双库自水印以来新增 ≥10 条；两值与帽值集中 `glean.cfg.json` 可覆盖；双门全过且锁闲 → 物化 `<全端目录>/glean-brief.json`（实测门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg 全文）+ 固定包 `glean-pack.md`（MM-29）并在响应附 `orch_memory.glean={due:true, reason, brief_path, pack_path, lock_state}`。
+MM-16 到期信号：server 每次工具调用评估三键两腿——闲时腿：①距上次归敛 >idle_hours（缺省 48h）∧②双库自水印以来新增 ≥new_events（缺省 10 条）；常忙腿（v1.3）：③双库自水印以来新增 ≥busy_channel_events（缺省 40 条；0=关断；仅闲时腿时间门不过时兜底触发，防常忙期 48h 久不归敛）；三键与帽值集中 `glean.cfg.json` 可覆盖（cfg 全键：idle_hours / new_events / busy_channel_events / 锁过期键〔1.5h〕/ pack_global_section / orch_md_max_lines〔默认 120〕/ orch_md_max_bytes〔默认 10KB〕）；帽两键为 v1.3 W4 opt-in（默认零行为变更；上调帽值→主控上下文线性增长，每+10KB≈每变更事件注入 +10KB，操作者自担）；任一腿全过且锁闲 → 物化 `<全端目录>/glean-brief.json`（实测门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg 全文）+ 固定包 `glean-pack.md`（MM-29）并在响应附 `orch_memory.glean={due:true, reason, brief_path, pack_path, lock_state}`。
 MM-17 处置：`due:true` 且锁闲 → 后台 GP+orch-gleaner persona 派发（gate due 路径 = MM-29 一行 prompt 指固定包，主控零组装；手工拉起 = MM-28 骨架组包，包内 CONTEXT 内嵌 brief 快照）；TASK = 抢锁（位置=`<brief.lock_path>`，权威指针勿手写）→ 消费 ORCHTEMP（retire 置状态）→ 候选巡检 promote → 视图层维护（ORCH.md 重写 ver+1 / 标记区外科编辑 / 全端 AGENTS.md 更新）→ 锁置 done + watermarks → 写报告；`lock_state:"busy"` 或不感兴趣 → 忽略（信号不消费无后果，下次按门槛重新评估）。
 MM-18 组包校验：派发后 grep pack.md 验证 CONTEXT 物化（缺陷候选 #52 纪律）；路径类括注一律引权威指针（brief 字段/DESIGN 节号），不写绝对路径。
-MM-19 ORCH.md ver 同步：任一工具成功响应可能附顶层 `orch_memory.orch_md`——`reason:"initial"` 静默装载；`"changed"` 以新全文替换旧认知；`"removed"` 清空；`truncated:true` 视为超帽信号，考虑拉起归敛；主控不写 ORCH.md，只消费。
+MM-19 ORCH.md ver 同步：任一工具成功响应可能附主控记忆两 surfacing——content 面 result 顶层 `orch_md` 键（v1.3 起主通道，OV-9）＋顶层 `orch_memory.orch_md` 附件（尽力而为）——`reason:"initial"` 静默装载；`"changed"` 以新全文替换旧认知；`"removed"` 清空；`truncated:true` 视为超帽信号，考虑拉起归敛；主控不写 ORCH.md，只消费（消费纪律=OV-9 三通道）。
 MM-20 文件地图：
 
 | 文件 | 落位 | 说明 |
 |---|---|---|
-| `<存储根>/ORCH.md` | 项目存储根 | 主控记忆视图（帽 120 行/10KB；超帽 server 截断兜底并提示） |
+| `<存储根>/ORCH.md` | 项目存储根 | 主控记忆视图（默认帽 120 行/10KB，`glean.cfg.json` 的 orch_md_max_lines/orch_md_max_bytes 可调；超帽 server 截断兜底并提示实际帽值） |
 | 项目根 `AGENTS.md` 标记区 | 项目根 | 子代理记忆（硬帽 60 行/4KB；只动标记对内） |
 | `<全端目录>/AGENTS.md` | 全端目录 | 跨项目子代理记忆（帽 50 行/2KB；GLOBAL MEMORY 条件节注入，`glean.cfg.json` 的 pack_global_section 一键关） |
 | `<存储根>/memory/lessons.jsonl`（项目库）/ `<全端目录>/memory/lessons.jsonl`（全端库） | 项目存储根 / 全端目录 | 事件层；全端库跨项目，读端双库合并（10.1） |
-| `<全端目录>/glean-lock.json` / `glean.cfg.json` | 全端目录 | 归敛互斥锁（done 态保留：mtime=上次归敛时间、watermarks=事件基线）/ 门槛与帽值（缺省内建：48h/10 条/锁过期 1.5h） |
+| `<全端目录>/glean-lock.json` / `glean.cfg.json` | 全端目录 | 归敛互斥锁（done 态保留：mtime=上次归敛时间、watermarks=事件基线）/ 门槛与帽值（缺省内建：48h/10 条/常忙 40 条〔0=关〕/锁过期 1.5h；ORCH.md 帽缺省 120 行/10KB，全键 cfg 可调） |
 | `<全端目录>/glean-brief.json` / `glean-pack.md` / `projects.jsonl` / `reports/` | 全端目录 | server 物化的归敛简报 / 固定任务包（gate due 随 brief 再生，MM-29） / 注册项目名册 / 归敛报告 |
 
 （全端目录缺省 `<~/.zcode>/orchestrator-memory`，`--memory-root` 可覆盖。）
