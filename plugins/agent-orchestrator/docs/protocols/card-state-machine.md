@@ -135,7 +135,7 @@ const ALLOWED_TRANSITIONS = {
 - **crv6-statemachine**（tests/suites/crv6-statemachine.mjs，主锁）：A-v060-SM-01/02（closed 双门：采信侧 isGreenClosed=qa.verdict==="pass" ∨ pack.sandbox.applied_at；写入侧 close_confirmed+drafted 禁直达+sandbox_apply 直改不受限）；SM-03/04/05（白名单矩阵回归、reopen:true+note、跨迁移清 ack、→running 仅 claim、opts.internal 旁路）；SM-06/07（租约回收扩容+终态豁免；running/dispatched→ready、blocked/question 保状态；answer 对 owner=null 翻 ready）；SM-08（closed 拒改板 report 机读语义）；A-v070-P2P-01..06（p2p 边界/失效/前置态/活性）。
 - **crv5-auth**（tests/suites/crv5-auth.mjs）：A-v060-AUTH-01..08——fail-closed token 门、成对鉴权、claim 必换发（V6-14）。
 - **crv6-resilience / crv1-scope / crv2-pack**：派发链路、scope 审计、组包对拍面（板写外围）。
-- **M1-3 对拍（本卡的设计消费方）**：contract-sync.mjs 从 server.mjs 抽取 §2 源码表体与本卡对拍（卡≈码，漂移即红）；lint-manifest LM-05=卡内常量名（ALLOWED_TRANSITIONS/MERGEABLE_KEYS/ONE_LEVEL）在 server.mjs grep 可见+卡存在非空。
+- **M1-3 对拍（本卡的设计消费方）**：contract-sync.mjs 经模块族源码拼接（server.mjs 入口+mcp/ 全集，familySource）抽取 §2 源码表体与本卡对拍（卡≈码，漂移即红）；lint-manifest LM-05=卡内常量名（ALLOWED_TRANSITIONS/MERGEABLE_KEYS/ONE_LEVEL）在 server-board/server-core 等模块族现形可见+卡存在非空。（2026-11-02 W4 E1 勘误：原「在 server.mjs grep 可见」表述随 v1.3 拆分失真，按模块族现形改写。）
 
 ## 8. 维护规则（本卡的写方）
 

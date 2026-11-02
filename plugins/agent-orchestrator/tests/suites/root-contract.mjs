@@ -68,6 +68,7 @@ const PROJ = path.join(BASE.root, "proj");
 const DEF = path.join(PROJ, ".zcode", "orchestrator"); // 默认根（回退面）
 const CUSTOM = path.join(PROJ, "custom-root"); // 采信目标（含 root-id 的自定义根）
 const NOID = path.join(PROJ, "noid-root"); // 存活但无 root-id（v1 拒 / 旧版劫持）
+const NOBOARD = path.join(PROJ, "noboard-root"); // 存活有 root-id 但缺 board.json（v1.4 F1 腿 B 专属）
 const PLAIN = path.join(BASE.root, "plain-dir"); // 项目外普通存活目录（非存储根）
 const GONE = path.join(BASE.root, "gone-root"); // 悬空目标（永不创建）
 const TMPFAKE = path.join(BASE.root, "tmpfake"); // 子进程眼中的 os.tmpdir()（不必存在）
@@ -81,8 +82,10 @@ const ENV_FAKETMP = { ZCODE_PROJECT_DIR: PROJ, TMPDIR: TMPFAKE, TMP: TMPFAKE, TE
 fs.mkdirSync(DEF, { recursive: true });
 fs.mkdirSync(CUSTOM, { recursive: true });
 fs.mkdirSync(NOID, { recursive: true });
+fs.mkdirSync(NOBOARD, { recursive: true });
 fs.mkdirSync(PLAIN, { recursive: true });
 fs.writeFileSync(path.join(CUSTOM, "root-id"), RID + "\n");
+fs.writeFileSync(path.join(NOBOARD, "root-id"), RID + "\n");
 // 采信根预置板面（session-start / stop-check 主流程的可分辨观测面）；默认根恒无板。
 fs.writeFileSync(
   path.join(CUSTOM, "board.json"),
@@ -358,6 +361,50 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
 }
 
 /* ================================================================== */
+/* P11 F1 腿 B（v1.4）：指针目标缺 board.json ∧ 默认根有 board.json      */
+/* → 回退默认根 + stderr 告警（五实现矩阵同形；混配=误配置 G1-4，        */
+/* 本根优先）。夹具注记：NOBOARD 有 root-id 无板（root-id 门全过，       */
+/* board.json 校验腿=唯一否决点）；DEF 临时置板（例后清除，不扰动 S 组   */
+/* S5 保留语义）。                                                       */
+/* ================================================================== */
+{
+  fs.writeFileSync(
+    path.join(DEF, "board.json"),
+    JSON.stringify({
+      version: 2,
+      updated_at: new Date().toISOString(),
+      missions: [
+        { id: "m-defboard", title: "def-board", status: "running", original_prompt: "def-prompt", dispatch: {} },
+      ],
+    }) + "\n",
+  );
+  writePointer(NOBOARD, RID); // v2 形自洽指针（root-id 匹配）——无腿 B 时会被采信
+  cleanArtifacts();
+  const r = runJournal(ENV_FAKETMP);
+  ck.ok("P11a 腿 B：journal 回退默认根（目标缺 board.json ∧ 默认根有）", journalAt(DEF) && !journalAt(NOBOARD), { stderr: r.stderr.slice(0, 200) });
+  ck.ok(
+    "P11b 腿 B：stderr 告警单行含回退语（lacks board.json / falling back to default root）",
+    r.stderr.includes("root.txt target lacks board.json") && r.stderr.includes("falling back to default root"),
+    r.stderr.slice(0, 200),
+  );
+  cleanArtifacts();
+  const g = runGate(ENV_FAKETMP);
+  ck.ok("P11c 腿 B：bg-gate 回退默认根（提示戳落 DEF）", stampAt(DEF) && !stampAt(NOBOARD) && g.stderr.includes("lacks board.json"), { stderr: g.stderr.slice(0, 200) });
+  cleanArtifacts();
+  const s = runSession(ENV_FAKETMP);
+  ck.ok("P11d 腿 B：session-start 读默认根板（简报含 m-defboard）", s.stdout.includes("m-defboard"), { out: s.stdout.slice(0, 120), stderr: s.stderr.slice(0, 200) });
+  cleanArtifacts();
+  const m = runStopMirror(ENV_FAKETMP);
+  ck.ok("P11e 腿 B：stop-check 镜像回退默认根", mirrorAt(DEF) && !mirrorAt(NOBOARD) && m.stderr.includes("lacks board.json"), { stderr: m.stderr.slice(0, 200) });
+  cleanArtifacts();
+  const doc = await runSentinel(ENV_FAKETMP, DEF);
+  ck.ok("P11f 腿 B：哨兵槽位落默认根且 root 字段=DEF", doc && doc.root === DEF && doc.slot === 0, { doc });
+  // 例后清除 DEF 板（防扰动 S 组 S5「v1+目标含 root-id 保留」语义——S5 要求 DEF 无板）
+  rmrf(path.join(DEF, "board.json"));
+  clearPointer();
+}
+
+/* ================================================================== */
 /* W22 祖先回退（v1.1.1）：默认根无板无 root-id → 取最近合法祖先根        */
 /* 覆盖：env 态 / cwd 态双态命中、journal/session-start/bg-sentinel 三处、 */
 /*      祖先缺 root-id 不命中、默认根有 root-id 不回退、空指针回退同走祖先 */
@@ -549,6 +596,18 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
     writePointer(CUSTOM);
     await boot(DEF, ENV_FAKETMP);
     ck.ok("S5 server 自愈保留：v1+目标含 root-id 指针不删（待重启升级）", fs.existsSync(POINTER), undefined);
+    // S6 F1 删除腿（v1.4，红转绿）：混配夹具注记（G1-4）=默认根 server 与自定义根 server
+    // 混配=误配置非支持面，判定取删除=本根优先。DEF 运行 + 指针指向自带匹配 id 的 CUSTOM
+    // （目标自洽 ∧ ≠默认根）∧ DEF board.json 在 → 删指针（现行为=保留；自愈语义从「指针
+    // 完整性校验」升「根唯一性仲裁」——目标自洽≠目标合法）。
+    writePointer(CUSTOM, RID); // v2 自洽指针（root-id 匹配）——删除腿是唯一否决点
+    fs.writeFileSync(
+      path.join(DEF, "board.json"),
+      JSON.stringify({ version: 2, updated_at: new Date().toISOString(), missions: [] }) + "\n",
+    );
+    await boot(DEF, ENV_FAKETMP);
+    ck.ok("S6 F1 删除腿（红转绿）：混配（DEF 运行+自洽指针指向 CUSTOM+DEF 板在）→ 指针被删（G1-4 本根优先）", !fs.existsSync(POINTER), { kept: fs.existsSync(POINTER) });
+    rmrf(path.join(DEF, "board.json")); // 例后清板（同 P11 尾纪律）
   }
   clearPointer();
 }

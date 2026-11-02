@@ -56,11 +56,15 @@ export async function runV120DispatchScenarios() {
     });
   const resultDirOf = (rt) => path.join(rt, "context", "dispatch-results");
   const wakeDirOf = (rt) => path.join(rt, "context", "wake-queue");
-  // v1.2.3 W2：播种拒绝回执的两条固定指引（draft §P3 逐字；DSP-02/03 字面断言钉，
-  // 与 dispatch-supply.mjs GUIDANCE_* 同源）
+  // v1.2.3 W2：播种拒绝回执的固定指引（draft §P3 逐字；DSP-02/03 字面断言钉，
+  // 与 dispatch-supply.mjs GUIDANCE_* 同源）。
+  // v1.4 W3 增补（EXTRA ③-A，W1 随行③候裁落地）：D3 背书两句入列——与 dispatch-supply
+  // GUIDANCE_FULL 四元素同文（W1 已落装，沙箱内现版为锚源；:205/:282 两腿全等钉随行改锚）。
   const DSP_GUIDANCE = [
     '显式传 model="<providerId>/<modelId>[@level]"（api-key 型 provider）',
     "请用户在宿主启用目标 api-key provider，使会话 defaultModelSelection 可采信",
+    "（实证背书 2026-11-02）CLI 选型层已证账号型目标不可选：defaultModelSelection 指向账号型被无视/过滤（α「Select a model」零请求死、β 静默回落 api-key；见 v1.4 qa/d1-finding.md）——解除禁种在 CLI 层无技术意义。",
+    "账号型需求走 nested 主形态（宿主按 subagent_type 加载角色定义；嵌套转发 prompt 系模型逐字转录）；CLI 选型层改造候选已记 patcher 项目 backlog。",
   ];
 
   // ---- DSP-01（Q1①④）：dms 命中 → 选题=dms、level=dms 原值（非 values.at(-1)）、

@@ -248,9 +248,9 @@ try {
   // ---------- A-v110-W4-A1：v1.1 W4 尾部契约块/三段派发静态回潮防钉（DESIGN §1/§2） ----------
   // 行为面 = sentinel-teardown T12（stop-check 黑盒）+ crv2-pack W4-PREFIX（跨派发前缀字节）。
   ck.ok(
-    "W4-01 SKILL PL-10 在位（v1.1.1 W21，v2 双标签形制）：ORT 标记对三规则/两形制帽值/STALE_T=24h/coord-tail 日志落点/dispatch 启动器",
+    "W4-01 SKILL PL-10 在位（v1.1.1 W21；v1.4 W1 改11 升 v3 形制——C2-b 标记对 SKILL ×3 字面随 sessionId 协议行升版）：ORT 标记对三规则/两形制帽值/STALE_T=24h/coord-tail 日志落点/dispatch 启动器",
     count(SKILL_LF, /^PL-10 /gm) === 1 &&
-      count(SKILL, "<!-- orch-tail v2") === 3 &&
+      count(SKILL, "<!-- orch-tail v3") === 3 &&
       count(SKILL, "<!-- orch-tail-end -->") === 3 &&
       count(SKILL, "成对闭合、只取消息最后一组完整对、尾锚定") === 1 &&
       count(SKILL, "≤10 行/900B") === 2 &&
@@ -261,7 +261,7 @@ try {
       count(SKILL, "persona 原型正文") >= 1,
     {
       pl10: count(SKILL_LF, /^PL-10 /gm),
-      open: count(SKILL, "<!-- orch-tail v2"),
+      open: count(SKILL, "<!-- orch-tail v3"),
       close: count(SKILL, "<!-- orch-tail-end -->"),
       v2Rules: count(SKILL, "成对闭合、只取消息最后一组完整对、尾锚定"),
       fullCap: count(SKILL, "≤10 行/900B"),
@@ -333,7 +333,7 @@ try {
       count(STOP_CHECK, "<!-- orch-tail-end -->") >= 1 &&
       count(STOP_CHECK, "full: { lines: 10, bytes: 900 }") === 1 &&
       count(STOP_CHECK, "short: { lines: 6, bytes: 400 }") === 1 &&
-      count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];') === 1 &&
+      count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "sessionId", "project", "stage", "flying", "ruled", "next"];') === 1 &&
       count(STOP_CHECK, '"sess_subagent_"') === 1 &&
       count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";') === 1 &&
       count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;") === 1 &&
@@ -344,7 +344,7 @@ try {
       close: count(STOP_CHECK, "<!-- orch-tail-end -->"),
       full: count(STOP_CHECK, "full: { lines: 10, bytes: 900 }"),
       short: count(STOP_CHECK, "short: { lines: 6, bytes: 400 }"),
-      fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];'),
+      fields: count(STOP_CHECK, 'const COORD_TAIL_FIELDS = ["ts", "seq", "sessionId", "project", "stage", "flying", "ruled", "next"];'),
       guard: count(STOP_CHECK, '"sess_subagent_"'),
       logFile: count(STOP_CHECK, 'const COORD_TAIL_LOG_FILE = "coord-tail-log.md";'),
       trimAt: count(STOP_CHECK, "const COORD_TAIL_LOG_TRIM_AT = 20;"),
@@ -388,7 +388,7 @@ try {
     "W4-08 SKILL PL-10 注入=启动器自动（v1.1.1 W21→v1.2.2 滞回+教训节改写）：纪律段恒在 offset 0/轨迹 ≤20 全量 >20 尾 10 去 ts/seq 旧→新/digest 条件节机器组装/教训转投节/scoping 恒在行/persona/指针+CONTRACT；日志存全量尾块含协议行；粘贴|共享头|逐字复用|精简态语汇零残留",
     PL10.includes("注入=启动器自动") &&
       PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）") &&
-      PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）") &&
+      PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`/`sessionId:`，旧→新）") &&
       PL10.includes("digest 条件节（机器组装，Q8=a") &&
       PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）") &&
       PL10.includes("哨兵 scoping 恒在行") &&
@@ -407,7 +407,7 @@ try {
     {
       autoInject: PL10.includes("注入=启动器自动"),
       discipline: PL10.includes("纪律段（全角色通用编排纪律，恒在、offset 0）"),
-      trajectory: PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`，旧→新）"),
+      trajectory: PL10.includes("尾块轨迹节（≤20 块全量，>20 取尾 10；去 `ts:`/`seq:`/`sessionId:`，旧→新）"),
       digest: PL10.includes("digest 条件节（机器组装，Q8=a"),
       lessons: PL10.includes("教训转投节（条件，任务包 LESSONS 节逐字）"),
       scoping: PL10.includes("哨兵 scoping 恒在行"),

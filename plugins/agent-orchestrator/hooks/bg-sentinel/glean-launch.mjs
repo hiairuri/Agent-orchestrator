@@ -27,6 +27,93 @@ export const GLEAN_LAUNCH_TIMEOUT_MIN_DEFAULT = 240; // 子进程存活上限（
 export const GLEAN_GUARD_STALE_MS = 60 * 1000; // 获取租约守卫文件陈旧窗（进程崩溃后的夺位条件）
 export const GLEAN_CLI_DEFAULT = "C:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs";
 
+/* v1.4 B2 全局后台任务落位（G1-7/M-1）：全局后台任务（glean 等）的落位项目根二分。
+   取值优先级：userConfig 键（<homedir>/.zcode/cli/config.json → plugins.options
+   ["agent-orchestrator@*"].globalTaskProjectDir；env ZCODE_ORCH_USER_CONFIG 为测试/
+   诊断注入缝）＞根级 glean.cfg.json 同键（<memoryRoot>/glean.cfg.json，用户手写）。
+   键值非空 ∧ 路径存在 → 落位该项目；否则回退触发项目（现行为，不硬编 home）+ stderr
+   单行告警（M-1：回退不得静默；同进程回退态去重防 tick 噪声，resetGleanDirWarn()
+   供测试复位）。落位只迁移 glean 拉起 cwd/消息行，哨兵盯守根（--root/locateRoot）
+   不随迁移——防触发项目板面失明（波首步 R4.2 链核验结论）。 */
+export const GLEAN_GLOBAL_TASK_PROJECT_DIR_KEY = "globalTaskProjectDir";
+let gleanDirWarnState = "";
+export function resetGleanDirWarn() {
+  gleanDirWarnState = "";
+}
+
+/** 读插件 userConfig 的 globalTaskProjectDir（缺文件/缺键/坏 JSON → null，由调用方回落 glean.cfg.json）。 */
+function readUserConfigGlobalTaskProjectDir() {
+  const file =
+    String(process.env.ZCODE_ORCH_USER_CONFIG || "").trim() ||
+    path.join(os.homedir(), ".zcode", "cli", "config.json");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    const options =
+      parsed && parsed.plugins && typeof parsed.plugins === "object" && parsed.plugins.options && typeof parsed.plugins.options === "object"
+        ? parsed.plugins.options
+        : null;
+    if (!options) return null;
+    for (const [k, v] of Object.entries(options)) {
+      // 插件 id 带 marketplace source 后缀（agent-orchestrator@<source>），按名称前缀匹配
+      if (String(k).startsWith("agent-orchestrator@") && v && typeof v === "object" && typeof v[GLEAN_GLOBAL_TASK_PROJECT_DIR_KEY] === "string") {
+        return v[GLEAN_GLOBAL_TASK_PROJECT_DIR_KEY];
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * B2 落位二分（纯解析+回退告警；bg-sentinel 每 tick 对 glean 拉起路径调用）。
+ * 返回 {projectDir, source: "userConfig"|"gleanCfg"|"fallback", reason: null|string}。
+ */
+export function resolveGleanProjectDir({ argv, rawCfg, rootDir, triggerProjectDir, err } = {}) {
+  const warn = err || ((l) => { try { process.stderr.write(l); } catch { /* best effort */ } });
+  const fallback = (reason) => {
+    if (gleanDirWarnState !== "fallback") {
+      gleanDirWarnState = "fallback";
+      warn("[bg-sentinel] globalTaskProjectDir absent/invalid; falling back to trigger project\n");
+    }
+    return { projectDir: triggerProjectDir, source: "fallback", reason };
+  };
+  let candidate = "";
+  let from = "";
+  const uc = readUserConfigGlobalTaskProjectDir();
+  if (typeof uc === "string" && uc.trim()) {
+    candidate = uc;
+    from = "userConfig";
+  } else {
+    const memRoot = gleanMemoryRoot(argv || [], rawCfg, rootDir);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(memRoot, "glean.cfg.json"), "utf8"));
+      const v = parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed[GLEAN_GLOBAL_TASK_PROJECT_DIR_KEY] === "string"
+        ? parsed[GLEAN_GLOBAL_TASK_PROJECT_DIR_KEY]
+        : "";
+      if (v.trim()) {
+        candidate = v;
+        from = "gleanCfg";
+      }
+    } catch {
+      /* cfg 缺席/坏 JSON → 无候选 */
+    }
+  }
+  const trimmed = candidate.trim();
+  if (trimmed && !trimmed.startsWith("${")) {
+    const resolved = path.resolve(trimmed);
+    let isDir = false;
+    try {
+      isDir = fs.statSync(resolved).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (isDir) return { projectDir: resolved, source: from, reason: null };
+    return fallback(`invalid:${from}`);
+  }
+  return fallback(from ? "empty" : "absent");
+}
+
 /** 全端记忆目录：CLI > cfg > env ZCODE_ORCH_MEMORY > temp 根自包含 > ~/.zcode/orchestrator-memory。
  *  temp 根自包含与 server resolveMemoryRoot 的测试 carve-out 同语义——套件绝不碰真实家目录。 */
 export function gleanMemoryRoot(argv, rawCfg, rootDir) {
@@ -633,6 +720,9 @@ export function buildGleanMessage({ persona, memoryRoot, rootDir, projectDir, ro
   const events = gate ? gate.events : "?";
   const reportPath = path.join(memoryRoot, "reports", "<YYYYMMDD-HHmmss>-glean.md");
   return [
+    // v1.4 B1：任务名行——「记忆归敛代理」「orch-gleaner」字样供给源自 persona 首行迁至
+    // 内联指令段首（persona 首行标题化防会话标题泄漏，l-186c62），护 glean 套件既有字面钉零触碰。
+    "任务名：记忆归敛代理（orch-gleaner）",
     "你是 orch-gleaner（记忆归敛代理），由 agent-orchestrator 哨兵在后台自动拉起：独立 -p 会话，没有 board mission，也没有在线派发方。",
     `触发口径：idle ${idle}h ∧ +${events} events（glean gate due）。`,
     "",
@@ -648,7 +738,7 @@ export function buildGleanMessage({ persona, memoryRoot, rootDir, projectDir, ro
     "2) 消费 ORCHTEMP：全端库 memory/lessons.jsonl 中 source=\"orchestrator\" 且 status=\"candidate\" 的条目逐条研判；通过则视图层落笔（带 id 溯源）后 lessons(action=\"retire\", id, reason=\"glean: → <视图文件#位置>\")；不通过留 candidate 并在报告写理由。",
     "3) 候选巡检四态处置：每条候选恰一处置——晋升（promote/promote_batch，合并语义走 server）/合并/退役/保留（证据不足留 candidate 并写理由）。",
     `4) 视图层维护：${path.join(rootDir, "ORCH.md")}（重写 ver+1，帽 120 行/10KB）；项目根 AGENTS.md 只动 orch-mem 标记对内部、区外字节零触碰（标记对缺失=该项目记忆功能关闭，跳过不重建）；${path.join(memoryRoot, "AGENTS.md")} 整文件（帽 50 行/2KB）。`,
-    `5) digest（整文件原子覆盖）：${path.join(memoryRoot, "digest", "pack-tail-digest.md")}（首行 generated_at: <ISO8601>，正文 ≤12 行/1200B）与 ${path.join(memoryRoot, "digest", "pack-tail-digest.json")}（sources 源指纹）。`,
+    `5) digest（整文件原子覆盖；v1.4 C1 分键 digest/<rootId>/，跨项目各读各键）：${path.join(memoryRoot, "digest", rootId || "", "pack-tail-digest.md")}（首行 generated_at: <ISO8601>，正文 ≤12 行/1200B）与 ${path.join(memoryRoot, "digest", rootId || "", "pack-tail-digest.json")}（{generated_at, rootId, sources 源指纹}，rootId=${rootId || "<root-id>"} 逐字）。`,
     `6) 归敛报告：${reportPath}（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源）。`,
     "7) 红线：不要写 board.json（哨兵与归敛对任务板只读）；lessons.jsonl 事件行永不直写（改动一律经 lessons 工具）；active 教训不硬删（只给建议）；不与其他子代理互调。",
     "8) 完成：锁置 done + 报告落盘即完成，随后自然结束；最终回复恰 ≤3 行指针（KIND=done + 报告路径 / 视图变更与四态计数 / 未处理）。",

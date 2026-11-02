@@ -40,7 +40,7 @@
  * v1.2.3 W2/M2 增量（P3 播种面）：DS-01..08（impl-plan §9 名清单逐字，验收①-⑧映射）
  *   ＋ST-02（「first enabled」归零静态锁=验收⑩）。播种语义=两源快速失败（显式
  *   model= / 会话真值 dms；段③首 api-key 猜测删除）：选择类拒绝回执 ok:true＋
- *   model_seed{seeded:false, reason, rejected{kind,provider_id?,detail}, guidance[2],
+ *   model_seed{seeded:false, reason, rejected{kind,provider_id?,detail}, guidance[4],
  *   available_apikey_providers≤3}（§12 形态：不 spawn、零侧车、board 留 drafted）；
  *   reason 双写裁定=account 腿保持 model_arg_unusable（FA-3 谓词原样绿）；
  *   no_apikey_model 随段③退役（selection_missing 接管）；非选择类（env 链/写盘/
@@ -241,9 +241,14 @@ const NOISE = NOISE_LINES.join("\n");
 
 /* ================= v1.2.3 W2/M2：P3 播种面 DS×8 ＋ ST-02（A-v0123-DS/ST） ================= */
 
-// ---- 拒绝回执的两条固定指引（draft §P3 回执设计逐字；DS-02/04/05/07 字面断言钉）
+// ---- 拒绝回执的固定指引（draft §P3 回执设计逐字；DS-02/04/05/07 字面断言钉）。
+// v1.4 W1 改9/D3（design v1.4 §1.10）：guidance 尾增两句实证背书（源码侧单构造点
+// tool-dispatch dispatchSeedModelConfig，三拒绝腿共享；本套件四条全等腿同步改写）。
 const GUIDANCE_MODEL_ARG = '显式传 model="<providerId>/<modelId>[@level]"（api-key 型 provider）';
 const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provider，使会话 defaultModelSelection 可采信";
+const GUIDANCE_D1_EVIDENCE = "（实证背书 2026-11-02）CLI 选型层已证账号型目标不可选：defaultModelSelection 指向账号型被无视/过滤（α「Select a model」零请求死、β 静默回落 api-key；见 v1.4 qa/d1-finding.md）——解除禁种在 CLI 层无技术意义。";
+const GUIDANCE_NESTED_PRIMARY = "账号型需求走 nested 主形态（宿主按 subagent_type 加载角色定义；嵌套转发 prompt 系模型逐字转录）；CLI 选型层改造候选已记 patcher 项目 backlog。";
+const GUIDANCE_FULL = [GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER, GUIDANCE_D1_EVIDENCE, GUIDANCE_NESTED_PRIMARY];
 
 {
   const BASE = makeTempRoot({ prefix: "orch-ds-", root: parseRootArg() || undefined });
@@ -420,7 +425,7 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
         );
         ck.ok(
           "DS-02 两条 guidance 字面逐字（draft §P3 回执设计）",
-          JSON.stringify(r.model_seed.guidance) === JSON.stringify([GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER]),
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(GUIDANCE_FULL),
           r.model_seed.guidance,
         );
         ck.ok(
@@ -528,8 +533,8 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
           { model_seed: r.model_seed },
         );
         ck.ok(
-          `${tag} guidance 两条字面＋不 spawn 三锚＋种子文件不落（§12 零痕迹语义）`,
-          JSON.stringify(r.model_seed.guidance) === JSON.stringify([GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER]) &&
+          `${tag} guidance 四条字面（含 v1.4 D3 背书两句）＋不 spawn 三锚＋种子文件不落（§12 零痕迹语义）`,
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(GUIDANCE_FULL) &&
             noSpawnLeg(dir, rt, sid) &&
             !fs.existsSync(seedFileOf(rt, missionId)),
           { guidance: r.model_seed.guidance, noSpawn: noSpawnLeg(dir, rt, sid) },
@@ -645,8 +650,8 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
           { model_seed: r.model_seed },
         );
         ck.ok(
-          "DS-05 guidance 两条字面＋不 spawn 三锚＋种子不落＋留 drafted（fixture 有可用 api-key provider 仍不猜测——禁自动回落实锤）",
-          JSON.stringify(r.model_seed.guidance) === JSON.stringify([GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER]) &&
+          "DS-05 guidance 四条字面（含 v1.4 D3 背书两句）＋不 spawn 三锚＋种子不落＋留 drafted（fixture 有可用 api-key provider 仍不猜测——禁自动回落实锤）",
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(GUIDANCE_FULL) &&
             noSpawnLeg(dir, rt, sid) && !fs.existsSync(seedFileOf(rt, "m-ds05")) &&
             missionOf(rt, "m-ds05").status === "drafted",
           { noSpawn: noSpawnLeg(dir, rt, sid), status: missionOf(rt, "m-ds05").status },
@@ -837,7 +842,7 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
     // ---- DS-09-account-prefix-blindspot-selection-rejected（v1.3 W5 识别面臂 a，
     //      design §13.1① fold/O15=a）：显式 model 带 account: 前缀且规则不可见（
     //      providerRules 只载 personal 面）→ 选择类拒绝回执 account_not_seedable＋
-    //      guidance 两条＋available_apikey_providers 在场＋不 spawn＋留 drafted
+    //      guidance 四条（v1.4 D3 起）＋available_apikey_providers 在场＋不 spawn＋留 drafted
     //      （fork before spawn=可重派）。识别面臂 b=DS-02 规则可见原腿保绿、臂 c=DS-08
     //      非前缀 unusable 保绿——本波零改写，DS-02/08 现绿即保绿核对（M-1 主裁）。
     {
@@ -880,8 +885,8 @@ const GUIDANCE_ENABLE_PROVIDER = "请用户在宿主启用目标 api-key provide
           { model_seed: r.model_seed },
         );
         ck.ok(
-          "DS-09 拒绝回执三件在场：guidance 两条字面＋available_apikey_providers（enabled api-key 清单）＋detail 实名 personal 读取域不可见机理",
-          JSON.stringify(r.model_seed.guidance) === JSON.stringify([GUIDANCE_MODEL_ARG, GUIDANCE_ENABLE_PROVIDER]) &&
+          "DS-09 拒绝回执三件在场：guidance 四条字面（含 v1.4 D3 背书两句）＋available_apikey_providers（enabled api-key 清单）＋detail 实名 personal 读取域不可见机理",
+          JSON.stringify(r.model_seed.guidance) === JSON.stringify(GUIDANCE_FULL) &&
             Array.isArray(r.model_seed.available_apikey_providers) &&
             r.model_seed.available_apikey_providers.length > 0 &&
             typeof r.model_seed.rejected.detail === "string" && r.model_seed.rejected.detail.includes("personal"),

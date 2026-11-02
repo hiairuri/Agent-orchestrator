@@ -199,39 +199,48 @@ function recordMirrorIfEnabled(input, argv) {
    The coordinator emits a tail contract block at the end of its last assistant
    message each dispatch turn. Stop is the only hook that sees that message text,
    so the append-only log lives here (single source; recovery = Read the tail).
-   Marker form v2 (grill#3 G3-5): open `<!-- orch-tail v2` + close
-   `<!-- orch-tail-end -->`; three rules — (1) the two tags must both be present
-   in order, (2) only the LAST complete pair in the message counts, (3) tail
-   anchor: the close tag must be the message's last non-empty line (trailing
-   whitespace tolerated). Mid-message quotations never qualify, and a legacy v1
-   block is not a v2 marker at all → zero write. Two shapes: full (all five
-   business fields) and short (delta: flying +/-). Every entry is stored verbatim
-   (ts:/seq: included), blank-line separated, no file header; the injection face
-   (dispatch prompt assembly) strips the protocol lines. Rejections keep the log
-   byte-identical (fail-safe) and print one stderr line (fail-loud). Sessions
-   without a marker are a zero-write no-op (ORT-7). The legacy v1 file is only a
-   seed source: when the log is absent and the old full state parses, it is
-   re-rendered as the first v2 entry (idempotent; never re-seeded while the log
-   exists) and all three legacy artifacts are swept after a successful write.
+   Marker form v3 (v1.4 C2-a, PL-10 升版条款; 前代 v2, grill#3 G3-5): open
+   `<!-- orch-tail v3` + close `<!-- orch-tail-end -->`; three rules — (1) the two
+   tags must both be present in order, (2) only the LAST complete pair in the
+   message counts, (3) tail anchor: the close tag must be the message's last
+   non-empty line (trailing whitespace tolerated). Mid-message quotations never
+   qualify, and a legacy v1 block is not a v2/v3 marker at all → zero write.
+   v1.4 C2-a 同会话链补全（方案甲）：写面自动标注 `sessionId: <id>` 协议行（零主控
+   负担；主控手写块不强制）；短形补全基准=同会话链（sessionId 匹配）最新可解析全形，
+   无同会话前块 → 拒写+stderr 要求全形（跨会话字段不继承）；v2 遗留全形块照常渲染
+   （V2 legacy 双标识别，信息零丢失）、v2 短形无会话链 → 同一拒写（安全向）；v2 全形
+   输入块归一化落写=v3 主标记+sessionId 协议行（存量 v2 块原样保留不回写）。
+   Two shapes: full (all business fields) and short (delta: flying +/-). Every
+   entry is stored verbatim (ts:/seq:/sessionId: included), blank-line separated,
+   no file header; the injection face (dispatch prompt assembly) strips the
+   protocol lines. Rejections keep the log byte-identical (fail-safe) and print
+   one stderr line (fail-loud). Sessions without a marker are a zero-write no-op
+   (ORT-7). The legacy v1 file is only a seed source: when the log is absent and
+   the old full state parses, it is re-rendered as the first v3 entry (idempotent;
+   never re-seeded while the log exists; 恢复源会话不可知 → 不带 sessionId 行) and
+   all three legacy artifacts are swept after a successful write.
    Block-count lifecycle (v1.2.2 hysteresis): TRIM_AT=20 / TRIM_TO=10 — blocks
    accumulate without sliding up to 20 (nothing dropped at the top); the 21st
    append triggers one atomic rewrite keeping the newest 10 incl. the new
    block; sawtooth 10→20→10, one concentrated trim every 10 dispatch turns. */
-const COORD_TAIL_MARK = "<!-- orch-tail v2";
+const COORD_TAIL_MARK = "<!-- orch-tail v3";
 const COORD_TAIL_CLOSE = "<!-- orch-tail-end -->";
+// v1.4 C2-a 方案甲：V2 legacy 识别常量（形参照 v1 先例）——历史 v2 全形块照常渲染
+// （信息零丢失）；不入 twin-lock STRING_TWINS 锁面（锁面只锁主常量 v3≡v3）。
+const COORD_TAIL_MARK_V2 = "<!-- orch-tail v2";
 const COORD_TAIL_MARK_V1 = "<!-- orch-tail v1";
 const COORD_TAIL_CLOSE_V1 = "-->";
 const COORD_TAIL_LOG_FILE = "coord-tail-log.md";
 const COORD_TAIL_LOG_TRIM_AT = 20; // v1.2.2 滞回上限（累积至此不滑动，最上不丢；与 server DISPATCH_TRACE_TRIM_AT 值 twin）
 const COORD_TAIL_LOG_TRIM_TO = 10; // v1.2.2 裁剪目标（触发时原子重写保留的最新块数，含新块；与 server DISPATCH_TRACE_TRIM_TO 值 twin）
-const COORD_TAIL_FIELDS = ["ts", "seq", "project", "stage", "flying", "ruled", "next"];
+const COORD_TAIL_FIELDS = ["ts", "seq", "sessionId", "project", "stage", "flying", "ruled", "next"];
 const COORD_TAIL_FIELD_SET = new Set(COORD_TAIL_FIELDS);
 const COORD_TAIL_CAPS = {
   full: { lines: 10, bytes: 900 },
   short: { lines: 6, bytes: 400 },
 };
-/* v1.1.1 W8 撤译：精简态转译层整体废除，共享头改为全形块逐字（注入面去 ts:/seq:
-   两行）。v1.1.1 W20：旧 v1 恢复源降为 seed 源后消亡——日志是唯一源，append
+/* v1.1.1 W8 撤译：精简态转译层整体废除，共享头改为全形块逐字（注入面去 ts:/seq:/
+   sessionId: 协议行）。v1.1.1 W20：旧 v1 恢复源降为 seed 源后消亡——日志是唯一源，append
    无判旧（(ts,seq) 守卫随覆盖面结构性消亡）。权威=SKILL PL-10。 */
 
 function coordTailWarn(msg) {
@@ -242,7 +251,8 @@ function coordTailWarn(msg) {
   }
 }
 
-/** Last complete v2 pair (later quotes/echoes win, ORT-1) with the tail anchor:
+/** Last complete v2/v3 pair (later quotes/echoes win, ORT-1; v1.4 C2-a 双标识别：
+ *  未升级主控的 v2 尾块同样抽取——写面归一化为 v3) with the tail anchor:
  *  the close tag must be the message's last non-empty line. Mid-message
  *  quotations therefore never qualify; zero write on any miss (ORT-7). */
 function coordTailLastBlock(text) {
@@ -251,7 +261,8 @@ function coordTailLastBlock(text) {
   while (last >= 0 && !lines[last].trim()) last--;
   if (last < 0 || lines[last].trim() !== COORD_TAIL_CLOSE) return null;
   for (let i = last - 1; i >= 0; i--) {
-    if (lines[i].trim() === COORD_TAIL_MARK) return { lines: lines.slice(i, last + 1) };
+    const t = lines[i].trim();
+    if (t === COORD_TAIL_MARK || t === COORD_TAIL_MARK_V2) return { lines: lines.slice(i, last + 1) };
   }
   return null;
 }
@@ -294,14 +305,17 @@ function coordTailParse(block) {
   const body = block.lines.slice(1, -1);
   const fields = Object.create(null);
   for (const line of body) {
-    const m = /^([a-z]+): (.+)$/.exec(line);
+    // v1.4 C2-a：字段名含驼峰 sessionId（协议行），[a-z]+ 扩为 [a-zA-Z]+。
+    const m = /^([a-zA-Z]+): (.+)$/.exec(line);
     if (!m) return { error: `坏行（须 field: value）：${String(line).slice(0, 40)}` };
     if (!COORD_TAIL_FIELD_SET.has(m[1])) return { error: `未知字段：${m[1]}（整块拒绝）` };
     if (Object.prototype.hasOwnProperty.call(fields, m[1])) return { error: `重复字段：${m[1]}` };
     fields[m[1]] = m[2].trim();
   }
   const hasFull = ["project", "stage", "ruled"].some((k) => Object.prototype.hasOwnProperty.call(fields, k));
-  const required = hasFull ? COORD_TAIL_FIELDS : ["ts", "seq", "flying", "next"];
+  // v1.4 C2-a：sessionId 入字段白名单（识别+单次约束），但不入必需集——v2 遗留全形无此行
+  // 照常解析（C2-05 容忍半面）、seed 恢复源会话不可知同理；写面自动标注补齐（见抽取面）。
+  const required = (hasFull ? COORD_TAIL_FIELDS : ["ts", "seq", "flying", "next"]).filter((k) => k !== "sessionId");
   for (const k of required) {
     if (!Object.prototype.hasOwnProperty.call(fields, k) || fields[k] === "") return { error: `缺字段：${k}` };
   }
@@ -320,14 +334,15 @@ function coordTailParse(block) {
   return { form: "short", fields, seq, flyingItems };
 }
 
-/** Complete v2 pairs in a text (old→new), as line arrays. */
+/** Complete v2/v3 pairs in a text (old→new), as line arrays (v1.4 C2-a 双标识别：
+ *  历史 v2 全形块入块计数照常渲染——C2-05 容忍半面）。 */
 function coordTailScanBlocks(text) {
   const lines = String(text ?? "").split(/\r?\n/);
   const blocks = [];
   let open = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line === COORD_TAIL_MARK) {
+    if (line === COORD_TAIL_MARK || line === COORD_TAIL_MARK_V2) {
       open = i;
     } else if (line === COORD_TAIL_CLOSE && open >= 0) {
       blocks.push({ lines: lines.slice(open, i + 1) });
@@ -337,9 +352,11 @@ function coordTailScanBlocks(text) {
   return blocks;
 }
 
-/** Log snapshot: newest parseable FULL entry = merge baseline (bad entries are
- *  skipped by walking backwards), plus the raw last entry for the idempotence
- *  comparison and the full block list for the K=10 cap. */
+/** Log snapshot: parseable FULL entries newest→oldest (bad entries skipped by
+ *  walking backwards) — fulls[0] keeps the pre-C2-a「日志末个全形」语义, and the
+ *  session-scoped baseline lookup (C2-a 同会话链) filters the list by sessionId.
+ *  Plus the raw last entry for the idempotence comparison and the full block
+ *  list for the K=10 cap. */
 function coordTailLogLastFull(file) {
   let raw = "";
   try {
@@ -348,44 +365,48 @@ function coordTailLogLastFull(file) {
     raw = ""; // missing log ≈ empty baseline
   }
   const blocks = coordTailScanBlocks(raw);
-  let lastFull = null;
+  const fulls = [];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const parsed = coordTailParse(blocks[i]);
     if (!parsed.error && parsed.form === "full") {
-      lastFull = { parsed, text: blocks[i].lines.join("\n") };
-      break;
+      fulls.push({ parsed, text: blocks[i].lines.join("\n") });
     }
   }
   return {
     blocks,
     lastEntryText: blocks.length ? blocks[blocks.length - 1].lines.join("\n") : "",
-    lastFull,
+    lastFull: fulls[0] ?? null,
+    fulls,
   };
 }
 
 function coordTailRender(state) {
-  return [
-    COORD_TAIL_MARK,
-    `ts: ${state.ts}`,
-    `seq: ${state.seq}`,
+  // v1.4 C2-a：sessionId 协议行随写面标注（紧随 seq 协议簇）；缺席不落行（seed 恢复源
+  // 会话不可知 → 渲染为不带 sessionId 行的 v3 块，解析侧容忍）。
+  const lines = [COORD_TAIL_MARK, `ts: ${state.ts}`, `seq: ${state.seq}`];
+  if (state.sessionId) lines.push(`sessionId: ${state.sessionId}`);
+  lines.push(
     `project: ${state.project}`,
     `stage: ${state.stage}`,
     `flying: ${state.flying}`,
     `ruled: ${state.ruled}`,
     `next: ${state.next}`,
     COORD_TAIL_CLOSE,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function coordTailMerge(prev, parsed) {
-  if (!prev && parsed.form === "short") return { error: "缺全形基线，短形不立文件" };
+  if (!prev && parsed.form === "short") return { error: "缺全形基线（无同会话链前块），短形不立文件；请写全形尾块" };
   /* v1.1.1 W20：append-only 日志没有「覆盖旧态」的写入对象，(ts,seq) 判旧守卫随
      结构性消亡（pack 裁定「append 无判旧」）。迟到陈旧块由注入面 10 块帽老化。 */
+  const sessionId = parsed.fields.sessionId ?? "";
   let state;
   if (parsed.form === "full") {
     state = {
       ts: parsed.fields.ts,
       seq: String(parsed.seq),
+      sessionId,
       project: parsed.fields.project,
       stage: parsed.fields.stage,
       flying: parsed.flyingItems.join(", ") || "无",
@@ -408,6 +429,7 @@ function coordTailMerge(prev, parsed) {
     state = {
       ts: parsed.fields.ts,
       seq: String(parsed.seq),
+      sessionId,
       project: prev.fields.project,
       stage: prev.fields.stage,
       flying: flying.join(", ") || "无",
@@ -533,11 +555,12 @@ function coordTailAppendLog(file, blockText, blocks) {
   throw lastErr;
 }
 
-/** Protocol lines never enter the injection face (Q6); equality is judged bare. */
+/** Protocol lines never enter the injection face (Q6; v1.4 C2-a 剥离清单扩列
+ *  sessionId，与 ts:/seq: 同列); equality is judged bare. */
 function coordTailStripProtocol(text) {
   return String(text ?? "")
     .split(/\r?\n/)
-    .filter((line) => !/^(ts|seq): /.test(line))
+    .filter((line) => !/^(ts|seq|sessionId): /.test(line))
     .join("\n");
 }
 
@@ -547,7 +570,8 @@ function recordCoordTailIfEnabled(input) {
     if (String(input.session_id || "").startsWith("sess_subagent_")) return;
     const raw = input.last_assistant_message ?? input.last_message ?? input.assistant_message;
     if (typeof raw !== "string") return;
-    if (!raw.includes(COORD_TAIL_MARK)) return; // ORT-7 zero write（v1 块无 v2 标记，同样零写）
+    // ORT-7 zero write（v1 块无 v2/v3 标记，同样零写；v1.4 C2-a 双标识别——v2/v3 任一在位才进抽取）。
+    if (!raw.includes(COORD_TAIL_MARK) && !raw.includes(COORD_TAIL_MARK_V2)) return;
     const projectDir = process.env.ZCODE_PROJECT_DIR || process.cwd();
     const rootDir = locateRoot(projectDir);
     const contextDir = path.join(rootDir, "context");
@@ -578,9 +602,27 @@ function recordCoordTailIfEnabled(input) {
       coordTailWarn(capError);
       return;
     }
-    // 3) 合并：基线 = 日志末个可解析全形条目（坏条目跳过向前找）。
+    // 3) 合并（v1.4 C2-a 同会话链）：sessionId 自动标注（写面零主控负担；主控手写块不强制
+    //    ——已带 sessionId 行则以写入值为准）。短形补全基准=同会话链（sessionId 匹配）最新
+    //    可解析全形条目（坏条目跳过向前找）；无同会话前块 → 拒写+stderr 要求全形（跨会话
+    //    字段不继承——串味域从「日志全局上一块」缩至「同会话链」；v2 遗留短形无会话链同拒，
+    //    安全向）。v2 遗留全形块照常解析入日志（C2-05 容忍半面），但不充当同会话基线；
+    //    v2 全形输入块归一化落写=v3 主标记+sessionId 协议行（存量 v2 块原样保留不回写）。
+    if (!Object.prototype.hasOwnProperty.call(parsed.fields, "sessionId")) {
+      parsed.fields.sessionId = String(input.session_id ?? "");
+    }
     const log = coordTailLogLastFull(logFile);
-    const merged = coordTailMerge(log.lastFull ? log.lastFull.parsed : null, parsed);
+    let baseline = null;
+    if (parsed.form === "short") {
+      baseline = parsed.fields.sessionId
+        ? log.fulls.find((f) => f.parsed.fields.sessionId === parsed.fields.sessionId) ?? null
+        : null;
+      if (!baseline) {
+        coordTailWarn("缺全形基线（无同会话链前块，跨会话字段不继承），短形不立文件；请写全形尾块");
+        return;
+      }
+    }
+    const merged = coordTailMerge(parsed.form === "short" ? baseline.parsed : null, parsed);
     if (merged.error) {
       coordTailWarn(merged.error);
       return;
@@ -667,7 +709,10 @@ function readStdinJson() {
    本函数为各脚本内定根唯一副本（stop-check 主清点与镜像记录两条路径共用）。
    v1.1.1 (W20/W22) 祖先回退：默认根既无 board.json 也无 root-id（无指针/空指针/校验失败回退）时，
    自 projectDir 向上逐级找最近祖先目录，其 .zcode/orchestrator 同时存在 board.json 与 root-id
-   即采用（stderr 一行告知解析根）；找不到则静默默认根。root.txt 指针优先级不变。 */
+   即采用（stderr 一行告知解析根）；找不到则静默默认根。root.txt 指针优先级不变。
+   v1.4 (F1 腿 B) board.json 存在性校验：指针目标自洽≠目标合法——采信前先验目标 board.json，
+   目标缺而默认根有 → 回退默认根 + stderr 告警一行（混配=误配置 G1-4，本根优先）；默认根
+   亦无 → 现行为不变（祖先回退链 W22-RC1..RC8 不动）。删除面对称腿=server 自愈（server-core）。 */
 function isTempLikeDir(p) {
   try {
     const tmp = path.resolve(os.tmpdir());
@@ -725,7 +770,8 @@ function ancestorRoot(projectDir, defaultRoot) {
   }
 }
 
-/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根（先做祖先
+/** 存储根发现：root.txt 指针优先，采信前过分代门 + board.json 存在性校验（F1 腿 B：目标
+ *  缺板而默认根有板 → 回退默认根 + 告警）；无指针（或空指针）→ 默认根（先做祖先
  *  回退判定）；任一校验失败 → 回退默认根 + stderr 告警（同样做祖先回退判定）。不删指针。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
@@ -752,6 +798,17 @@ function locateRoot(projectDir) {
     }
     if (!live) {
       rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
+      return fallbackRoot();
+    }
+    // v1.4 F1 腿 B（五处 twin 同文）：board.json 存在性校验——目标自洽≠目标合法（根唯一性
+    // 仲裁删除面归 server 自愈腿，钩子侧只修根解析输入）。指针目标缺 board.json ∧ 默认根有
+    // board.json → 回退默认根 + stderr 告警一行（劈叉失明面补告警；G1-4 混配=误配置非支持
+    // 面，本根优先）。默认根亦无 board.json → 现行为（祖先回退链 W22-RC1..RC8 不动）。
+    if (
+      !fs.existsSync(path.join(target, "board.json")) &&
+      fs.existsSync(path.join(defaultRoot, "board.json"))
+    ) {
+      rootContractStderr("[orch-root-contract] root.txt target lacks board.json; falling back to default root");
       return fallbackRoot();
     }
     const rid = rootIdOf(target);

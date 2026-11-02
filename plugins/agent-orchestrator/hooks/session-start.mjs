@@ -187,7 +187,10 @@ function readStdinJson() {
    本函数为各脚本内定根唯一副本（stop-check 主清点与镜像记录两条路径共用）。
    v1.1.1 (W20/W22) 祖先回退：默认根既无 board.json 也无 root-id（无指针/空指针/校验失败回退）时，
    自 projectDir 向上逐级找最近祖先目录，其 .zcode/orchestrator 同时存在 board.json 与 root-id
-   即采用（stderr 一行告知解析根）；找不到则静默默认根。root.txt 指针优先级不变。 */
+   即采用（stderr 一行告知解析根）；找不到则静默默认根。root.txt 指针优先级不变。
+   v1.4 (F1 腿 B) board.json 存在性校验：指针目标自洽≠目标合法——采信前先验目标 board.json，
+   目标缺而默认根有 → 回退默认根 + stderr 告警一行（混配=误配置 G1-4，本根优先）；默认根
+   亦无 → 现行为不变（祖先回退链 W22-RC1..RC8 不动）。删除面对称腿=server 自愈（server-core）。 */
 function isTempLikeDir(p) {
   try {
     const tmp = path.resolve(os.tmpdir());
@@ -245,7 +248,8 @@ function ancestorRoot(projectDir, defaultRoot) {
   }
 }
 
-/** 存储根发现：root.txt 指针优先，采信前过分代门；无指针（或空指针）→ 默认根（先做祖先
+/** 存储根发现：root.txt 指针优先，采信前过分代门 + board.json 存在性校验（F1 腿 B：目标
+ *  缺板而默认根有板 → 回退默认根 + 告警）；无指针（或空指针）→ 默认根（先做祖先
  *  回退判定）；任一校验失败 → 回退默认根 + stderr 告警（同样做祖先回退判定）。不删指针。 */
 function locateRoot(projectDir) {
   const defaultRoot = path.join(projectDir, ".zcode", "orchestrator");
@@ -272,6 +276,17 @@ function locateRoot(projectDir) {
     }
     if (!live) {
       rootContractStderr("root.txt 指针未通过归属校验（指针目标不存在或不是目录），已回退默认根");
+      return fallbackRoot();
+    }
+    // v1.4 F1 腿 B（五处 twin 同文）：board.json 存在性校验——目标自洽≠目标合法（根唯一性
+    // 仲裁删除面归 server 自愈腿，钩子侧只修根解析输入）。指针目标缺 board.json ∧ 默认根有
+    // board.json → 回退默认根 + stderr 告警一行（劈叉失明面补告警；G1-4 混配=误配置非支持
+    // 面，本根优先）。默认根亦无 board.json → 现行为（祖先回退链 W22-RC1..RC8 不动）。
+    if (
+      !fs.existsSync(path.join(target, "board.json")) &&
+      fs.existsSync(path.join(defaultRoot, "board.json"))
+    ) {
+      rootContractStderr("[orch-root-contract] root.txt target lacks board.json; falling back to default root");
       return fallbackRoot();
     }
     const rid = rootIdOf(target);
