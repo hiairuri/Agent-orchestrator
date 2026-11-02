@@ -96,7 +96,7 @@
 - **crv5-apply-envelope**：apply/discard 两阶段包络＋幂等三态＋ENV-01 两慢 merge 场景套内失败重试一次（全新临时根重跑、断言集不变）。
 - **crv1-scope**：scope 三粒度冲突语义（scope_warnings/strict 拒绝/scope_conflicts）。
 - **crv6-resilience / root-contract / twin-lock**：根锁与路径包含校验为共享基建（跨卡：card-root-txt）。
-- **函数名锚（LM-05 候选行素材，供持 lint-manifest 写面的波次注册）**：`materializeSandbox`／`applyGateAndIntent`／`applyGitPipeline`／`applySettleBoard`／`applyTeardown`／`toolSandboxApply`／`toolSandboxDiscard`／`discardGate`／`discardGitTriple`／`discardSettleBoard`／`assertMergeTreeSupport`／`parseMergeTreeConflicts`／`applyIntentFresh`／`buildSandboxLines`／`coversPath`／`scopePairConflict`（均 server.mjs，2026-10-28 grep 实证可见）。
+- **函数名锚（LM-05 候选行素材，供持 lint-manifest 写面的波次注册）**：`materializeSandbox`／`applyGateAndIntent`／`applyGitPipeline`／`applySettleBoard`／`applyTeardown`／`toolSandboxApply`／`toolSandboxDiscard`／`discardGate`／`discardGitTriple`／`discardSettleBoard`／`assertMergeTreeSupport`／`parseMergeTreeConflicts`／`applyIntentFresh`／`buildSandboxLines`／`coversPath`／`scopePairConflict`（v1.3 拆分后按模块族现形：mcp/server-git.mjs 5 锚=materializeSandbox/assertMergeTreeSupport/parseMergeTreeConflicts/buildSandboxLines/scopePairConflict、mcp/server-core.mjs 1 锚=coversPath、mcp/tool-sandbox.mjs 10 锚=其余——split-anchor-map §3 终态映射；2026-11-02 W4 E1 勘误，原「均 server.mjs 2026-10-28 grep 实证可见」系旧单体表述）。
 
 ## 6. 维护规则
 

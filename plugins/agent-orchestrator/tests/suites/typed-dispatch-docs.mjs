@@ -4,7 +4,9 @@
  * suites/typed-dispatch-docs.mjs —— v0.6 簇 C 断言套（V6-63 文档在位防回退 + V6-64 到期回收机制载体）
  *
  * 如实声明：纯 Node 断言测不了宿主 typed 派发行为；本 suite 只测文档/配置在位，防回退。
- * 覆盖 21 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
+ * 覆盖 21 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01；v1.4 W1 增 A1-06/07+B3-01/02+C2-03 五腿，
+ *   权威 designs/agent-orchestrator-v1.4-planning/design.md §2.1；A-COMPAT-1/A-V080-DOC-01 随 ba92054
+ *   双前缀实名基线复位改锚）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
  *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §10「记忆与现场」在案+标记对逐字串，
  *   权威 designs/agent-orchestrator-v0.8-DESIGN.md §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
@@ -14,6 +16,10 @@
  *   默认模式断言各 anchor 在位（防缺陷期被误删）；env ORCH_HOST_FIXED=1 反向断言各 anchor 已回收，
  *   并断言 R-2 永久条款（「report 全名保留不删」）仍在位——该条款为永久不变量，不在回收范围。
  *   E-05/E-06/E-07 条目中「宿主快照缺陷期间」限定语随 R-2 同批复核；E-13/E-14 不回收。
+ *   v1.4 W1（改2-改4/改8，design v1.4 §2.2）：宿主修复事件已判定（typed-probe-20261101 归因翻面
+ *   +ba92054 修复）——R-1..R-4 anchor 全部改锚翻面后新字面、recycleAction 记「已于 v1.4.0 翻面执行」；
+ *   默认模式断言=新字面在位（防回退）；ORCH_HOST_FIXED=1 回收模式对已翻面锚语义=历史机制，
+ *   该模式不再适用翻面后锚（见台账 v1.4.0.md W1 节注记）。
  *   R-5（plugin.json 两键「兼容存根」）已于 2026-10-21 随 E-18 方案乙开关出清册（回收完成）：
  *   V6-24 实现侧（V7-05 numArgOpt 稀疏写）先行落地、桥接语义复邦；A-DOC-V4P12/A-PLUGIN-STUB
  *   同步切换为断言乙稿桥接措辞在位，方案甲存根短语改列 ban（防复发回退）。
@@ -52,6 +58,12 @@ const FILES = {
   c6Findings: path.join(REPO_ROOT, "designs", "agent-orchestrator-v0.9-C6-findings.md"),
 };
 const REPORT = "mcp__plugin_agent-orchestrator_orch__report";
+// v1.4 W1 基线复位（计划外发现；ba92054 残留）：ba92054（v1.3.0）把 agents/*.md frontmatter
+// tools 白名单改宿主注册双前缀实名（单前缀名≠注册名=typed 拒收根因）——frontmatter 面两腿
+// （A-COMPAT-1/A-V080-DOC-01）随之改锚双前缀实名；SKILL 正文钉仍用 REPORT 单形不受影响。
+const REPORT_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report";
+const PROBE_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe";
+const LESSONS_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_lessons";
 const SNAPSHOT_ERR = "Required MCP tool is not available in the parent startup snapshot";
 const POINTER = "designs/agent-orchestrator-v0.6-W-C-findings.md";
 const V08_POINTER = "designs/agent-orchestrator-v0.8-DESIGN.md";
@@ -65,32 +77,38 @@ export const RECYCLE_LIST = [
   {
     id: "R-1",
     file: FILES.skill,
-    anchor: "宿主快照缺陷期间插件角色 typed 派发不可用",
-    recycleAction: "恢复 typed 为默认派发形态表述，GP+persona 降为备选注记（headless 主形态不变，RP-1 联动）",
+    // v1.4 W1 改2（design v1.4 §2.2；SKILL RP-1 尾句 v1.4 翻面）：anchor 随新字面。
+    anchor: "typed 派发为主形态",
+    recycleAction: "已于 v1.4.0 翻面执行（typed 主形态/GP+persona 降级备选表述已落装）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
   {
     id: "R-2",
     file: FILES.skill,
-    anchor: "宿主侧一律走 GP+persona 注入",
-    recycleAction: "改写为「快照缺陷已修复（<宿主版本>），typed 与 GP 双形态并存」；「report 全名保留不删」为永久不变量条款，不在回收范围",
+    // v1.4 W1 改3：anchor→「GP+persona 注入为降级备选」（按逐字稿）；「保留不删」附属不动。
+    anchor: "GP+persona 注入为降级备选",
+    recycleAction: "已于 v1.4.0 翻面执行；「report 全名保留不删」为永久不变量条款，不在回收范围",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
   {
     id: "R-3",
     file: FILES.skill,
-    anchor: "宿主快照缺陷期间池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发",
-    recycleAction: "恢复 typed 池工表述",
+    // v1.4 W1 改4：R-3 锚实位=SKILL :379 DL-6 行（research R1.1 记 :230 RP-3 系坐标偏差；
+    // 波首步 grep 复位——「宿主快照缺陷期间」限定语随 M-5 语义保留取向同批翻面）。
+    anchor: "GP 降级备选通道形态下池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发",
+    recycleAction: "已于 v1.4.0 翻面执行（池工降级通道限定语已翻面）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
   {
     id: "R-4",
     file: FILES.agentsMd,
-    anchor: "勿重试同一角色",
-    recycleAction: "改写为历史注记（保留 designs/dispatch-probe-20261014/ 链接），删「勿重试」禁令",
+    // v1.4 W1 改8：活体 AGENTS.md 已于 2026-11-01 翻面（typed-probe-20261101.md）——
+    // anchor 改锚活体在盘字面「勿盲降级」（波首步 grep 复核命中=1）；recycleAction 同步。
+    anchor: "勿盲降级",
+    recycleAction: "已于 v1.4.0 翻面执行（活体归因段已翻面，锚随新字面）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -156,7 +174,10 @@ function main() {
 
   // ---- 编辑单落地断言（W-C §2 表；判据列逐条对应）----
   if (agentsMdExists) {
-    subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["startup snapshot 校验数据源分叉", "勿重试"], ban: ["原生角色派发需全新会话"] }, "E-01");
+    // v1.4 W1 改5（基线红复位，H-2）：活体 AGENTS.md 已于 2026-11-01 翻面——need 改锚
+    // 活体在盘字面（波首步 grep 复核：「归因已翻面终定」:54 命中=1、「勿盲降级」命中=1）；
+    // AGENTS.md 正文零写入（活体已翻面，只改锚）。
+    subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["归因已翻面终定", "勿盲降级"], ban: ["原生角色派发需全新会话"] }, "E-01");
   } else {
     ck.ok("A-AGENTS-1 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
   }
@@ -181,7 +202,9 @@ function main() {
     need: ["## CONTRACT（三行契约", "也出现在派发 prompt 尾块", "**派发 prompt 尾块**", "三行契约唯一权威=包 CONTRACT", "[channel] {mission_id}", "[worker] {worker 名，如 orch-worker#1}", "[token] {token}"],
     ban: ["## REPORT（双通道）"],
   }, "E-06");
-  subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona"] }, "E-07");
+  // v1.4 W1 改1（防御性改锚，design v1.4 §2.2）：SNAPSHOT_ERR 症状格保留+「GP+persona」
+  // 保留字样维持；新增 ba92054 翻面锚（:183 处置格新字面）防漂移。
+  subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona", "ba92054"] }, "E-07");
   subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
   subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");
   subGroup(ck, "A-DOC-V4P12", "SKILL.md", skill, { need: ["V7-05 起桥接可达", "桥接键", "两枪最小间隔"], ban: ["无实际效果", "v0.3 兼容存根"] }, "E-10");
@@ -195,11 +218,11 @@ function main() {
     ck.ok("A-DOC-V4P25 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
   }
 
-  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名 + SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
+  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名（ba92054 后=宿主注册双前缀实名，v1.4 W1 基线复位）+ SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
     const bad = [];
     for (const [name, text] of agentTexts) {
       const line = frontmatterLine(text, "tools");
-      if (!line.includes(REPORT)) bad.push(`${name} tools 行缺 report 全名`);
+      if (!line.includes(REPORT_TYPED)) bad.push(`${name} tools 行缺 report 全名（双前缀实名）`);
     }
     if (!skill8.includes("保留不删")) bad.push("SKILL.md §8 缺「保留不删」");
     ck.ok("A-COMPAT-1 @ agents/*.md tools 行 + SKILL §8 保留不删", bad.length === 0,
@@ -282,17 +305,16 @@ function main() {
   }
 
   // ---- v0.8 W4 增例（静态在位断言，权威 designs/agent-orchestrator-v0.8-DESIGN.md §10.2/§10.3/§14；不随 ORCH_HOST_FIXED 双模翻转）----
-  { // A-V080-DOC-01：orch-gleaner.md 在册且 lessons 不在 disallowedTools（与三角色相反的放行面）+ tools 面断言（report/probe/lessons 全名）
+  { // A-V080-DOC-01：orch-gleaner.md 在册且 lessons 不在 disallowedTools（与三角色相反的放行面）+ tools 面断言（report/probe/lessons 全名；ba92054 后=双前缀实名，v1.4 W1 基线复位）
     const gleaner = readFile(FILES.agentGleaner);
     const toolsLine = frontmatterLine(gleaner, "tools");
     const disallowLine = frontmatterLine(gleaner, "disallowedTools");
-    const LESSONS = "mcp__plugin_agent-orchestrator_orch__lessons";
     const bad = [];
     if (!gleaner.includes("name: orch-gleaner")) bad.push("缺 name: orch-gleaner");
-    for (const t of [REPORT, "mcp__plugin_agent-orchestrator_orch__probe", LESSONS]) {
+    for (const t of [REPORT_TYPED, PROBE_TYPED, LESSONS_TYPED]) {
       if (!toolsLine.includes(t)) bad.push(`tools 行缺 ${t}`);
     }
-    if (disallowLine.includes(LESSONS)) bad.push("disallowedTools 不得含 lessons 全名（归敛放行面）");
+    if (disallowLine.includes(LESSONS_TYPED)) bad.push("disallowedTools 不得含 lessons 全名（归敛放行面）");
     ck.ok("A-V080-DOC-01 @ agents/orch-gleaner.md 在册 + tools 面 + lessons 放行", bad.length === 0,
       bad.length ? `A-V080-DOC-01 失败: ${bad.join("; ")} —— 回写指针: 见 ${V08_POINTER} §10.3/§14 DOC-01` : "");
   }
@@ -329,6 +351,49 @@ function main() {
       const miss = firstMissing(c6, need);
       ck.ok("A-V090-HOST-01 @ C6-findings 在册+§0 判定串+§1 锚点串", !miss,
         miss ? `A-V090-HOST-01 失败: 缺失子串 ${JSON.stringify(miss)} —— 回写指针: 见 ${C6_POINTER} §3/§5-2（HOST-01 移交语义）` : "");
+    }
+  }
+
+  // ---- v1.4 W1 新腿五条（A1-06/07 + B3-01/02 + C2-03；权威 designs/agent-orchestrator-v1.4-planning/design.md
+  //      §1.1/§1.5/§1.7 + §2.1 表；typed 翻面收口防回退钉 + DP-3/TS-19a 护栏 + PL-10 补注/剥离句/v3 标记对）----
+  {
+    // A1-06：SKILL RP-5/RP-6 翻面字面在位（防回退钉；design §2.1 A1-06 行）
+    subGroup(ck, "A-V0140-A1-06", "SKILL.md §8 RP-5/RP-6", skill8, {
+      need: ["typed 派发已恢复（v1.3.0 ba92054，主形态）", "恢复条件（已满足，2026-11-01 归因翻面）"],
+      ban: ["typed 派发当前无法启动", "宿主修复快照数据源"],
+    }, "v1.4 design §1.1");
+    // A1-07：typed:true 句（DP-3 与 TS-19a 两处；design §2.1 A1-07 行，与 B3-02 邻接）
+    {
+      const dp3 = skill.split("\n").find((l) => l.startsWith("DP-3 ")) || "";
+      const ts19a = skill.split("\n").find((l) => l.startsWith("TS-19a ")) || "";
+      const bad = [];
+      if (!dp3.includes("typed 角色发射须在 dispatch 调用显式传 typed:true（缺省 false=GP 全烘兼容形态）")) bad.push("DP-3 缺 typed:true 句");
+      if (!ts19a.includes("typed 角色发射须显式传 typed:true（缺省 false）")) bad.push("TS-19a 缺 typed:true 句");
+      ck.ok("A-V0140-A1-07 @ SKILL.md DP-3+TS-19a typed:true 句", bad.length === 0,
+        bad.length ? `A-V0140-A1-07 缺失: ${bad.join("; ")} —— 回写指针: 见 v1.4 design §1.1 G1-3` : "");
+    }
+    // B3-01：DP-3 护栏块（design §2.1 B3-01 行：描述面/唯一入口/禁止按链描述手工复刻）
+    {
+      const dp3 = skill.split("\n").find((l) => l.startsWith("DP-3 ")) || "";
+      const miss = firstMissing(dp3, ["【护栏】本条为组装链描述（描述面）", "派发操作面唯一入口=dispatch 工具调用与返回值", "禁止按链描述手工复刻"]);
+      ck.ok("A-V0140-B3-01 @ SKILL.md DP-3 护栏块", !miss,
+        miss ? `A-V0140-B3-01 缺失子串: ${JSON.stringify(miss)} —— 回写指针: 见 v1.4 design §1.5 护栏句逐字稿` : "");
+    }
+    // B3-02：TS-19a 护栏句（design §2.1 B3-02 行：护栏+typed:true 字面）
+    {
+      const ts19a = skill.split("\n").find((l) => l.startsWith("TS-19a ")) || "";
+      const miss = firstMissing(ts19a, ["回执 prompt 即完整首条消息", "禁止按链描述手工复刻", "typed:true"]);
+      ck.ok("A-V0140-B3-02 @ SKILL.md TS-19a 护栏句", !miss,
+        miss ? `A-V0140-B3-02 缺失子串: ${JSON.stringify(miss)} —— 回写指针: 见 v1.4 design §1.5 护栏句逐字稿` : "");
+    }
+    // C2-03：PL-10 补注+剥离句扩列 sessionId+v3 标记对字面（design §2.1 C2-03 行，与改11b 同源）
+    {
+      const pl10 = skill.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
+      const miss = firstMissing(pl10, ["多根 workspace 共写 coord-tail-log 时一律写全形尾块", "短形块补全以同会话链为界，跨会话字段不继承", "`ts:`/`seq:`/`sessionId:`", "<!-- orch-tail v3"]);
+      const stale = pl10.includes("orch-tail v2") ? "PL-10 行残留 orch-tail v2 字面" : "";
+      ck.ok("A-V0140-C2-03 @ SKILL.md PL-10 补注+剥离句+标记对 v3", !miss && !stale,
+        miss ? `A-V0140-C2-03 缺失子串: ${JSON.stringify(miss)} —— 回写指针: 见 v1.4 design §1.7 C2-b 文案规格`
+          : stale ? `A-V0140-C2-03 应升级字面仍在位: ${stale} —— 回写指针: 见 v1.4 design §2.2 改11b` : "");
     }
   }
 

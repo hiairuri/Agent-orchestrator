@@ -177,18 +177,21 @@ function startSentinel(c, opts = {}) {
     "--glean-launch-grace-sec",
     "2",
   ];
-  const proc = spawn(process.execPath, args, {
-    cwd: c.PROJ,
-    env: {
-      ...process.env,
-      ZCODE_PROJECT_DIR: c.PROJ,
-      ZCODE_CLI_PATH: c.stub,
-      GLEAN_STUB_OUT: c.out,
-      GLEAN_STUB_EXIT: String(opts.stubExit ?? 0),
-      GLEAN_STUB_DELAY_MS: String(opts.stubDelayMs ?? 0),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+    const proc = spawn(process.execPath, args, {
+      cwd: c.PROJ,
+      env: {
+        ...process.env,
+        ZCODE_PROJECT_DIR: c.PROJ,
+        ZCODE_CLI_PATH: c.stub,
+        GLEAN_STUB_OUT: c.out,
+        GLEAN_STUB_EXIT: String(opts.stubExit ?? 0),
+        GLEAN_STUB_DELAY_MS: String(opts.stubDelayMs ?? 0),
+        // v1.4 B2：userConfig 读面测试缝——默认指向缺席路径（回退触发项目，确定性；
+        // 防真机 userConfig 已设 globalTaskProjectDir 时落位串入套件），落位腿显式传入
+        ZCODE_ORCH_USER_CONFIG: opts.userConfig || path.join(c.base, "user-config.json"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   let stdout = "";
   let stderr = "";
   proc.stdout.on("data", (d) => (stdout += d));
@@ -424,6 +427,50 @@ try {
     await sleep(200);
   }
 
+  /* ---- v1.4 B2 黑盒：全局任务落位二分端到端（哨兵 spawn 面经 resolveGleanProjectDir）---- */
+  {
+    const ucFile = path.join(BASE.root, "b2-blackbox-uc.json");
+    const targetDir = path.join(BASE.root, "b2-blackbox-target");
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(ucFile, JSON.stringify({ plugins: { options: { "agent-orchestrator@test": { globalTaskProjectDir: targetDir } } } }));
+    const c = makeCase("b2-blackbox-rehome");
+    // W2r 修复（B2-02 基线红）：桩须存活过腿读取窗——delay=0 桩立即退出 code=0 走
+    // settle 路径清状态文件，腿 poll 到记录时 state 已删（readState=null 误报
+    // root_dir:null）；delay 1500>grace 支撑读取窗（G3 同形），断言面零改动
+    const s = startSentinel(c, { userConfig: ucFile, stubDelayMs: 1500 });
+    const launched = await waitFor(() => stubRecords(c).length >= 1, 10000);
+    const rec = stubRecords(c)[0] || {};
+    const argvB2 = Array.isArray(rec.argv) ? rec.argv : [];
+    const msgB2 = String(argvB2[1] || "");
+    const stB2 = readState(c);
+    ck.ok(
+      "B2-02 黑盒落位：键值合法 → spawn cwd=键值 ∧ 消息「项目根目录」行=键值（下游自动跟随）",
+      launched && rec.cwd === path.resolve(targetDir) && msgB2.includes(`- 项目根目录：${path.resolve(targetDir)}`),
+      { launched, cwd: rec.cwd, target: path.resolve(targetDir) },
+    );
+    ck.ok(
+      "B2-02 哨兵盯守根不随落位迁移（波首步 R4.2 链核验消歧）：root/状态文件仍落触发项目存储根",
+      Boolean(stB2) && stB2.root_dir === c.ROOT,
+      { root_dir: stB2 && stB2.root_dir, ROOT: c.ROOT },
+    );
+    s.kill();
+    await sleep(200);
+
+    const c2 = makeCase("b2-blackbox-fallback");
+    const s2 = startSentinel(c2); // userConfig 缺席（默认注入缺席路径）→ 回退触发项目
+    await waitFor(() => stubRecords(c2).length >= 1 || s2.stderr.includes("globalTaskProjectDir absent/invalid"), 8000);
+    await sleep(1500);
+    const rec2 = stubRecords(c2)[0] || {};
+    ck.ok(
+      "B2-01 黑盒回退不静默：stderr 单行告警在场 ∧ 回退触发项目 cwd（现行为）",
+      s2.stderr.includes("globalTaskProjectDir absent/invalid; falling back to trigger project") &&
+        (!fs.existsSync(c2.out) || !rec2 || rec2.cwd === c2.PROJ),
+      s2.stderr.slice(0, 200),
+    );
+    s2.kill();
+    await sleep(200);
+  }
+
   /* ---- 库级准备：把 bg-sentinel 当库导入（黑盒测不到 spawn options/竞态/超时）----
      v1.3 切分重基（m-20261101-034720-a7a6）：旧形态=读入口单文件剥尾（try{main()}catch 段）
      +手工补 export 面成单文件 lib；拆分后函数面迁入 hooks/bg-sentinel/glean-launch.mjs
@@ -448,6 +495,26 @@ try {
     lib = null;
   }
   ck.ok("G5-pre 哨兵入口可剥（探针结构无漂移）", lib != null, lib ? "family mirror import ok" : "family mirror import failed");
+
+  /* ---- v1.4 B1 静态腿（A-V0140-B1-01/02/03）：gleaner 专有提示词手术（agents/orch-gleaner.md）---- */
+  {
+    const personaRaw = readText(path.join(PLUGIN_DIR, "agents", "orch-gleaner.md")).replace(/\r\n/g, "\n");
+    const fm = /^---\n[\s\S]*?\n---\n/.exec(personaRaw);
+    const body = fm ? personaRaw.slice(fm[0].length) : personaRaw;
+    const bodyFirst = body.split("\n").find((l) => l.trim()) || "";
+    ck.ok(
+      "B1-01 persona 首行标题化（非人名式，防会话标题泄漏 l-186c62）∧ frontmatter 键面不动（A-V080-DOC-01 零触碰核验引用）",
+      bodyFirst === "# 记忆归敛任务指令" && Boolean(fm) && /^name: orch-gleaner$/m.test(fm[0]) && fm[0].includes("disallowedTools:"),
+      { firstLine: bodyFirst, hasFm: Boolean(fm) },
+    );
+    ck.ok(
+      "B1-02 GL-2 翻面：含「typed 直派已恢复主形态」不含「勿依赖 typed」",
+      body.includes("typed 直派已恢复主形态") && !body.includes("勿依赖 typed"),
+      null,
+    );
+    const zhukong = (body.match(/主控/g) || []).length;
+    ck.ok("B1-03 persona 正文零主控语汇（GL-29/30/34 中性化后 grep「主控」=0）", zhukong === 0, { hits: zhukong });
+  }
 
   if (lib) {
     /* ---- G5a spawn 异常 → 短冷却 + 锁回退 + stderr ---- */
@@ -960,6 +1027,91 @@ if (acq.ok) setTimeout(() => { finishGleanLease(acq); process.exit(0); }, 500); 
           { hk, lock: readText(c.lockFile).slice(0, 80), stamp, err: err.slice(0, 120) },
         );
       }
+    }
+
+    /* ---- v1.4 B1-05 + B2-01/02（lib 级）：任务名行供给 + 全局任务落位二分 ---- */
+    {
+      // B1-05 任务名行供给：buildGleanMessage 拼装消息段首含「记忆归敛代理」+「orch-gleaner」
+      // （persona 首行标题化后字样供给源迁移护钉——glean 套件 :331/:536 既有字面钉零触碰）
+      const msg05 = lib.buildGleanMessage({
+        persona: "",
+        memoryRoot: "M",
+        rootDir: "R",
+        projectDir: "P",
+        rootId: "0123456789abcdef",
+        gate: { idleH: 1, events: 1 },
+      });
+      ck.ok(
+        "B1-05 任务名行供给：消息段首=「任务名：记忆归敛代理（orch-gleaner）」且双字样在场",
+        msg05.startsWith("任务名：记忆归敛代理（orch-gleaner）") && msg05.includes("记忆归敛代理") && msg05.includes("orch-gleaner"),
+        msg05.split("\n")[0],
+      );
+
+      // B2 lib 级：resolveGleanProjectDir 取值优先级与回退告警（userConfig 键＞glean.cfg.json 同键＞回退）
+      const ucFile = path.join(BASE.root, "b2-lib-uc.json");
+      const setUc = (doc) => {
+        if (doc == null) {
+          try {
+            fs.unlinkSync(ucFile);
+          } catch {
+            /* absent */
+          }
+          return;
+        }
+        fs.writeFileSync(ucFile, JSON.stringify(doc));
+      };
+      const savedUcEnv = process.env.ZCODE_ORCH_USER_CONFIG;
+      process.env.ZCODE_ORCH_USER_CONFIG = ucFile;
+      const c17 = makeCase("b2-resolver", { gcfg: { idle_hours: 0, new_events: 0, lock_stale_hours: 1.5 } });
+      const targetDir = path.join(BASE.root, "b2-lib-target");
+      fs.mkdirSync(targetDir, { recursive: true });
+      let err = "";
+      const origErr = process.stderr.write;
+      process.stderr.write = (chunk) => {
+        err += String(chunk);
+        return true;
+      };
+      let rAbsent = null;
+      let rEmpty = null;
+      let rInvalid = null;
+      let rCfg = null;
+      let rValid = null;
+      try {
+        lib.resetGleanDirWarn();
+        setUc(null); // 缺席：userConfig 缺文件 ∧ glean.cfg 无键 → 回退触发项目 + stderr 单行
+        rAbsent = lib.resolveGleanProjectDir({ argv: ["--glean-memory-root", c17.MEM], rawCfg: {}, rootDir: c17.ROOT, triggerProjectDir: c17.PROJ });
+        setUc({ plugins: { options: { "agent-orchestrator@test": { globalTaskProjectDir: "" } } } }); // 空串键 → 同回退态（去重）
+        rEmpty = lib.resolveGleanProjectDir({ argv: ["--glean-memory-root", c17.MEM], rawCfg: {}, rootDir: c17.ROOT, triggerProjectDir: c17.PROJ });
+        setUc({ plugins: { options: { "agent-orchestrator@test": { globalTaskProjectDir: path.join(BASE.root, "no-such-dir-b2") } } } }); // 非法路径
+        rInvalid = lib.resolveGleanProjectDir({ argv: ["--glean-memory-root", c17.MEM], rawCfg: {}, rootDir: c17.ROOT, triggerProjectDir: c17.PROJ });
+        setUc(null); // glean.cfg.json 同键（userConfig 键缺席回落）→ 落位
+        fs.writeFileSync(path.join(c17.MEM, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0, lock_stale_hours: 1.5, globalTaskProjectDir: targetDir }));
+        rCfg = lib.resolveGleanProjectDir({ argv: ["--glean-memory-root", c17.MEM], rawCfg: {}, rootDir: c17.ROOT, triggerProjectDir: c17.PROJ });
+        setUc({ plugins: { options: { "agent-orchestrator@test": { globalTaskProjectDir: targetDir } } } }); // userConfig 键在位合法（优先级更高）
+        rValid = lib.resolveGleanProjectDir({ argv: ["--glean-memory-root", c17.MEM], rawCfg: {}, rootDir: c17.ROOT, triggerProjectDir: c17.PROJ });
+      } finally {
+        process.stderr.write = origErr;
+        if (savedUcEnv === undefined) delete process.env.ZCODE_ORCH_USER_CONFIG;
+        else process.env.ZCODE_ORCH_USER_CONFIG = savedUcEnv;
+        setUc(null);
+      }
+      const warnCount = (err.match(/globalTaskProjectDir absent\/invalid; falling back to trigger project/g) || []).length;
+      ck.ok(
+        "B2-01 cfg 缺席/空/非法 → projectDir=触发项目（现行为）+stderr 单行告警在场（回退态去重：三连回退恰一告警）",
+        Boolean(rAbsent && rEmpty && rInvalid) &&
+          rAbsent.projectDir === c17.PROJ && rAbsent.source === "fallback" && rAbsent.reason === "absent" &&
+          rEmpty.projectDir === c17.PROJ && (rEmpty.reason === "empty" || rEmpty.reason === "absent") &&
+          rInvalid.projectDir === c17.PROJ && rInvalid.reason === "invalid:userConfig" &&
+          warnCount === 1,
+        { absent: rAbsent && rAbsent.reason, empty: rEmpty && rEmpty.reason, invalid: rInvalid && rInvalid.reason, warnCount },
+      );
+      ck.ok(
+        "B2-02 键值合法落位（lib）：userConfig 键＞glean.cfg.json 同键，合法路径均落位目标目录",
+        Boolean(rCfg && rValid) &&
+          rCfg.projectDir === path.resolve(targetDir) && rCfg.source === "gleanCfg" &&
+          rValid.projectDir === path.resolve(targetDir) && rValid.source === "userConfig",
+        { rCfg: rCfg && rCfg.source, rValid: rValid && rValid.source },
+      );
     }
   }
 } catch (err) {

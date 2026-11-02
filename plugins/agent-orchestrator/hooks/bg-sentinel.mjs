@@ -144,6 +144,7 @@ import {
   GLEAN_LAUNCH_TIMEOUT_MIN_DEFAULT,
   maybeLaunchGlean,
   maybeSuperviseGlean,
+  resolveGleanProjectDir,
 } from "./bg-sentinel/glean-launch.mjs";
 
 function main() {
@@ -316,7 +317,17 @@ function main() {
     // 位置在 standby 节流之前：待命期也持续满足「伴随即拉起」的用户口径。
     maybeSuperviseGlean({ rootDir: root, cfg });
     if (!quarantined) {
-      maybeLaunchGlean({ rootDir: root, projectDir, argv, cfg, slot });
+      // v1.4 B2 全局任务落位二分：glean 拉起路径取 globalTaskProjectDir（userConfig 键＞
+      // <memoryRoot>/glean.cfg.json 同键）非空∧路径存在 → 落位该项目；否则回退触发项目
+      // （stderr 告警在模块内，回退不静默 M-1）。哨兵盯守根 root/唤醒面不随迁移（projectDir
+      // 本体保持触发项目）——防触发项目板面失明；spawn cwd 与消息「项目根目录」行自动跟随。
+      maybeLaunchGlean({
+        rootDir: root,
+        projectDir: resolveGleanProjectDir({ argv, rawCfg: cfg.raw, rootDir: root, triggerProjectDir: projectDir }).projectDir,
+        argv,
+        cfg,
+        slot,
+      });
     }
 
     // v2.1 待命节流（V7-04 起隔离值守同门共享）：active 每 tick 全量评估；

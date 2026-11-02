@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { runCapture } from "../../harness/capture.mjs";
 import { familySource } from "../../harness/source-family.mjs";
 
@@ -167,13 +168,14 @@ export async function run(ctx) {
         env: { ZCODE_PROJECT_DIR: envProject },
       });
     const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, "utf8") : null);
+    // v1.4 C2-a 改13：scanBlocks 升 v3 主标识别（双标识别——历史 v2 块照常计数，C2-05 载体）。
     const scanBlocks = (text) => {
       const lines = String(text ?? "").split(/\r?\n/);
       const out = [];
       let open = -1;
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
-        if (t === "<!-- orch-tail v2") open = i;
+        if (t === "<!-- orch-tail v3" || t === "<!-- orch-tail v2") open = i;
         else if (t === "<!-- orch-tail-end -->" && open >= 0) {
           out.push(lines.slice(open, i + 1).join("\n"));
           open = -1;
@@ -183,7 +185,27 @@ export async function run(ctx) {
     };
     const logBlocks = () => scanBlocks(readLog());
     const stripProto = (blockText) =>
-      blockText.split("\n").filter((line) => !/^(ts|seq): /.test(line)).join("\n");
+      blockText.split("\n").filter((line) => !/^(ts|seq|sessionId): /.test(line)).join("\n");
+    // v1.4 C2-a 改13（期望值侧）：写面归一化落写形态=v3 主标记+sessionId 协议行（EXTRA ⑧；
+    // 输入夹具 fullBlock/shortBlock 维持 v2 原样=改13 收窄——既有 v2 夹具=C2-05 识别腿载体）。
+    // sessionId: null → 不落行（seed 恢复源会话不可知形）。
+    const normBlock = (over = {}) => {
+      const lines = [
+        "<!-- orch-tail v3",
+        `ts: ${over.ts ?? "2026-10-25T05:00:00.000Z"}`,
+        `seq: ${over.seq ?? 1}`,
+      ];
+      if (over.sessionId !== null) lines.push(`sessionId: ${over.sessionId ?? "sess_main-1"}`);
+      lines.push(
+        `project: ${over.project ?? "v1.1.1 施工中"}`,
+        `stage: ${over.stage ?? "W20"}`,
+        `flying: ${over.flying ?? "m-a"}`,
+        `ruled: ${over.ruled ?? "日志唯一源"}`,
+        `next: ${over.next ?? "机制波"}`,
+        "<!-- orch-tail-end -->",
+      );
+      return lines.join("\n");
+    };
 
     resetSC();
     {
@@ -198,8 +220,8 @@ export async function run(ctx) {
       const r = runStop(fullBlock());
       const got = readLog();
       ck.ok(
-        "T12-b 全形块 → 日志首条逐字追加（v2 标签对/字段序/含 ts:seq: 协议行/exit 0）",
-        r.code === 0 && got === fullBlock() + "\n" && logBlocks().length === 1 && !r.stderr.trim(),
+        "T12-b 全形块 → 日志首条追加（改13 期望值侧：v2 输入归一化落写=v3 主标记+sessionId 协议行；字段序/ts:seq: 协议行保留/exit 0）",
+        r.code === 0 && got === normBlock() + "\n" && logBlocks().length === 1 && !r.stderr.trim(),
         { got, stderr: r.stderr },
       );
     }
@@ -207,9 +229,9 @@ export async function run(ctx) {
       const before = readLog();
       const r = runStop(shortBlock({ flying: "+m-b,-m-a" }));
       const got = logBlocks();
-      const want = fullBlock({ ts: "2026-10-25T05:01:00.000Z", seq: 2, flying: "m-b", next: "收口" });
+      const want = normBlock({ ts: "2026-10-25T05:01:00.000Z", seq: 2, flying: "m-b", next: "收口" });
       ck.ok(
-        "T12-c 短形 delta 合并后追加全形条目（基线=日志末条；project/stage/ruled 保留、flying +/-、ts/seq 换新）",
+        "T12-c 短形 delta 合并后追加全形条目（v1.4 C2-a：基线=同会话链末条；project/stage/ruled 保留、flying +/-、ts/seq 换新、sessionId 协议行在位）",
         r.code === 0 && got.length === 2 && got[1] === want && readLog() !== before && !r.stderr.trim(),
         { last: got[1], want, stderr: r.stderr },
       );
@@ -261,8 +283,8 @@ export async function run(ctx) {
       resetSC();
       const r = runStop(shortBlock({ seq: 1, flying: "+m-b" }));
       ck.ok(
-        "T12-j 短形无全形基线 → 不立日志 + stderr「缺全形基线」",
-        r.code === 0 && !fs.existsSync(LOG) && r.stderr.includes("缺全形基线"),
+        "T12-j 短形无同会话链全形基线 → 不立日志 + stderr「缺全形基线」（v1.4 C2-a：同会话链为界）",
+        r.code === 0 && !fs.existsSync(LOG) && r.stderr.includes("缺全形基线") && r.stderr.includes("同会话"),
         { stderr: r.stderr, exists: fs.existsSync(LOG) },
       );
     }
@@ -273,8 +295,8 @@ export async function run(ctx) {
       const r = runStop(msg);
       const got = logBlocks();
       ck.ok(
-        "T12-k 多块取最后一块（只取消息最后一组完整对）：日志=seq 2 块",
-        r.code === 0 && got.length === 1 && got[0] === fullBlock({ seq: 2, project: "新" }),
+        "T12-k 多块取最后一块（只取消息最后一组完整对）：日志=seq 2 块（归一化 v3 落写）",
+        r.code === 0 && got.length === 1 && got[0] === normBlock({ seq: 2, project: "新" }),
         { got },
       );
     }
@@ -299,8 +321,8 @@ export async function run(ctx) {
       );
       const trailing = runStop(fullBlock({ seq: 1 }) + "   \n\t ");
       ck.ok(
-        "T12-x2 尾锚定容忍尾随空白：闭标签后仅空白 → 正常追加",
-        trailing.code === 0 && readLog() === fullBlock({ seq: 1 }) + "\n" && !trailing.stderr.trim(),
+        "T12-x2 尾锚定容忍尾随空白：闭标签后仅空白 → 正常追加（归一化 v3 落写）",
+        trailing.code === 0 && readLog() === normBlock({ seq: 1 }) + "\n" && !trailing.stderr.trim(),
         { stderr: trailing.stderr, got: readLog() },
       );
     }
@@ -311,13 +333,13 @@ export async function run(ctx) {
       const r1 = runStop(fullBlock({ seq: 2, ts: "2026-10-25T05:02:00.000Z", next: "二" }));
       const got = logBlocks();
       ck.ok(
-        "T12-o 变化即追加：业务字段（next）变 → 日志新增一条全形条目（旧条目保留，块间空行）",
+        "T12-o 变化即追加：业务字段（next）变 → 日志新增一条全形条目（旧条目保留，块间空行；改13：追加块=v3 主标记）",
         r0.code === 0 &&
           r1.code === 0 &&
           got.length === 2 &&
           got[0].includes("next: 一") &&
           got[1].includes("next: 二") &&
-          readLog().includes("<!-- orch-tail-end -->\n\n<!-- orch-tail v2") &&
+          readLog().includes("<!-- orch-tail-end -->\n\n<!-- orch-tail v3") &&
           !r1.stderr.trim(),
         { count: got.length, stderr: r1.stderr },
       );
@@ -351,11 +373,11 @@ export async function run(ctx) {
       }
       const got = logBlocks();
       ck.ok(
-        "T12-q 滞回裁剪腿（v1.2.2 自「封顶 K=10 第 11 块触发」改写）：第 21 块触发原子重写（seq1..11 出队，保留最新 10，末块最新）",
+        "T12-q 滞回裁剪腿（v1.2.2 自「封顶 K=10 第 11 块触发」改写）：第 21 块触发原子重写（seq1..11 出队，保留最新 10，末块最新；改13：落写=v3+sessionId 形）",
         got.length === 10 &&
           [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].every((n) => !readLog().includes(`seq: ${n}\n`)) &&
-          got[0] === fullBlock({ seq: 12, ts: "2026-10-25T06:12:00.000Z", next: "n12" }) &&
-          got[9] === fullBlock({ seq: 21, ts: "2026-10-25T06:21:00.000Z", next: "n21" }),
+          got[0] === normBlock({ seq: 12, ts: "2026-10-25T06:12:00.000Z", next: "n12" }) &&
+          got[9] === normBlock({ seq: 21, ts: "2026-10-25T06:21:00.000Z", next: "n21" }),
         { count: got.length, first: got[0] && got[0].split("\n")[2], last: got[9] && got[9].split("\n")[2] },
       );
       // HYS-01 累积腿：20 块 ≤ TRIM_AT → 全程 plain append，最上不丢（seq1 在位）。
@@ -371,10 +393,10 @@ export async function run(ctx) {
       }
       const gotH1 = logBlocks();
       ck.ok(
-        "HYS-01 累积腿（v1.2.2 滞回）：20 块不滑动（无裁剪，最上不丢）——恰 20 全在位，seq1..20 逐块等值",
+        "HYS-01 累积腿（v1.2.2 滞回）：20 块不滑动（无裁剪，最上不丢）——恰 20 全在位，seq1..20 逐块等值（改13：v3+sessionId 形）",
         gotH1.length === 20 &&
-          gotH1[0] === fullBlock({ seq: 1, ts: "2026-10-25T07:01:00.000Z", next: "h1" }) &&
-          gotH1[19] === fullBlock({ seq: 20, ts: "2026-10-25T07:20:00.000Z", next: "h20" }),
+          gotH1[0] === normBlock({ seq: 1, ts: "2026-10-25T07:01:00.000Z", next: "h1" }) &&
+          gotH1[19] === normBlock({ seq: 20, ts: "2026-10-25T07:20:00.000Z", next: "h20" }),
         { count: gotH1.length, first: gotH1[0] && gotH1[0].split("\n")[2], last: gotH1[19] && gotH1[19].split("\n")[2] },
       );
       // HYS-02 单写触发腿：恰 20 块日志（直投种子）追加第 21 块 → 一步裁回 10
@@ -392,13 +414,13 @@ export async function run(ctx) {
       const rH2 = runStop(fullBlock({ seq: 21, ts: "2026-10-25T08:21:00.000Z", next: "s21" }));
       const gotH2 = logBlocks();
       ck.ok(
-        "HYS-02 裁剪腿（v1.2.2 滞回）：恰 20 块 + 第 21 块 → 原子重写保留最新 10（含新块，seq11 消失、seq12..21 在位）",
+        "HYS-02 裁剪腿（v1.2.2 滞回）：恰 20 块 + 第 21 块 → 原子重写保留最新 10（含新块，seq11 消失、seq12..21 在位；改13：种子 v2 块原样保留不回写、新落写块=v3+sessionId 形——C2-05 存量保留同源证据）",
         rH2.code === 0 &&
           gotH2.length === 10 &&
           !readLog().includes("seq: 11\n") &&
           gotH2[0] === fullBlock({ seq: 12, ts: "2026-10-25T08:12:00.000Z", next: "s12" }) &&
           gotH2[8] === fullBlock({ seq: 20, ts: "2026-10-25T08:20:00.000Z", next: "s20" }) &&
-          gotH2[9] === fullBlock({ seq: 21, ts: "2026-10-25T08:21:00.000Z", next: "s21" }),
+          gotH2[9] === normBlock({ seq: 21, ts: "2026-10-25T08:21:00.000Z", next: "s21" }),
         { count: gotH2.length, first: gotH2[0] && gotH2[0].split("\n")[2], stderr: rH2.stderr },
       );
     }
@@ -412,10 +434,10 @@ export async function run(ctx) {
       const r = runStop(fullBlock());
       const got = logBlocks();
       ck.ok(
-        "T12-r seed 幂等 + 三遗留清理：v1 全形 → 日志首条 v2 渲染（等值轮零追加）+ 旧文件/compact/stale 全删",
+        "T12-r seed 幂等 + 三遗留清理：v1 全形 → 日志首条 v3 渲染（改13：恢复源会话不可知 → 不带 sessionId 行；等值轮零追加）+ 旧文件/compact/stale 全删",
         r.code === 0 &&
           got.length === 1 &&
-          got[0] === fullBlock() &&
+          got[0] === normBlock({ sessionId: null }) &&
           !readLog().includes("orch-tail v1") &&
           !fs.existsSync(LEGACY) &&
           !fs.existsSync(LEGACY_COMPACT) &&
@@ -460,7 +482,7 @@ export async function run(ctx) {
       );
       const got = logBlocks();
       ck.ok(
-        "T12-s 跨会话追加无冻结：seq 40 → 1 两块均入日志、零拒（判旧守卫复活必红）",
+        "T12-s 跨会话追加无冻结：seq 40 → 1 两块均入日志、零拒（判旧守卫复活必红；全形块不受同会话链约束——拒写面只对短形）",
         r0.code === 0 &&
           r1.code === 0 &&
           got.length === 2 &&
@@ -468,6 +490,69 @@ export async function run(ctx) {
           got[1].includes("project: 新会话项目") &&
           !r1.stderr.trim(),
         { count: got.length, stderr: r1.stderr },
+      );
+    }
+    {
+      // v1.4 C2-a C2-01（绿腿）：同会话链补全——短形补全只取同 sessionId 链全形，
+      // 落写带 sessionId 协议行（会话归属可审计）。
+      resetSC();
+      const rf = runStop(
+        fullBlock({ seq: 10, project: "会话X板", stage: "SX", flying: "m-x1", next: "x1" }),
+        { session_id: "sess_chain-x" },
+      );
+      const rs = runStop(
+        shortBlock({ seq: 11, ts: "2026-10-25T05:11:00.000Z", flying: "+m-x2", next: "x2" }),
+        { session_id: "sess_chain-x" },
+      );
+      const got = logBlocks();
+      ck.ok(
+        "C2-01 同会话链补全：同会话短形补全自同 sessionId 链全形（project/stage/ruled 保留自本会话全形 ∧ 落写=v3 主标记+sessionId 协议行 ∧ flying 增量合并）",
+        rf.code === 0 &&
+          rs.code === 0 &&
+          got.length === 2 &&
+          got[1].startsWith("<!-- orch-tail v3") &&
+          got[1].includes("sessionId: sess_chain-x") &&
+          got[1].includes("project: 会话X板") &&
+          got[1].includes("stage: SX") &&
+          got[1].includes("flying: m-x1, m-x2") &&
+          got[1].includes("next: x2") &&
+          !rs.stderr.trim(),
+        { last: got[1], stderr: rs.stderr },
+      );
+    }
+    {
+      // v1.4 C2-a C2-02（红转绿）：日志上一块属他会话 ∧ 本块短形 → 拒写+stderr 要求全形
+      // （跨会话字段不继承——缺陷本体=字段继承的会话域错配，串味域缩至同会话链）。
+      // v2 遗留短形无 sessionId 行 → 同会话链不可判 → 同一拒写（安全向，不猜不继承）。
+      resetSC();
+      const rf = runStop(
+        fullBlock({ seq: 20, project: "旧会话板", stage: "OLD", flying: "m-old", next: "old" }),
+        { session_id: "sess_cross-old" },
+      );
+      const before = readLog();
+      const rs = runStop(
+        shortBlock({ seq: 21, ts: "2026-10-25T05:21:00.000Z", flying: "+m-new", next: "new" }),
+        { session_id: "sess_cross-new" },
+      );
+      const got = logBlocks();
+      ck.ok(
+        "C2-02 跨会话拒写（红转绿）：短形块同会话链无全形基线（上一块属他会话）→ 拒写+stderr 要求全形，日志逐字节不动（跨会话字段不继承）",
+        rf.code === 0 &&
+          rs.code === 0 &&
+          readLog() === before &&
+          got.length === 1 &&
+          rs.stderr.includes("缺全形基线") &&
+          rs.stderr.includes("同会话"),
+        { count: got.length, last: got[0] && got[0].split("\n")[2], stderr: rs.stderr, changed: readLog() !== before },
+      );
+      const rv2 = runStop(
+        shortBlock({ seq: 22, ts: "2026-10-25T05:22:00.000Z", flying: "+m-v2", next: "v2" }),
+        { session_id: "sess_cross-new" },
+      );
+      ck.ok(
+        "C2-02b v2 遗留短形同拒：v2 短形（无 sessionId 行）在无同会话链全形时同一拒写语义（安全向）",
+        rv2.code === 0 && readLog() === before && rv2.stderr.includes("缺全形基线"),
+        { stderr: rv2.stderr, changed: readLog() !== before },
       );
     }
     {
@@ -515,10 +600,10 @@ export async function run(ctx) {
       fs.mkdirSync(DEEP, { recursive: true });
       const r = runStop(fullBlock({ seq: 7, next: "祖先" }), { cwd: DEEP, envProject: DEEP });
       ck.ok(
-        "T12-v 祖先回退：cwd=子目录且默认根无板无 root-id → 定根命中祖先根（日志落祖先根 + stderr 定根回退一行 + 子目录零 .zcode）",
+        "T12-v 祖先回退：cwd=子目录且默认根无板无 root-id → 定根命中祖先根（日志落祖先根〔改13：归一化 v3 落写〕+ stderr 定根回退一行 + 子目录零 .zcode）",
         r.code === 0 &&
           fs.existsSync(ANC_LOG) &&
-          fs.readFileSync(ANC_LOG, "utf8") === fullBlock({ seq: 7, next: "祖先" }) + "\n" &&
+          fs.readFileSync(ANC_LOG, "utf8") === normBlock({ seq: 7, next: "祖先" }) + "\n" &&
           !fs.existsSync(path.join(DEEP, ".zcode")) &&
           r.stderr.includes("定根回退") &&
           r.stderr.includes(ANC_ROOT),
@@ -537,6 +622,100 @@ export async function run(ctx) {
         r2.code === 0 && fs.existsSync(deepLog) && !r2.stderr.includes("定根回退"),
         { stderr: r2.stderr.slice(0, 200), exists: fs.existsSync(deepLog) },
       );
+    }
+    {
+      // v1.4 C2-a C2-04/C2-05（注入面）：剥离清单 ts:/seq:/sessionId: 生效 + v2 历史全形块
+      // 照常渲染识别腿。载体=纯区脚手架形只读 import 被测组装模块（BUILD-DISPATCH-PURE 标记区
+      // 抽取，crv2-pack/dispatch-pure 同形；断言文件恒落 W3 写面——被测模块只读 import 不构成
+      // 写面，R-16 回退点=root-contract 追加节备用）。日志夹具：直投 v2 全形块（存量形态原样）
+      // + 写面 v3 块（带 sessionId 行）。
+      let dispatchPure = null;
+      {
+        const src = fs
+          .readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8")
+          .replace(/\r\n/g, "\n");
+        const beginMark = "/* BUILD-DISPATCH-PURE-BEGIN";
+        const endMark = "/* BUILD-DISPATCH-PURE-END */";
+        const i = src.indexOf(beginMark);
+        const j = src.indexOf(endMark);
+        if (i >= 0 && j > i) {
+          const dir = path.join(BASE.root, "t12-dispatch-pure");
+          fs.mkdirSync(dir, { recursive: true });
+          const file = path.join(dir, "pure.mjs");
+          fs.writeFileSync(
+            file,
+            src.slice(i, j + endMark.length) +
+              "\nexport { buildDispatchPrompt, dispatchTailBlocks, dispatchStripProtocol, DISPATCH_TAIL_MARK, DISPATCH_TAIL_MARK_V2 };\n",
+          );
+          dispatchPure = await import(pathToFileURL(file).href + "?v=" + Date.now());
+        }
+        ck.ok(
+          "C2-04a 注入面纯区可抽取（BUILD-DISPATCH-PURE 标记对在位；v3 主标记+V2 legacy 识别常量双出）",
+          Boolean(
+            dispatchPure &&
+              dispatchPure.buildDispatchPrompt &&
+              dispatchPure.DISPATCH_TAIL_MARK === "<!-- orch-tail v3" &&
+              dispatchPure.DISPATCH_TAIL_MARK_V2 === "<!-- orch-tail v2",
+          ),
+          { extracted: Boolean(dispatchPure) },
+        );
+      }
+      if (dispatchPure) {
+        const mkMission = (id, packPath) => ({ id, pack: { path: packPath } });
+        const mkPack = (mid, worker, token) =>
+          [
+            `# 任务包：T（${mid}）`,
+            "",
+            "## CONTRACT（三行契约，也出现在派发 prompt 尾块）",
+            `[channel] ${mid}`,
+            `[worker] ${worker}`,
+            `[token] ${token}`,
+            "",
+            "## TASK",
+            "- 做一件事",
+          ].join("\n");
+        const { buildDispatchPrompt, dispatchStripProtocol } = dispatchPure;
+        // 剥离清单直测：ts:/seq:/sessionId: 三协议行全剥，业务行保留。
+        const stripped = dispatchStripProtocol(["ts: t", "seq: 1", "sessionId: s", "project: p"]);
+        ck.ok(
+          "C2-04b 剥离清单生效：dispatchStripProtocol 剥 ts:/seq:/sessionId: 三协议行（sessionId 与 ts:/seq: 同列）、业务行保留",
+          stripped.length === 1 && stripped[0] === "project: p",
+          { stripped },
+        );
+        // 日志=存量 v2 全形块（直投原样）+ 写面 v3 块（sessionId 行在位）。
+        resetSC();
+        fs.mkdirSync(CTX, { recursive: true });
+        fs.writeFileSync(LOG, fullBlock({ seq: 30, project: "存量v2板", next: "v2next" }) + "\n");
+        const rw = runStop(fullBlock({ seq: 31, ts: "2026-10-25T05:31:00.000Z", project: "新v3板", next: "v3next" }));
+        const gotLog = logBlocks();
+        ck.ok(
+          "C2-05 v2 历史全形块照常渲染（识别腿）：存量 v2 块原样保留不回写 ∧ 写面新块=v3 归一化落写 ∧ 日志双标计数两块",
+          rw.code === 0 &&
+            gotLog.length === 2 &&
+            gotLog[0] === fullBlock({ seq: 30, project: "存量v2板", next: "v2next" }) &&
+            gotLog[1] === normBlock({ seq: 31, ts: "2026-10-25T05:31:00.000Z", project: "新v3板", next: "v3next" }),
+          { count: gotLog.length, stderr: rw.stderr },
+        );
+        const built = buildDispatchPrompt(
+          mkMission("m-c204", "packs/m-c204/pack.md"),
+          mkPack("m-c204", "orch-w3#1", "0".repeat(32)),
+          readLog(),
+          "persona 正文",
+          null,
+          { absent: 2 },
+        );
+        ck.ok(
+          "C2-04 注入面剥离生效：拼装 prompt 轨迹节不含 sessionId: 行（剥离清单 ts:/seq:/sessionId: 生效）∧ v3 主标记在位 ∧ v2 历史块字段渲染完整（信息零丢失）∧ 双标计数两块",
+          built.ok === true &&
+            built.blocks === 2 &&
+            built.text.includes("<!-- orch-tail v3") &&
+            !built.text.includes("sessionId:") &&
+            built.text.includes("project: 存量v2板") &&
+            built.text.includes("next: v2next") &&
+            built.text.includes("next: v3next"),
+          { ok: built.ok, blocks: built.blocks, hasSessionId: built.text.includes("sessionId:") },
+        );
+      }
     }
   }
 }

@@ -335,7 +335,7 @@ export async function scenGlean02_04() {
     const packRaw = fs.readFileSync(pack8, "utf8");
     const briefRaw = fs.readFileSync(brief8, "utf8");
     const G13_PINS = [
-      "主控零组装", // 固定物化定性
+      "固定模板直投", // 固定物化定性（v1.4 W2 改6 改锚：主控零组装→固定模板直投——server-memory :612 B1 中性化）
       "agents/orch-gleaner.md", // persona 路径（READ FIRST）
       "三行契约以派发 prompt 尾块为准", // CONTRACT：server 预物化、token 不入包（v1.1 W4 Q5a）
       "glean-brief 逐字内嵌", // CONTEXT 节定性
@@ -347,7 +347,7 @@ export async function scenGlean02_04() {
       "-glean.md", // 报告命名形
       "≤3 行指针纪律", // Return 面定性
       "KIND=done + 报告路径", // Return 行 1
-      "report(kind=blocked, question=需要主控决策的事项)。", // 阻塞处置（WK-8 形）
+      "report(kind=blocked, question=需要主会话决策的事项)。", // 阻塞处置（WK-8 形；v1.4 W2 改7 改锚——server-memory :633 B1 中性化）
     ];
     const g13Misses = G13_PINS.filter((n) => !packRaw.includes(n));
     ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 13 钉）", g13Misses.length === 0, g13Misses);
@@ -372,6 +372,19 @@ export async function scenGlean02_04() {
       "G13-g 包内锁路径只经 CONTEXT brief 内嵌出现（模板行无手写 glean-lock.json，权威指针勿手写）",
       g13CtxAt >= 0 && g13RfAt > g13CtxAt && g13LockStray < 0,
       { ctxAt: g13CtxAt, rfAt: g13RfAt, strayAt: g13LockStray },
+    );
+
+    // ---- v1.4 B1-04：固定包模板零主控语汇（A-V0140-B1-04）——server-memory.mjs pack
+    // 模板区（const pack = [ … ].join）grep「主控」=0（B1 白名单中性化落装核验，禁扩大化）。 ----
+    const memSrc = fs.readFileSync(path.join(PLUGIN_DIR, "mcp", "server-memory.mjs"), "utf8");
+    const tplAt = memSrc.indexOf("const pack = [");
+    const tplEnd = tplAt >= 0 ? memSrc.indexOf('].join("\\n");', tplAt) : -1;
+    const tplRegion = tplAt >= 0 && tplEnd > tplAt ? memSrc.slice(tplAt, tplEnd) : "";
+    const tplHits = (tplRegion.match(/主控/g) || []).length;
+    ck.ok(
+      "B1-04 固定包模板区零主控语汇（server-memory.mjs pack 模板 grep「主控」=0；B1 中性化=主会话/固定模板直投）",
+      tplRegion.length > 0 && tplHits === 0,
+      { tplFound: tplAt >= 0 && tplEnd > tplAt, hits: tplHits },
     );
 
     // ---- GLEAN-02b/c：锁 active+活 PID → 只附 lock_state=busy、无 due 键、不重写 brief

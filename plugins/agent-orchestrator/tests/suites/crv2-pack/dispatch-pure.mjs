@@ -188,6 +188,77 @@ export async function runDispatchPure() {
       oversized.ok === false && /超预算/.test(oversized.error) && /30000/.test(oversized.error),
       oversized.error,
     );
+    // ---- v1.4 W1 A1 免烘机制五腿（A1-01..05；design v1.4 §1.1+§2.1，落点=dispatch-pure）----
+    // typed 第 7 可缺省参（缺省 false=现行为全烘字节一致）；typed∧nested（scoping.mode 传位）→
+    // persona 段=两行指针行（personaText 传位改为 resolveDispatchPersona 返回的绝对路径）；
+    // typed∧headless → 恒全文；回执 persona 旗标（"pointer"|"full"）恒在。
+    {
+      const missionTyped = { id: "mD", agent_type: "orch-worker", pack: { path: "packs/mD/pack.md" } };
+      // A1-01：typed 缺省=false=现行为字节一致（W4-DISPATCH-05 夹具基回归）
+      const defA = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, logFixture, personaFixture, digestFixture);
+      const defB = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, logFixture, personaFixture, digestFixture, null, false);
+      ck.ok(
+        "A-V0140-A1-01 typed 缺省 false=现行为字节一致：六参调用与显式 typed:false 逐字节相等、persona 段全烘（W4-DISPATCH-05 夹具基）、回执旗标=full",
+        defA.ok === true && defB.ok === true &&
+          defA.text === defB.text &&
+          defA.text === built.text &&
+          defA.text.includes(personaFixture) &&
+          !defA.text.includes("已随 subagent_type 加载") &&
+          defA.persona === "full" && defB.persona === "full",
+        { same: defA.ok && defB.ok && defA.text === defB.text && defA.text === built.text, persona: defA.persona },
+      );
+      // A1-02：typed:true+nested → 两行指针行（subagent_type/Read 字面+绝对路径+role 名；角色正文零烘入）
+      const absFixture = path.resolve(BASE.root, "agents", "orch-worker.md");
+      const ptr = buildDispatchPrompt(missionTyped, packFixture, logFixture, absFixture, digestFixture, { absent: 0, mode: "nested" }, true);
+      const ptrExpect =
+        `【职责】本 mission 角色=orch-worker；角色定义已随 subagent_type 加载（定义文件=${absFixture}）。\n` +
+        "若本会话未加载角色定义（GP 通道降级面），先 Read 上列定义文件再继续。";
+      const ptrIdx = ptr.ok ? ptr.text.indexOf("【职责】本 mission 角色=") : -1;
+      const ptrSection = ptr.ok && ptrIdx >= 0 ? ptr.text.slice(ptrIdx, ptr.text.indexOf("先 Read 任务包")).trim() : "";
+      ck.ok(
+        "A-V0140-A1-02 typed:true+nested 指针行：persona 段=两行指针逐字（subagent_type/Read 字面+绝对路径+role 名）；角色正文首行零烘入；旗标=pointer",
+        ptr.ok === true &&
+          path.isAbsolute(absFixture) &&
+          ptrSection === ptrExpect &&
+          !ptr.text.includes(personaFixture) &&
+          ptr.persona === "pointer",
+        { okFlag: ptr.ok, sectionHead: ptrSection.slice(0, 60), persona: ptr.persona },
+      );
+      // A1-03：typed:true+headless → persona 恒全文（-p 无 subagent_type 加载面，语义不变）
+      const hl = buildDispatchPrompt(missionTyped, packFixture, logFixture, personaFixture, digestFixture, { absent: 0, mode: "headless" }, true);
+      ck.ok(
+        "A-V0140-A1-03 typed:true+headless 恒 full：persona 全文烘入（headless 语义不变）、指针行零出现、旗标=full",
+        hl.ok === true &&
+          hl.persona === "full" &&
+          hl.text.includes(personaFixture) &&
+          !hl.text.includes("已随 subagent_type 加载"),
+        { persona: hl.persona, baked: hl.ok && hl.text.includes(personaFixture) },
+      );
+      // A1-04：回执 persona 旗标恒在，且与实际形态一致（缺省=full）
+      const dfltNested = buildDispatchPrompt(mkMission("mD", "packs/mD/pack.md"), packFixture, logFixture, personaFixture, digestFixture, { absent: 0, mode: "nested" });
+      ck.ok(
+        "A-V0140-A1-04 回执 persona 旗标恒在：缺省调用=full、typed∧nested=pointer、typed∧headless=full（三态与实际组装形态一致）",
+        dfltNested.ok === true && dfltNested.persona === "full" &&
+          ptr.persona === "pointer" && hl.persona === "full" &&
+          defA.persona === "full",
+        { dflt: dfltNested.persona, ptr: ptr.persona, hl: hl.persona },
+      );
+      // A1-05：指针行路径同源=resolveDispatchPersona 返回值（role 腿=安装根绝对路径）；
+      // 接线静态钉=tool-dispatch 调用点 personaPointerMode ? personaFile : personaText（同源传位）。
+      const roleLegPath = path.join(PLUGIN_DIR, "agents", "orch-worker.md");
+      const tdSrc = fs.readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8").replace(/\r\n/g, "\n");
+      const wired = tdSrc.includes("personaPointerMode ? personaFile : personaText");
+      const ptrSrc = buildDispatchPrompt(missionTyped, packFixture, logFixture, roleLegPath, digestFixture, { absent: 0, mode: "nested" }, true);
+      ck.ok(
+        "A-V0140-A1-05 指针行路径同源：role 腿=resolveDispatchPersona 安装根绝对路径（<插件根>/agents/<role>.md）逐字嵌入指针行；≠ projectDir 相对拼接（路径以 resolveDispatchPersona 返回值传位，接线静态钉在位）",
+        path.isAbsolute(roleLegPath) && fs.existsSync(roleLegPath) &&
+          ptrSrc.ok === true &&
+          ptrSrc.text.includes(`定义文件=${roleLegPath}）`) &&
+          !tdSrc.includes('path.resolve(projectDir, "agents"') &&
+          wired,
+        { roleLeg: roleLegPath, wired, embedded: ptrSrc.ok && ptrSrc.text.includes(`定义文件=${roleLegPath}）`) },
+      );
+    }
     // ---- v1.2.2 LSN（教训转投节）+ TRC（滞回读侧）：design v2 §4。LSN fixture 节头
     // 自 server.mjs 源码提取 buildPackMarkdown 真实渲染字面（CT 契约纵深，QA-R1 M-5）；
     // mkPack 本体不加节（W4-PREFIX-01 head 恒同面免查项，QA-R1 L-3）。

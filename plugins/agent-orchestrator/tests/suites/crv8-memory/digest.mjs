@@ -6,16 +6,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { ck, subRoot, writeJsonl, readPack, startServer } from "./shared.mjs";
+import { ck, subRoot, writeJsonl, readPack, startServer, startServerX } from "./shared.mjs";
 
 /* ============ 场景 16：v1.1 W3 Q11 digest 消费面（回落/新鲜/STALE/信号） ============ */
 export async function scenDigestStl() {
   const R16 = subRoot("r-digest");
   const MEM16 = path.join(R16, "orchestrator-memory");
   const lib16 = path.join(R16, "memory", "lessons.jsonl");
-  const digestDir = path.join(MEM16, "digest");
-  const digestMd = path.join(digestDir, "pack-tail-digest.md");
-  const digestJson = path.join(digestDir, "pack-tail-digest.json");
   fs.mkdirSync(MEM16, { recursive: true });
   // GLOBAL MEMORY 显式开启（digest 只在「至少一节旧记忆节将渲染」时替代渲染）+ gate due。
   fs.writeFileSync(path.join(MEM16, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0, pack_global_section: true }));
@@ -42,6 +39,19 @@ export async function scenDigestStl() {
     },
   ]);
   const s16d = startServer({ root: R16 });
+  // v1.4 改10（C1 分键随行）：夹具迁分键路径 digest/<rootId>/（rootId=server 启动后 root-id 读回，
+  // spawn→模块初始化有窗，轮询读回），侧车写点全部补 rootId 字段（读侧失配=missing 契约，v1.4 C1 乙）。
+  let rootId16 = "";
+  for (let i = 0; i < 100 && !rootId16; i++) {
+    try {
+      rootId16 = fs.readFileSync(path.join(R16, "root-id"), "utf8").trim();
+    } catch {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  const digestDir = path.join(MEM16, "digest", rootId16);
+  const digestMd = path.join(digestDir, "pack-tail-digest.md");
+  const digestJson = path.join(digestDir, "pack-tail-digest.json");
   try {
     const packOf = async (mid) => {
       await s16d.call("context_pack", { mission_id: mid, title: "digest 探针", task: "DIGPROBE 任务" });
@@ -73,6 +83,7 @@ export async function scenDigestStl() {
       digestJson,
       JSON.stringify({
         generated_at: genAt,
+        rootId: rootId16,
         sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs },
         bytes: Buffer.byteLength(fs.readFileSync(digestMd, "utf8"), "utf8"),
       }),
@@ -95,6 +106,7 @@ export async function scenDigestStl() {
         digestJson,
         JSON.stringify({
           generated_at: genAt,
+          rootId: rootId16,
           sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs },
           bytes: Buffer.byteLength(md, "utf8"),
         }),
@@ -140,7 +152,7 @@ export async function scenDigestStl() {
     // ---- 腿 3：指纹不合（lessons_lines 漂移）→ 标 STALE 不阻断组包 + 信号 stale
     fs.writeFileSync(
       digestJson,
-      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
+      JSON.stringify({ generated_at: genAt, rootId: rootId16, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
     );
     const pStale = await packOf("m-dg-stale");
     ck.ok("W3-DG-05 指纹不合 → digest 节标 STALE（仍渲染、不阻断组包）",
@@ -158,7 +170,7 @@ export async function scenDigestStl() {
     // STL-01 漂移 5（≤N5 边界内侧）→ 轻微样例：态势面大概率仍有效
     fs.writeFileSync(
       digestJson,
-      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 6, lessons_mtime_ms: libStat.mtimeMs } }),
+      JSON.stringify({ generated_at: genAt, rootId: rootId16, sources: { lessons_lines: 6, lessons_mtime_ms: libStat.mtimeMs } }),
     );
     const pStlMinor = await packOf("m-stl-minor");
     ck.ok("STL-01 漂移 5≤N5 → 注入头轻微样例（lessons_lines 6 ≠ 1（漂移 5≤5，轻微——态势面大概率仍有效））",
@@ -167,7 +179,7 @@ export async function scenDigestStl() {
     // STL-02 漂移 7（>N5 边界外侧）→ 显著文案；分级互斥（轻微不出现）
     fs.writeFileSync(
       digestJson,
-      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 8, lessons_mtime_ms: libStat.mtimeMs } }),
+      JSON.stringify({ generated_at: genAt, rootId: rootId16, sources: { lessons_lines: 8, lessons_mtime_ms: libStat.mtimeMs } }),
     );
     const pStlMajor = await packOf("m-stl-major");
     const hStlMajor = digestHeaderOf(pStlMajor);
@@ -177,7 +189,7 @@ export async function scenDigestStl() {
     // STL-03 大漂移注入头样例（旧文案前缀兼容：`lessons_lines 999 ≠ 1` 仍可检索）
     fs.writeFileSync(
       digestJson,
-      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
+      JSON.stringify({ generated_at: genAt, rootId: rootId16, sources: { lessons_lines: 999, lessons_mtime_ms: libStat.mtimeMs } }),
     );
     const pStlBig = await packOf("m-stl-big");
     ck.ok("STL-03 大漂移注入头样例（lessons_lines 999 ≠ 1（漂移 998>5，显著——建议触发归敛））",
@@ -186,7 +198,7 @@ export async function scenDigestStl() {
     // STL-04 mtime 单独不匹配（无数值漂移）→ drift 未知 → 显著（fail-safe 侧）
     fs.writeFileSync(
       digestJson,
-      JSON.stringify({ generated_at: genAt, sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs + 12345 } }),
+      JSON.stringify({ generated_at: genAt, rootId: rootId16, sources: { lessons_lines: 1, lessons_mtime_ms: libStat.mtimeMs + 12345 } }),
     );
     const pStlMtime = await packOf("m-stl-mtime");
     ck.ok("STL-04 mtime 漂移未知 → 注入头显著样例（lessons_mtime_ms 不匹配（漂移未知，显著——建议触发归敛））",
@@ -214,6 +226,84 @@ export async function scenDigestStl() {
     ck.ok("W3-DG-10 brief.digest 权威路径（path/sidecar_path 双指针）",
       Boolean(brief16.digest) && brief16.digest.path === digestMd && brief16.digest.sidecar_path === digestJson,
       brief16.digest);
+
+    // ---- v1.4 C1 组（A-V0140-C1-01..05）：digest 分键 digest/<rootId>/ + 侧车 rootId 指纹。
+    // 共享全端目录双根 rig（startServerX --memory-root 注入）= memoryRoot 全局单例的生产形。
+    // 红转绿证据（C1-02）：施工前以基线 server（git archive bf7100c 快照）真跑本 rig——
+    // 旧单例路径上的 digest 被另一根当自己的渲染（跨项目串味实锤，C1-02 红腿输出入
+    // tests/assertions/v1.4.0.md W2 节证据链）；本腿组=转绿后形态。 ----
+    {
+      const R17 = subRoot("r-digest-rootkey");
+      const MEM17 = path.join(R17, "shared-memory"); // 共享全端目录（两侧 --memory-root 同指）
+      fs.mkdirSync(path.join(MEM17, "memory"), { recursive: true });
+      fs.writeFileSync(path.join(MEM17, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0, pack_global_section: true }));
+      fs.writeFileSync(path.join(MEM17, "AGENTS.md"), "# GLOBAL\n- ROOTKEY 全端稳定事实行\n");
+      const RA = path.join(R17, "proj-a", ".zcode", "orchestrator");
+      const RB = path.join(R17, "proj-b", ".zcode", "orchestrator");
+      for (const r of [RA, RB]) fs.mkdirSync(path.join(r, "memory"), { recursive: true });
+      const sA = startServerX({ root: RA, args: ["--memory-root", MEM17] });
+      const sB = startServerX({ root: RB, args: ["--memory-root", MEM17] });
+      try {
+        // 首调触发 boot（root-id 落盘）后读回两根 rootId
+        await sA.call("board", { action: "list" });
+        await sB.call("board", { action: "list" });
+        const ridA = fs.readFileSync(path.join(RA, "root-id"), "utf8").trim();
+        const ridB = fs.readFileSync(path.join(RB, "root-id"), "utf8").trim();
+        const keyA = path.join(MEM17, "digest", ridA);
+        // 旧单例残骸（零迁移面）：A 名义写入旧单例路径，侧车为 v1.3 形（无 rootId 字段）
+        const legacyMd = path.join(MEM17, "digest", "pack-tail-digest.md");
+        const legacyJson = path.join(MEM17, "digest", "pack-tail-digest.json");
+        fs.mkdirSync(path.join(MEM17, "digest"), { recursive: true });
+        fs.writeFileSync(legacyMd, "generated_at: 2026-11-01T00:00:00.000Z\n- ROOTKEY-LEGACY-A 项目现状行\n");
+        fs.writeFileSync(legacyJson, JSON.stringify({ generated_at: "2026-11-01T00:00:00.000Z", sources: { lessons_lines: 0, lessons_mtime_ms: null }, bytes: 64 }));
+        const packOf17 = async (srv, rootDir, mid) => {
+          await srv.call("context_pack", { mission_id: mid, title: "ROOTKEY 探针", task: "ROOTKEY 任务" });
+          return readPack(rootDir, mid);
+        };
+        // C1-01 分键读：A 的 digest 在 digest/<rootIdA>/ 且侧车带 rootId → A 渲染（旧单例残骸不参与）
+        fs.mkdirSync(keyA, { recursive: true });
+        const mdA = path.join(keyA, "pack-tail-digest.md");
+        const jsonA = path.join(keyA, "pack-tail-digest.json");
+        const genA = new Date().toISOString();
+        fs.writeFileSync(mdA, `generated_at: ${genA}\n- ROOTKEY-A 项目现状行\n`);
+        fs.writeFileSync(jsonA, JSON.stringify({ generated_at: genA, rootId: ridA, sources: { lessons_lines: 0, lessons_mtime_ms: null }, bytes: Buffer.byteLength(fs.readFileSync(mdA, "utf8"), "utf8") }));
+        const pA = await packOf17(sA, RA, "m-rk-a");
+        ck.ok("C1-01 分键读：A 读 digest/<rootIdA>/（fresh 渲染 A 键内容；旧单例残骸零参与）",
+          Boolean(pA) && pA.includes("## PROJECT DIGEST") && pA.includes("ROOTKEY-A 项目现状行") && !pA.includes("ROOTKEY-LEGACY-A"),
+          pA && pA.split("\n").filter((l) => l.startsWith("## PROJECT DIGEST")));
+        // C1-02 跨项目隔离（红转绿）：B 不渲染 A 的 digest（含旧单例残骸不串味；B 键缺席 → 信号 missing）
+        const pB = await packOf17(sB, RB, "m-rk-b");
+        const dB = await sB.call("board", { action: "list" });
+        const dBig = dB.json && dB.json.glean_due ? dB.json.glean_due.digest : null;
+        ck.ok("C1-02 跨项目隔离（红转绿）：B 无 PROJECT DIGEST 节 ∧ 无 A 标记行 ∧ glean_due.digest=missing",
+          Boolean(pB) && !pB.includes("ROOTKEY-LEGACY-A") && !pB.includes("ROOTKEY-A 项目现状行") && !pB.includes("## PROJECT DIGEST") &&
+            Boolean(dBig) && dBig.status === "missing",
+          { sections: pB && pB.split("\n").filter((l) => l.startsWith("## ")), digest: dBig });
+        // C1-03 侧车 rootId 指纹：失配（此处伪冒他根 id）→ 按 missing 处理（不渲染、不标 STALE）
+        fs.writeFileSync(jsonA, JSON.stringify({ generated_at: genA, rootId: ridB, sources: { lessons_lines: 0, lessons_mtime_ms: null }, bytes: 64 }));
+        const pMis = await packOf17(sA, RA, "m-rk-mis");
+        ck.ok("C1-03 侧车 rootId 失配 → 按 missing 处理（fail-safe；旧单例侧车无字段同失配）",
+          Boolean(pMis) && !pMis.includes("## PROJECT DIGEST") && !pMis.includes("；STALE："),
+          pMis && pMis.split("\n").filter((l) => l.startsWith("## ")));
+        // C1-04 烘焙指针分键：brief.digest.path/sidecar_path 恒等分键路径（rootId 段随定位函数自动携带）
+        const brief17 = JSON.parse(fs.readFileSync(path.join(MEM17, "glean-brief.json"), "utf8"));
+        ck.ok("C1-04 brief 指针烘焙分键：digest.path/sidecar_path 均含 rootIdA 段（materializeGleanBrief 零改点跟随）",
+          Boolean(brief17.digest) && brief17.digest.path === mdA && brief17.digest.sidecar_path === jsonA,
+          brief17.digest);
+        // C1-05 STALE 分级回归（分键下现行为不变）：rootId 合 + lessons_lines 漂移 5 → 轻微分级渲染
+        fs.writeFileSync(path.join(RA, "memory", "lessons.jsonl"), '{"id":"rk-a1"}\n');
+        const libMtime = fs.statSync(path.join(RA, "memory", "lessons.jsonl")).mtimeMs;
+        fs.writeFileSync(jsonA, JSON.stringify({ generated_at: genA, rootId: ridA, sources: { lessons_lines: 6, lessons_mtime_ms: libMtime }, bytes: 64 }));
+        const pStl = await packOf17(sA, RA, "m-rk-stl");
+        const hdr17 = String(pStl || "").split("\n").find((l) => l.startsWith("## PROJECT DIGEST")) || "";
+        ck.ok("C1-05 STALE 分级回归：漂移 5≤N5 → 轻微分级文案（:95-108 分级路径零触碰核验）",
+          hdr17.includes("；STALE：lessons_lines 6 ≠ 1（漂移 5≤5，轻微——态势面大概率仍有效）"),
+          hdr17);
+      } finally {
+        sA.close();
+        sB.close();
+      }
+    }
   } finally {
     s16d.close();
   }

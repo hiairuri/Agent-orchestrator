@@ -57,14 +57,17 @@ function buildGlobalMemoryLines() {
 const DIGEST_MAX_LINES = 12;
 const DIGEST_MAX_BYTES = 1200;
 
-/** Digest md file (<memoryRoot>/digest/pack-tail-digest.md; DESIGN §3.1). */
+/** Digest md file (<memoryRoot>/digest/<rootId>/pack-tail-digest.md; DESIGN §3.1;
+ * v1.4 C1 甲分键：rootId 段隔离跨项目串味（memoryRoot 全局单例下各根各键）。
+ * 旧单例 digest/pack-tail-digest.md 零迁移（M-3：读侧只读新分键，缺席=missing
+ * fail-safe；旧物列 W4 E2 盘点候删）。 */
 function digestMdFile() {
-  return path.join(memoryRoot, "digest", "pack-tail-digest.md");
+  return path.join(memoryRoot, "digest", rootId, "pack-tail-digest.md");
 }
 
-/** Digest sidecar with the generation-time source fingerprint (DESIGN §3.1). */
+/** Digest sidecar with the generation-time source fingerprint (DESIGN §3.1; v1.4 C1 同构分键). */
 function digestJsonFile() {
-  return path.join(memoryRoot, "digest", "pack-tail-digest.json");
+  return path.join(memoryRoot, "digest", rootId, "pack-tail-digest.json");
 }
 
 /** Current source fingerprint for digest freshness (pack RULES: lessons.jsonl
@@ -161,6 +164,12 @@ function readProjectDigest() {
       side = null;
     }
     const want = side && side.sources && typeof side.sources === "object" ? side.sources : null;
+    // v1.4 C1 乙（侧车加固）：rootId 指纹失配 → 按 missing 处理（fail-safe 契约，见上
+    // missing 语义注记）——跨项目侧车互不采信；旧单例侧车无 rootId 字段同失配（零迁移读侧）。
+    // 侧车整体缺失/不可解析（side=null）维持既有 STALE 契约（W3-DG-07），不入本腿。
+    if (side && String(side.rootId) !== String(rootId)) {
+      return missing;
+    }
     const now = digestSourcesNow();
     if (!want) staleReason = "digest 指纹侧车缺失/不可解析";
     else if (Number(want.lessons_lines) !== now.lessons_lines) {
@@ -609,7 +618,7 @@ function materializeGleanPack(sharedCfg) {
     /* read-back failure → CONTEXT 留空；brief 物化刚在本调用点同步完成，此路径常态不可达 */
   }
   const pack = [
-    "# 任务包：记忆归敛（server 固定物化 glean-pack，主控零组装）",
+    "# 任务包：记忆归敛（server 固定物化 glean-pack，固定模板直投——零组装，无常驻组装方）",
     "",
     "## CONTRACT（三行契约以派发 prompt 尾块为准）",
     "[channel]/[worker]/[token] 三行与字段语义以派发 prompt 尾块为准（权威定义 = SKILL 第 3 章 PC-1；本包 server 预物化，token 不入包）。",
@@ -628,9 +637,9 @@ function materializeGleanPack(sharedCfg) {
     "- 锁纪律（§9.3）：先领锁（brief.lock_path，wx 原子写 active 态）再消费；锁占用（活 PID 且未过期）→ report(kind=done, summary=\"锁占用，跳过\") 立即收工；完成转 done + finished_at + watermarks（全端行数+各扫描项目行数基线）；失败退出保持 active 留现场",
     "- 四态口径：每条候选恰一处置——晋升（promote/promote_batch 合并语义走 server，证据随报告）/ 合并（同 trigger+fix 归一，hits/confidence 合并）/ 退役（retire 置状态、内容原样保留；矛盾走 add(contradicts=旧id) 置旧条 superseded）/ 保留（证据不足留 candidate 并在报告写理由）",
     `- 视图层边界：只写视图层（ORCH.md 重写 ver+1，帽 ${capLines} 行/${fmtCapBytes(capBytes)}；根 AGENTS.md 只动 orch-mem 标记对内、区外字节零触碰；全端 AGENTS.md 帽 50 行/2KB；全端 AGENTS.md 或全端库 memory/ 目录缺席=先创建（mkdir -p+有 content 首建才落笔，不落空壳；首建事件报告『视图变更』节单列））；lessons.jsonl 事件行永不直写（改动一律经 lessons 工具）；active 教训不硬删（退役只有建议权）；标记区缺失 = 该项目记忆功能关闭，跳过并报告，不重建`,
-    "- digest 职责（Q11 B+C）：每轮整文件覆盖写 brief.digest.path（首行 generated_at: <ISO8601>，正文 ≤12 行/≤1200B：态势面=项目现状一句话+在飞 mission 摘要，时间面=近期裁决/关键事件 3–5 条；禁任务相关检索内容）与 brief.digest.sidecar_path（{generated_at, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}）；sources 记录产出时点实测值，组包侧据此判 freshness",
-    "- 日志纪律：归敛报告 = reports/<YYYYMMDD-HHmmss>-glean.md（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源）；报告即交付物，主控只读报告与 Return 指针",
-    "- 受阻/目标矛盾/必败门禁 → 立即 report(kind=blocked, question=需要主控决策的事项)。",
+    "- digest 职责（Q11 B+C；v1.4 C1 分键）：每轮整文件覆盖写 brief.digest.path（分键路径 digest/<rootId>/…，跨项目各读各键；首行 generated_at: <ISO8601>，正文 ≤12 行/≤1200B：态势面=项目现状一句话+在飞 mission 摘要，时间面=近期裁决/关键事件 3–5 条；禁任务相关检索内容）与 brief.digest.sidecar_path（{generated_at, rootId, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}，rootId=brief.root_id 逐字）；sources 记录产出时点实测值，组包侧据此判 freshness",
+    "- 日志纪律：归敛报告 = reports/<YYYYMMDD-HHmmss>-glean.md（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源）；报告即交付物，主会话只读报告与 Return 指针",
+    "- 受阻/目标矛盾/必败门禁 → 立即 report(kind=blocked, question=需要主会话决策的事项)。",
     "",
     "## RETURN（≤3 行指针纪律）",
     "- 最终回复恰 ≤3 行，只回指针，不复制报告内容（零汇报占用）：",

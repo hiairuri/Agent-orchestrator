@@ -593,8 +593,13 @@ const lm06Rel = (p) => path.relative(PLUGIN_DIR, p).split("\\").join("/");
 const LM06_CAP_SOFT = 900;
 const LM06_CAP_EXEMPT = [
   // 登记值=机械口径行数（§2.4，S1 步 1③ 全量重测定格，与 F-1 wc -l 值 ±0）；触发器=+200 量级（split-design OS-4）
-  { rel: "mcp/tool-dispatch.mjs", lines: 1428, wcSource: "F-1.1", note: "八波 W5/WG 施工域；≥1628 即红=二拆另案评估入口（21cba5 形态预案见 split-impl-design §8）" },
+  // v1.4 W3 增补（EXTRA ③-B）：tool-dispatch 登记值 1428→1646（沙箱态 wc -l 实测，W1 A1/D3 增行+W3 C2-a 注入面随行）；
+  //   二拆另案评估欠账→v1.5 backlog（2026-11-02 W1 触发越线，本版不拆）。
+  { rel: "mcp/tool-dispatch.mjs", lines: 1646, wcSource: "v1.4-W3 实测", note: "八波 W5/WG 施工域；≥1846 即红=二拆另案评估入口（21cba5 形态预案见 split-impl-design §8）；二拆另案评估欠账→v1.5 backlog（2026-11-02 W1 触发越线，本版不拆）" },
   { rel: "mcp/server-lessons.mjs", lines: 932, wcSource: "F-1.1", note: "lessons 域写意图跨三模块（F-4.2）；≥1132 即红同上" },
+  // v1.4 W3 主控裁决①（m-20261102-043942-9c1a）：glean-launch 硬帽域恰线观察件转豁免登记（与 tool-dispatch 同构），
+  //   随豁免域出硬帽域（腿 B 跳过豁免 rel）；登记值=990（wc -l 沙箱实测）。
+  { rel: "hooks/bg-sentinel/glean-launch.mjs", lines: 990, wcSource: "v1.4-W3 实测", note: "glean 拉起域（W2 B1/B2/C1 施工域）；≥1190 即红=二拆另案评估入口；二拆另案评估欠账→v1.5 backlog（2026-11-02 W2 B1 合法增量落于恰线观察件触发；与 tool-dispatch 1639 同批 v1.5 评估）" },
 ];
 // 硬帽域口径钉（偏差声明）：设计档 §2.3 草案常量系宽面 glob（hooks/*.mjs、tests/suites/*.mjs），
 //   实测会把两件非族面存量拽入域内（hooks/stop-check.mjs=921、tests/suites/glean-launch.mjs=976
@@ -615,19 +620,27 @@ const LM06_CAP_HARD_FAMILIES = ["hooks/bg-sentinel.mjs", "tests/suites/crv8-memo
     if (!(v !== null && v < e.lines + 200)) exemptOk = false;
   }
   ck.ok("LM-06-CAP 腿 A（豁免触发器钉）：豁免表逐件机械口径行数<登记值+200", exemptOk, { measured });
-  // 腿 B：硬帽域 ≤900（glean-launch 900 恰线观察件在域内=增长即红）
+  // 腿 B：硬帽域 ≤900（恰线观察件转豁免登记后随豁免域出硬帽域——v1.4 W3 主控裁决①：
+  //   glean-launch 990 入豁免登记表与 tool-dispatch 同构；域内余件语义不变）
+  const exemptRels = new Set(LM06_CAP_EXEMPT.map((e) => e.rel));
   const hardFiles = new Map();
   for (const rel of LM06_CAP_HARD_FAMILIES) for (const p of familyFiles(PLUGIN_DIR, rel)) hardFiles.set(lm06Rel(p), p);
   const hardViolations = [];
   let gleanWatch = null;
   for (const [rel, p] of hardFiles) {
+    if (exemptRels.has(rel)) {
+      if (rel === "hooks/bg-sentinel/glean-launch.mjs") {
+        try { gleanWatch = mechLines(p) + "（exempt）"; } catch { gleanWatch = "unreadable"; }
+      }
+      continue;
+    }
     let v = null;
     try { v = mechLines(p); } catch { hardViolations.push(rel + " 不可读"); continue; }
     if (v > LM06_CAP_SOFT) hardViolations.push(rel + "=" + v);
     if (rel === "hooks/bg-sentinel/glean-launch.mjs") gleanWatch = v;
   }
-  ck.ok("LM-06-CAP 腿 B（硬帽域≤900）：hooks 族 9 文件+六套件族 52 文件实测行数≤900",
-    hardViolations.length === 0, { violations: hardViolations.slice(0, 12), files: hardFiles.size, watch: "glean-launch=" + gleanWatch });
+  ck.ok("LM-06-CAP 腿 B（硬帽域≤900）：hooks 族+六套件族实测行数≤900（豁免登记件出域——v1.4 W3 裁① glean-launch 转豁免登记）",
+    hardViolations.length === 0, { violations: hardViolations.slice(0, 12), files: hardFiles.size, exempt: [...exemptRels], watch: "glean-launch=" + gleanWatch });
 }
 
 // ---- LM-06 FAMILIES 登记全景钉（OS-2 机械化；防登记面被静默收缩） ----

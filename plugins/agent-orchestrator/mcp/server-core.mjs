@@ -8,7 +8,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.3.0";
+const SERVER_VERSION = "1.4.0";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -599,6 +599,18 @@ if (path.resolve(root) === path.resolve(defaultRoot)) {
       else if (isTempDirPath(target)) remove = true; // test root must not stick
       else if (ptrId === null) remove = rootIdOf(target) === null; // v1: keep only when target upgraded
       else remove = rootIdOf(target) !== ptrId; // v2 id mismatch (or unreadable) → stale
+      // v1.4 F1 删除腿（G1-4：默认根 server 与自定义根 server 混配=误配置非支持面，本根
+      // 优先）：目标自洽≠目标合法——上面四腿全过（指针完好指向自定义根）而默认根
+      // board.json 在 → 删指针（回归本根；钩子侧腿 B 同波把根解析输入修向默认根）。
+      // 自愈语义从「指针完整性校验」升「根唯一性仲裁」。删除腿不触发=现行为。
+      if (
+        !remove &&
+        target &&
+        path.resolve(target) !== path.resolve(defaultRoot) &&
+        fs.existsSync(path.join(defaultRoot, "board.json"))
+      ) {
+        remove = true;
+      }
       if (remove) fs.unlinkSync(pointer);
     }
   } catch {
