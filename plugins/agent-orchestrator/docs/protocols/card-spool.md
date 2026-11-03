@@ -1,6 +1,6 @@
 # 契约卡②：spool 邮箱（事件信封 + 目录协议）
 
-- **归属模块**：mcp/server.mjs（spool 全部读写经 server；落箱在 report 工具内，消费在 mailbox/resume/gc 工具内）；事件信封生成与消费所读写的 board 字段见 `card-board.md` §4（两卡接缝，字段语义以彼卡为准）
+- **归属模块**：mcp/server-stores.mjs（spool 全部读写经 server；落箱在 report 工具内，消费在 mailbox/resume/gc 工具内）；事件信封生成与消费所读写的 board 字段见 `card-board.md` §4（两卡接缝，字段语义以彼卡为准）
 - **脆度评级**（面广度×后果重度双轴）：**中**——消费面广（mailbox peek/read/answer/gc、resume 计数、board list unread、close 告警、组包 wake 链），但失效后果限单 mission 的消息面（不同于 root.txt 的全局性）；裸 JSON 无 schema 校验 + rename 消费语义是主要风险面
 - **历史事故回链**：v0.3.1 A1/A3/B9（根锁/answers wx/ENOENT 已消费）、C4/C5（gc 归档/closed 拒改板）、V6-18 details 存储侧截断、V6-49 畸形事件文件致 close 假 unread 永挂（QQagent 实锤）、v1.1 W6 QA P2-b（畸形 id 炸 board list）、v1.1 W3 A5-E（read 呈现指针化）、v1.1.1 W-B（完成即唤队列骑落箱面）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -86,7 +86,7 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 - **crv6-statemachine**：C5（closed 拒改板、事件入箱）+ SM-08（closed 机器可读键）+ V6-49 隔离行为腿 + wake 队列 WB-SRV 系（done×headless 产事件）。
 - **crv5-auth**：AUTH-01..08——fail-closed token 门含「三探针零事件落箱+板面零改动」（拒绝先于落箱的机械证明）。
 - **crv2-pack**：组包对拍基线（信封字段面与响应键面）；**po-static/crv 系**：read 呈现指针化（A5-E）细节腿。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（missionSpoolDir/unreadDirOf/readEventFile/consumeEventFile/countUnreadSafe/DETAILS_MAX_CHARS 等）server.mjs grep 可见+卡存在非空。
+- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（missionSpoolDir/unreadDirOf/readEventFile/consumeEventFile/countUnreadSafe/DETAILS_MAX_CHARS 等）mcp/server-stores.mjs grep 可见+卡存在非空。
 
 ## 7. 维护规则
 

@@ -3,9 +3,12 @@
  * suites/crv6-resilience/scenarios-v120-dispatch.mjs —— v1.2 M3-1 dispatch 场景 DSP
  * （2026-11-01 拆分自 crv6-resilience.mjs：A-v0120-DSP-01..08。断言体逐字搬运零改动，
  * 仅外包 async 函数供入口按序聚合。）
+ * v1.5.0 W2-B 增补：DSP-09（T10-a 窄窗竞态 2 腿——indexWritten 置位序手术行为面，
+ * l-20261028-2e0c91；A-V0150-T10-a-1/-2。）
  */
 import fs from "node:fs";
 import path from "node:path";
+import { runCapture } from "../../harness/capture.mjs";
 import {
   ck,
   resultText,
@@ -700,5 +703,103 @@ export async function runV120DispatchScenarios() {
     }
   }
   grp("DSP 组收尾（A-v0120-DSP 15 断言：Q1 五腿/忙碌闸三态+env 阈值/死信两腿+fail 补 index/归因三面）");
+  // ---- DSP-09（v1.5.0 W2-B T10-a：indexWritten 置位序窄窗竞态——复现腿+修复后行为腿）----
+  //  T10 手术（dispatch-runner fail/finish 两段 indexWritten=true 后移至真实 index 写入成功之后；
+  //  :246-247 兜底自身不在手术面）的行为腿。故障桩（--require 预载；首个 .index.json renameSync
+  //  抛错一次后放行=窄窗写入抛错注入；marker 文件证故障咬合）×两形态 runner：
+  //  ①修复前形态副本（两处置位逆位移回写入点之前，字面锚+恰 1 计数守卫防漂移；副本物化于
+  //  测试临时目录，插件树零写）→ 置位已发生→exit handler killed 兜底跳过→无 index=busy 闸维持
+  //  （缺陷档案 l-20261028-2e0c91 复现）；②现 runner（修复后）→ 置位未发生→兜底落 killed:true
+  //  index=busy 闸解锁（card-result-dir :44 语义句行为面承载）。fail 段实弹（--prompt 缺文件
+  //  =prompt unreadable 路径，零 CLI spawn）；finish 段镜像腿不另设（impl-plan §5.2「视首腿形
+  //  裁量」采不设，finish 直跑行为由 DSP-06a/06b 既有腿承载）。
+  {
+    const grp9 = (t) => ck.ok(t, true, "");
+    const dir = subRoot("dsp9");
+    fs.mkdirSync(dir, { recursive: true });
+    const runnerPath = path.join(PLUGIN_DIR, "hooks", "dispatch-runner.mjs");
+    const faultStub = path.join(dir, "throw-once.cjs");
+    fs.writeFileSync(
+      faultStub,
+      [
+        "// T10-a 故障桩（测试夹具非运行面）：首个 .index.json renameSync 抛错一次后放行",
+        'const fs = require("node:fs");',
+        "const orig = fs.renameSync;",
+        "let thrown = false;",
+        "fs.renameSync = function (from, to) {",
+        '  if (!thrown && String(to).endsWith(".index.json")) {',
+        "    thrown = true;",
+        '    if (process.env.ORCH_T10A_FAULT_MARKER) { try { fs.writeFileSync(process.env.ORCH_T10A_FAULT_MARKER, "thrown"); } catch {} }',
+        '    throw new Error("T10-a fault: index write failure injected");',
+        "  }",
+        "  return orig.call(fs, from, to);",
+        "};",
+      ].join("\n") + "\n",
+    );
+    const runFaulted = (runnerFile, id) =>
+      runCapture({
+        script: process.execPath,
+        args: [
+          "--require", faultStub, runnerFile,
+          "--mission-id", id,
+          "--prompt", path.join(dir, "absent-prompt.txt"),
+          "--cwd", dir,
+          "--result-dir", path.join(dir, id, "results"),
+          "--log", path.join(dir, id + ".runner.log"),
+        ],
+        env: { ORCH_T10A_FAULT_MARKER: path.join(dir, id + ".fault.marker") },
+        timeoutMs: 30000,
+      });
+    const indexOf = (id, resDir) => {
+      try {
+        const name = fs.readdirSync(resDir).find((n) => new RegExp("^" + id + "-\\d+\\.index\\.json$").test(n));
+        return name ? JSON.parse(fs.readFileSync(path.join(resDir, name), "utf8")) : null;
+      } catch {
+        return null;
+      }
+    };
+    // T10-a-1 复现腿：修复前形态副本（置位逆位移×2；源码 CRLF 先归一 LF，锚带行首 \n 钉位防
+    // 短缩进前缀误计；锚漂移=swapOk 响红不静默）
+    const FLAG_A_POST = "\n        });\n        indexWritten = true;\n      }";
+    const CALL_A = "\n        atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {";
+    const FLAG_B_POST = "\n    });\n    indexWritten = true;\n    // v1.1.1 W-B（生产者②）";
+    const CALL_B = "\n    atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {";
+    let prefixSrc = fs.readFileSync(runnerPath, "utf8").replace(/\r\n/g, "\n");
+    let swapOk = true;
+    for (const [post, postTo, call, callTo] of [
+      [FLAG_A_POST, "\n        });\n      }", CALL_A, "\n        indexWritten = true;" + CALL_A],
+      [FLAG_B_POST, "\n    });\n    // v1.1.1 W-B（生产者②）", CALL_B, "\n    indexWritten = true;" + CALL_B],
+    ]) {
+      if (prefixSrc.split(post).length - 1 !== 1 || prefixSrc.split(call).length - 1 !== 1) { swapOk = false; break; }
+      prefixSrc = prefixSrc.replace(post, postTo).replace(call, callTo);
+    }
+    fs.writeFileSync(path.join(dir, "runner-prefix.mjs"), prefixSrc);
+    const resA = path.join(dir, "m-dsp9a", "results");
+    const runA = runFaulted(path.join(dir, "runner-prefix.mjs"), "m-dsp9a");
+    const idxA = indexOf("m-dsp9a", resA);
+    const errA = fs.existsSync(resA) && fs.readdirSync(resA).some((n) => /^m-dsp9a-.+\.error\.json$/.test(n));
+    const faultA = fs.existsSync(path.join(dir, "m-dsp9a.fault.marker"));
+    ck.ok(
+      "T10-a-1 窄窗复现腿（v1.5.0 W2-B，l-20261028-2e0c91 缺陷档）：修复前形态副本（置位先于真实 index 写入）" +
+        "+故障注入 → fail 段 index 写入抛错→置位已发生→exit handler killed 兜底跳过→无 index" +
+        "（busy 闸维持至超龄豁免档复现；error 侧车在场+fault marker 证故障咬合）",
+      runA.code === 1 && swapOk && faultA && errA && !idxA,
+      { code: runA.code, swapOk, faultA, errA, idxA },
+    );
+    // T10-a-2 修复后行为腿：现 runner（置位于写入成功之后）同故障 → 兜底接手落 killed index
+    const resB = path.join(dir, "m-dsp9b", "results");
+    const runB = runFaulted(runnerPath, "m-dsp9b");
+    const idxB = indexOf("m-dsp9b", resB);
+    const faultB = fs.existsSync(path.join(dir, "m-dsp9b.fault.marker"));
+    ck.ok(
+      "T10-a-2 修复后行为腿：现 runner fail 段置位后移（indexWritten 置位于 index 写入成功之后）同故障注入 → " +
+        "置位未发生→writeKilledIndex 兜底接手→index 在场（killed:true、outcome:error、error=runner_killed: exit、" +
+        "session_id/result_path=null）=busy 闸解锁",
+      runB.code === 1 && faultB && idxB && idxB.killed === true && idxB.outcome === "error" &&
+        idxB.error === "runner_killed: exit" && idxB.session_id === null && idxB.result_path === null,
+      { code: runB.code, faultB, idxB },
+    );
+    grp9("T10-a 组收尾（v1.5.0 W2-B 窄窗竞态 2 腿：复现腿+修复后行为腿；DSP-05a :421 夹具腿方向不变由聚合承载）");
+  }
 }
 }

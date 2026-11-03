@@ -17,6 +17,11 @@
  *   （读写两侧漂移即语义分叉：写侧 21 块裁回 10 ↔ 读侧 >20 取尾 10）。
  * STRING_TWINS v1.2.2 首例非数值 twin（G-3 顺手项）：DISPATCH_TAIL_MARK/CLOSE（server）
  *   × COORD_TAIL_MARK/CLOSE（stop-check）——协议行字符串字面，引号捕获转义留意（QA-R1 L-5）。
+ * v1.5 W4 适配（m-20261103-083000-w15-4；主控裁定 A 2026-11-03，W2-A-5 先例；l-20261101-9659df 同族第三例）：
+ *   DISPATCH 侧四锚（TRIM_AT/TO、TAIL_MARK/CLOSE）+CT 解析器前缀随 W2-A T7 二拆迁 tool-dispatch 族
+ *   （dispatch-prompt.mjs 标记区逐字随迁；server 族顶层 readdir 不再吸收子目录族致六腿基线红），
+ *   rel 重基 mcp/tool-dispatch.mjs（族面恰一定义口径不变）；CT 双 site 改两族双 site
+ *   （packHeader=server 族 × parserPrefix=tool-dispatch 族），NEG tamper 随迁。
  * TW-CT v1.2.2 转投契约腿（QA-R1 M-5/G-3）：buildPackMarkdown 包节头字面（## LESSONS（…）
  *   × 解析器前缀（^## LESSONS）双 site 同文件在位锁——节头改名而无解析随改=转投静默吞教训，
  *   CT 红即检出；负例腿（前缀盲改副本）红证内建。
@@ -65,16 +70,20 @@ const VALUE_TWINS = [
   { rel: "hooks/bg-sentinel.mjs", name: "HEARTBEAT_STALE_MS", expect: "90000" },
   { rel: "hooks/bg-gate.mjs", name: "HEARTBEAT_STALE_MS", expect: "90000" },
   // v1.2.2 尾块滞回 20/10 异名值 twin（写侧 stop-check × 读侧 server；漂移即读写语义分叉）
-  { rel: "mcp/server.mjs", name: "DISPATCH_TRACE_TRIM_AT", expect: "20" },
-  { rel: "mcp/server.mjs", name: "DISPATCH_TRACE_TRIM_TO", expect: "10" },
+  // v1.5 W4 适配（m-20261103-083000-w15-4；主控裁定 A，W2-A-5 先例）：DISPATCH 侧常量随 W2-A T7
+  //   二拆迁 mcp/tool-dispatch/dispatch-prompt.mjs（标记区逐字随迁），server 族（modDir=mcp 顶层
+  //   readdir）不再吸收子目录族——rel 重基 tool-dispatch 族，族面恰一定义口径不变。
+  { rel: "mcp/tool-dispatch.mjs", name: "DISPATCH_TRACE_TRIM_AT", expect: "20" },
+  { rel: "mcp/tool-dispatch.mjs", name: "DISPATCH_TRACE_TRIM_TO", expect: "10" },
   { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_LOG_TRIM_AT", expect: "20" },
   { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_LOG_TRIM_TO", expect: "10" },
 ];
 
 // ---- STRING_TWINS v1.2.2 首例非数值 twin（G-3 顺手项；引号字面捕获，值内无引号/反斜杠前提） ----
+// v1.5 W4 适配：a 侧两锚随 W2-A 二拆迁 tool-dispatch 族（dispatch-prompt.mjs），rel 重基（同 VALUE_TWINS 注）。
 const STRING_TWINS = [
-  { a: { rel: "mcp/server.mjs", name: "DISPATCH_TAIL_MARK" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_MARK" } },
-  { a: { rel: "mcp/server.mjs", name: "DISPATCH_TAIL_CLOSE" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_CLOSE" } },
+  { a: { rel: "mcp/tool-dispatch.mjs", name: "DISPATCH_TAIL_MARK" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_MARK" } },
+  { a: { rel: "mcp/tool-dispatch.mjs", name: "DISPATCH_TAIL_CLOSE" }, b: { rel: "hooks/stop-check.mjs", name: "COORD_TAIL_CLOSE" } },
 ];
 
 const RS_PIN = ["done", "failed", "blocked", "question"];
@@ -328,21 +337,26 @@ try {
     );
   });
 
-  // ---- TW-CT 转投契约腿（v1.2.2，QA-R1 M-5/G-3）：包节头字面 × 解析器前缀双 site 同文件在位——
-  // 节头改名而无解析随改=转投静默吞教训（RV-3 型），CT 红即检出。负例腿红证内建（零源触碰）。 ----
+  // ---- TW-CT 转投契约腿（v1.2.2，QA-R1 M-5/G-3）：包节头字面 × 解析器前缀双 site 在位——
+  // 节头改名而无解析随改=转投静默吞教训（RV-3 型），CT 红即检出。负例腿红证内建（零源触碰）。
+  // v1.5 W4 适配：双 site 随拆分异族——包节头字面（buildPackMarkdown 渲染侧，tool-pack.mjs=server
+  // 族顶层成员）留 server 族；解析器前缀（^## LESSONS）随标记区迁 tool-dispatch 族（dispatch-prompt.mjs）。
+  // 「同文件双 site」改「两族各恰一」双 site 锁，判据强度保持（节头改名破 packHeader 腿；解析盲改破
+  // parserPrefix 腿）；NEG tamper 随迁 tool-dispatch 族文本。 ----
   {
     const serverLF = famSrc("mcp/server.mjs");
+    const dispatchLF = famSrc("mcp/tool-dispatch.mjs");
     const ctPackHeader = (serverLF.match(/"## LESSONS（[^"]*"/g) || []).length;
-    const ctParserPrefix = (serverLF.match(/\^## LESSONS/g) || []).length;
+    const ctParserPrefix = (dispatchLF.match(/\^## LESSONS/g) || []).length;
     ck.ok(
-      "TW-CT-01 转投契约双腿在位：buildPackMarkdown 包节头字面（## LESSONS（…）恰 1）× 解析器前缀（^## LESSONS 恰 1）同文件双 site",
+      "TW-CT-01 转投契约双腿在位：buildPackMarkdown 包节头字面（## LESSONS（…）恰 1，server 族）× 解析器前缀（^## LESSONS 恰 1，tool-dispatch 族）两族双 site",
       ctPackHeader === 1 && ctParserPrefix === 1,
       { ctPackHeader, ctParserPrefix },
     );
-    const ctTam = serverLF.replace("/^## LESSONS/", "/^## LESSONZ/");
+    const ctTam = dispatchLF.replace("/^## LESSONS/", "/^## LESSONZ/");
     let ctNeg = false;
     let ctNegDetail = "tamper not applied";
-    if (ctTam !== serverLF && ctTam.includes("/^## LESSONZ/")) {
+    if (ctTam !== dispatchLF && ctTam.includes("/^## LESSONZ/")) {
       const p2 = (ctTam.match(/\^## LESSONS/g) || []).length;
       ctNeg = p2 === 0; // 解析器盲改后 CT-01 判据在副本上破 → 检出（静默吞教训面红证）
       ctNegDetail = "parser prefix hits after tamper=" + p2;

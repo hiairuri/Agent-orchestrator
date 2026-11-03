@@ -75,7 +75,7 @@ export async function runV120NestedScenarios() {
       );
       ck.ok(
         "NST-01b prompt 形状（内嵌 CONTRACT 三行+指针句+纪律段含第 11 条）：组装出口纪律注入段自动携带" +
-          "（消费 M6-2 DISPATCH_DISCIPLINE_BODY，11 条随 prompt 进 worker 上下文）",
+          "（消费 M6-2 DISPATCH_DISCIPLINE_BODY，13 条随 prompt 进 worker 上下文）",
         r.prompt.includes("[channel] m-nst1") && r.prompt.includes(`[token] ${packed.token}`) &&
           r.prompt.includes("先 Read 任务包") && r.prompt.includes("【纪律（全角色通用编排纪律") &&
           r.prompt.includes("尾块态上报"),
@@ -192,8 +192,14 @@ export async function runV120NestedScenarios() {
   //      server 额外 CLI 旗标，以源码钉承接；strictTokens 拒收分支与 report/p2p 闸同款）----
   // v1.3 切分重基（修复轮 D）：schema 双面迁 mcp/server-registry.mjs、nested 接线+strict 拒收
   // 分支迁 mcp/tool-dispatch.mjs，读取面走 server 族 helper（族拼接恰 2 计数=拆分前单文件同值）。
+  // v1.5 W2-A 重基（T7 裁 a 二拆）：dispatch 域字面（nested 接线+strict 拒收分支+mode:"headless"
+  // 恰 2 计数）随主流程下沉 mcp/tool-dispatch/dispatch-core.mjs——读取面改 server 族+tool-dispatch 族
+  // 两族拼接（族集合形；04a schema 面/04b 接线面/04c 恰 2 计数期望值全部零改动）。
   {
-    const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
+    const src =
+      familySource(PLUGIN_DIR, path.join("mcp", "server.mjs")) +
+      "\n" +
+      familySource(PLUGIN_DIR, path.join("mcp", "tool-dispatch.mjs"));
     ck.ok(
       "NST-04a schema 两面：board 工具 dispatch.mode 枚举加 nested（W3 headless 不动）+" +
         "dispatch 工具 inputSchema mode enum [headless, nested]",

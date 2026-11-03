@@ -9,17 +9,16 @@
  *   双前缀实名基线复位改锚）：A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
  *   A-V080-DOC-01（orch-gleaner 在册+lessons 不在 disallow+tools 面）/ A-V080-DOC-02（SKILL §10「记忆与现场」在案+标记对逐字串，
- *   权威 designs/agent-orchestrator-v0.8-DESIGN.md §10/§14；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）/
+ *   权威 designs/agent-orchestrator-v0.8-DESIGN.md §10/§14；静态在位断言）/
  *   A-V090-HOST-01（C6 findings 文件存在+§0 判定串+§1 锚点串在册口径；权威 designs/agent-orchestrator-v0.9-C6-findings.md
- *   §3/§5-2 移交语义 + v0.9-DESIGN §16 HOST-01 行；静态在位断言，不随 ORCH_HOST_FIXED 双模翻转）。
- * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-4 导出常量（宿主修复事件触发的人工维护清单）；
- *   默认模式断言各 anchor 在位（防缺陷期被误删）；env ORCH_HOST_FIXED=1 反向断言各 anchor 已回收，
- *   并断言 R-2 永久条款（「report 全名保留不删」）仍在位——该条款为永久不变量，不在回收范围。
- *   E-05/E-06/E-07 条目中「宿主快照缺陷期间」限定语随 R-2 同批复核；E-13/E-14 不回收。
+ *   §3/§5-2 移交语义 + v0.9-DESIGN §16 HOST-01 行；静态在位断言）。
+ * 回收机制（W-C §3）：RECYCLE_LIST R-1..R-4 导出常量（宿主修复事件触发的人工维护清单，已收官）。
  *   v1.4 W1（改2-改4/改8，design v1.4 §2.2）：宿主修复事件已判定（typed-probe-20261101 归因翻面
- *   +ba92054 修复）——R-1..R-4 anchor 全部改锚翻面后新字面、recycleAction 记「已于 v1.4.0 翻面执行」；
- *   默认模式断言=新字面在位（防回退）；ORCH_HOST_FIXED=1 回收模式对已翻面锚语义=历史机制，
- *   该模式不再适用翻面后锚（见台账 v1.4.0.md W1 节注记）。
+ *   +ba92054 修复）——R-1..R-4 anchor 全部改锚翻面后新字面、recycleAction 记「已于 v1.4.0 翻面执行」。
+ *   v1.5 W3-M1（T6 退役）：env ORCH_HOST_FIXED=1 回收双模分支摘除（该模式对已翻面锚语义=历史机制，
+ *   见台账 v1.4.0.md W1 节注记），套件改单模式——各 anchor 在位断言保留（防回退）；R-2 永久条款
+ *   （「report 全名保留不删」）为永久不变量（A-COMPAT-1 承载），不在回收范围；
+ *   E-05/E-06/E-07 条目中「宿主快照缺陷期间」限定语随 R-2 同批复核；E-13/E-14 不回收。
  *   R-5（plugin.json 两键「兼容存根」）已于 2026-10-21 随 E-18 方案乙开关出清册（回收完成）：
  *   V6-24 实现侧（V7-05 numArgOpt 稀疏写）先行落地、桥接语义复邦；A-DOC-V4P12/A-PLUGIN-STUB
  *   同步切换为断言乙稿桥接措辞在位，方案甲存根短语改列 ban（防复发回退）。
@@ -27,7 +26,7 @@
  * TODO(issue): 上游 issue 稿（宿主 startup snapshot 缺陷，证据链 designs/dispatch-probe-20261014/）
  *   待 V6-61 定稿提交后回填编号，并同步回填 RECYCLE_LIST 各条 issue 字段。
  *
- * 运行方式：node tests/suites/typed-dispatch-docs.mjs（回收核对：ORCH_HOST_FIXED=1 node …）
+ * 运行方式：node tests/suites/typed-dispatch-docs.mjs（ORCH_HOST_FIXED=1 回收核对模式已随 v1.5 退役）
  * v1.2.3 W1 守卫（主控扩授裁决 m-20261030-060549-56b4）：AGENTS.md（A-AGENTS-1/A-DOC-V4P25/
  *   R-4）与 designs/（A-V090-HOST-01）缺席（OSS 发布快照 checkout 永不含 AGENTS.md，66757fd
  *   untrack）→ skip 带标记不崩不红；主仓在盘时全量断言不弱化。
@@ -79,7 +78,8 @@ export const RECYCLE_LIST = [
     file: FILES.skill,
     // v1.4 W1 改2（design v1.4 §2.2；SKILL RP-1 尾句 v1.4 翻面）：anchor 随新字面。
     anchor: "typed 派发为主形态",
-    recycleAction: "已于 v1.4.0 翻面执行（typed 主形态/GP+persona 降级备选表述已落装）",
+    // v1.5 W3-M1 注记压缩：v1.4 W1 改2 括注（typed 主形态/GP+persona 降级备选表述已落装）随双模退役收编（见头注回收机制段）。
+    recycleAction: "已于 v1.4.0 翻面执行",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -88,7 +88,8 @@ export const RECYCLE_LIST = [
     file: FILES.skill,
     // v1.4 W1 改3：anchor→「GP+persona 注入为降级备选」（按逐字稿）；「保留不删」附属不动。
     anchor: "GP+persona 注入为降级备选",
-    recycleAction: "已于 v1.4.0 翻面执行；「report 全名保留不删」为永久不变量条款，不在回收范围",
+    // v1.5 W3-M1 注记压缩：永久不变量语义保留（承载面=A-COMPAT-1+头注回收机制段）。
+    recycleAction: "已于 v1.4.0 翻面执行（「report 全名保留不删」为永久不变量，不在回收范围）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -108,7 +109,8 @@ export const RECYCLE_LIST = [
     // v1.4 W1 改8：活体 AGENTS.md 已于 2026-11-01 翻面（typed-probe-20261101.md）——
     // anchor 改锚活体在盘字面「勿盲降级」（波首步 grep 复核命中=1）；recycleAction 同步。
     anchor: "勿盲降级",
-    recycleAction: "已于 v1.4.0 翻面执行（活体归因段已翻面，锚随新字面）",
+    // v1.5 W3-M1 注记压缩：v1.4 W1 改8 括注（活体归因段已翻面，锚随新字面）随双模退役收编。
+    recycleAction: "已于 v1.4.0 翻面执行",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
   },
@@ -170,7 +172,6 @@ function main() {
   ];
   const agentTexts = agentFiles.map(([name, p]) => [name, readFile(p)]);
   const pj = JSON.parse(readFile(FILES.pluginJson));
-  const hostFixed = process.env.ORCH_HOST_FIXED === "1";
 
   // ---- 编辑单落地断言（W-C §2 表；判据列逐条对应）----
   if (agentsMdExists) {
@@ -260,7 +261,7 @@ function main() {
       bad.length ? `A-PLUGIN-STUB 断言未过: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-18（乙稿）` : "");
   }
 
-  { // A-RECYCLE-1：RECYCLE_LIST 形状（四字段+host-fixed）+ 双模断言（默认在位 / ORCH_HOST_FIXED=1 已回收）
+  { // A-RECYCLE-1：RECYCLE_LIST 形状（四字段+host-fixed）+ 单模式断言（anchor 在位=防回退；v1.5 W3-M1 双模退役）
     let shapeErr = "";
     try {
       assert.equal(RECYCLE_LIST.length, 4, "应恰 4 条 R-1..R-4（R-5 已随 E-18 方案乙开关于 2026-10-21 出清册，V7-05 桥接复邦）");
@@ -277,34 +278,23 @@ function main() {
     }
     let modeErr = "";
     // v1.2.3 W1 守卫（主控扩授裁决）：R-4 file=AGENTS.md untracked 缺席（worktree）时该条
-    // 跳过不核、断言名带 [SKIP ...] 标记（缺席≠误删≠已回收，不计入任一收集集）；主仓在盘
-    // 时 R-4 全量照核。
+    // 跳过不核、断言名带 [SKIP ...] 标记（缺席≠误删，不计入收集集）；主仓在盘时 R-4 全量照核。
+    // v1.5 W3-M1（T6 退役）：ORCH_HOST_FIXED=1 回收反向断言分支摘除（历史机制，recycleAction
+    // 已记「已于 v1.4.0 翻面执行」）；单模式=anchor 在位防回退；R-2 永久条款由 A-COMPAT-1 承载。
     const recycleAbsent = RECYCLE_LIST.filter((e) => !fs.existsSync(e.file)).map((e) => e.id);
     const recycleAnchorPresent = (e) => fs.existsSync(e.file) && readFile(e.file).includes(e.anchor);
     if (!shapeErr) {
-      if (!hostFixed) {
-        // 默认模式：缺陷期措辞必须在位（删了会让读者误以为 typed 可用）
-        const still = RECYCLE_LIST.filter((e) => !recycleAbsent.includes(e.id) && !recycleAnchorPresent(e));
-        if (still.length) modeErr = `锚点被误删（宿主缺陷期措辞应在位）: ${still.map((e) => e.id).join(", ")}`;
-      } else {
-        // 回收模式（ORCH_HOST_FIXED=1）：各 anchor 应已回收；R-2 永久条款仍在位
-        const left = RECYCLE_LIST.filter((e) => recycleAnchorPresent(e));
-        if (left.length) modeErr = `回收未完成: ${left.map((e) => e.id).join(", ")}`;
-        const skillNow = readFile(FILES.skill);
-        const perm10 = section(skillNow, "## 8.", "## 9.");
-        if (!perm10.includes("保留不删") || !perm10.includes(REPORT)) {
-          modeErr += `${modeErr ? "; " : ""}R-2 永久条款受损：「report 全名保留不删」不得随回收删除`;
-        }
-      }
+      // 缺陷期措辞必须在位（删了会让读者误以为 typed 可用）
+      const still = RECYCLE_LIST.filter((e) => !recycleAbsent.includes(e.id) && !recycleAnchorPresent(e));
+      if (still.length) modeErr = `锚点被误删（宿主缺陷期措辞应在位）: ${still.map((e) => e.id).join(", ")}`;
     }
     const cond = !shapeErr && !modeErr;
-    const modeLabel = hostFixed ? "回收模式 ORCH_HOST_FIXED=1" : "默认模式（anchor 在位）";
     const skipNote = recycleAbsent.length ? ` [SKIP 缺席文件未核: ${recycleAbsent.join(", ")}]` : "";
-    ck.ok(`A-RECYCLE-1 RECYCLE_LIST 形状 + ${modeLabel}${skipNote}`, cond,
+    ck.ok(`A-RECYCLE-1 RECYCLE_LIST 形状 + 单模式（anchor 在位）${skipNote}`, cond,
       cond ? "" : `A-RECYCLE-1 失败: ${shapeErr || modeErr} —— 回写指针: 见 ${POINTER} §3（回收清单与触发双通道）`);
   }
 
-  // ---- v0.8 W4 增例（静态在位断言，权威 designs/agent-orchestrator-v0.8-DESIGN.md §10.2/§10.3/§14；不随 ORCH_HOST_FIXED 双模翻转）----
+  // ---- v0.8 W4 增例（静态在位断言，权威 designs/agent-orchestrator-v0.8-DESIGN.md §10.2/§10.3/§14）----
   { // A-V080-DOC-01：orch-gleaner.md 在册且 lessons 不在 disallowedTools（与三角色相反的放行面）+ tools 面断言（report/probe/lessons 全名；ba92054 后=双前缀实名，v1.4 W1 基线复位）
     const gleaner = readFile(FILES.agentGleaner);
     const toolsLine = frontmatterLine(gleaner, "tools");
@@ -331,7 +321,7 @@ function main() {
   }
 
   // ---- v0.9 P2-① 增例（静态在位断言，权威 designs/agent-orchestrator-v0.9-C6-findings.md §3/§5-2 移交语义 +
-  //      v0.9-DESIGN §16 HOST-01 行；不随 ORCH_HOST_FIXED 双模翻转）----
+  //      v0.9-DESIGN §16 HOST-01 行）----
   { // A-V090-HOST-01：C6 findings 在册口径——文件存在 + §0 判定串 + §1 锚点串（轻量 grep，DESIGN §16「文档断言」）
     // v1.2.3 W1 守卫（主控扩授裁决）：designs/ untracked 缺席（worktree）→ skip 带标记
     // （原缺席=FAIL 语义退役——缺席≠断言红，worktree 环境无法核在库文件）；在盘但子串
@@ -398,11 +388,8 @@ function main() {
   }
 
   // ---- 回收提醒面（非 fail，不挡发版门；run-all 注册后即出现在其尾行）----
-  if (hostFixed) {
-    console.log(`recycle: RECYCLE_LIST ${RECYCLE_LIST.length} 条（ORCH_HOST_FIXED=1 反向断言已执行；R-2 永久条款另测）`);
-  } else {
-    console.log(`recycle-pending: ${RECYCLE_LIST.length} 条（宿主修复事件未判定）`);
-  }
+  // v1.5 W3-M1（T6 退役）：双模日志收编单行（回收于 v1.4.0 翻面执行，双模退役为历史机制）。
+  console.log(`recycle: RECYCLE_LIST ${RECYCLE_LIST.length} 条（已于 v1.4.0 翻面执行；ORCH_HOST_FIXED 双模已随 v1.5 退役，anchor 在位断言维持）`);
 
   const { fail } = ck.summary();
   process.exit(fail ? 1 : 0);

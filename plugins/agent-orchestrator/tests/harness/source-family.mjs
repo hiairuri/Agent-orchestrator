@@ -27,6 +27,9 @@ const FAMILIES = {
   "tests/suites/crv2-pack.mjs": { modDir: "tests/suites/crv2-pack", entryBase: "crv2-pack.mjs" },
   "tests/suites/watcher-core.mjs": { modDir: "tests/suites/watcher-core", entryBase: "watcher-core.mjs" },
   "tests/suites/sentinel-teardown.mjs": { modDir: "tests/suites/sentinel-teardown", entryBase: "sentinel-teardown.mjs" },
+  // ---- v1.5 W2-A T7 裁 a（m-20261102-223500-w15-2a）：tool-dispatch 族登记（条文 1「入口+同名子目录」，
+  //      FAMILIES 8→9 族；21cba5 预案形态落地：组装纯区/模型播种/主流程三模块）----
+  "mcp/tool-dispatch.mjs": { modDir: "mcp/tool-dispatch", entryBase: "tool-dispatch.mjs" },
 };
 
 /** mcp 族文件→层级（v1.3 切分实施设计 §2.2；新模块准入规则②：新文件必须登记一行） */
@@ -37,6 +40,8 @@ export const LAYER_OF = {
   "tool-board.mjs": 2, "tool-report.mjs": 2, "tool-mailbox.mjs": 2, "tool-spawn.mjs": 2,
   "tool-pack.mjs": 2, "tool-dispatch.mjs": 2, "tool-sandbox.mjs": 2, "tool-resume.mjs": 2,
   "tool-harvest.mjs": 2, "tool-probe.mjs": 2,
+  // v1.5 W2-A tool-dispatch 二拆（准入规则②：新模块各登记一行；子目录族模块与入口同层 L2）
+  "dispatch-prompt.mjs": 2, "dispatch-model.mjs": 2, "dispatch-core.mjs": 2,
   // L1（域服务，9）
   "server-boot.mjs": 1, "server-board.mjs": 1, "server-git.mjs": 1, "server-lessons.mjs": 1,
   "server-stores.mjs": 1, "server-sentinel.mjs": 1, "server-p2p.mjs": 1, "server-memory.mjs": 1,

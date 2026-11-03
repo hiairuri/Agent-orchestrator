@@ -310,7 +310,6 @@ function main() {
         // Q2 双入口同堵·入口②（v1.2 M3-1）：早期失败补写 index（error=runner_early_fail）
         // ——旧形态只写 error 侧车不写 index，spawn 失败路径 busy 闸永久锁死
         // （server.mjs 旧注释「A spawn failure lands as a missing result index」自认面）。
-        indexWritten = true;
         atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {
           mission_id: missionId,
           worker: null,
@@ -325,6 +324,7 @@ function main() {
           exit_at: new Date().toISOString(),
           log_path: logFile,
         });
+        indexWritten = true;
       }
     } catch {
       /* diagnostic face only */
@@ -424,7 +424,6 @@ function main() {
     // 正常收 result 三态一目了然；index 原有 timed_out/exit_code 保留，wake 事件
     // 同步携带三字段（主控被唤即知死因，免开 index）。
     const outcome = timedOut ? "timeout" : resultPath ? "result" : "error";
-    indexWritten = true;
     atomicWriteJson(path.join(resultDir, `${missionId}-${startedMs}.index.json`), {
       mission_id: missionId,
       worker,
@@ -438,6 +437,7 @@ function main() {
       exit_at: exitAt,
       log_path: logFile,
     });
+    indexWritten = true;
     // v1.1.1 W-B（生产者②）：runner 收 result 出口同样落完成即唤队列事件 + 认领 kick
     // （runner 无 server 自写文件；含 sessionId；result 落盘后触发，无论 envelope 成败——
     // runner 退出即无 worker 进程在飞，主控宜早知道）。整段 best-effort：失败仅 stderr 一行，

@@ -2,7 +2,7 @@
 
 > **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码逐行核对，worker v12-m71；server.mjs 约 10657 行量级）。行号**不作跨版引用**；跨版定位以函数名锚为准（l-20261022-6a14d6）。
 >
-> - **归属模块**：M4 sandbox（mcp/server.mjs 沙箱写面：`materializeSandbox`（mcp/server-git.mjs）、`toolSandboxApply`/`toolSandboxDiscard`（mcp/tool-sandbox.mjs））＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，mcp/tool-pack.mjs）
+> - **归属模块**：M4 sandbox（沙箱写面：`materializeSandbox`（mcp/server-git.mjs）、`toolSandboxApply`/`toolSandboxDiscard`（mcp/tool-sandbox.mjs））＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，mcp/tool-pack.mjs）
 > - **脆度双轴评级**：面广度=中（两收口工具+组包三参）；**后果重度=第一梯队**（apply 的 merge 直接动主仓主线，git 历史不可逆——门禁链是唯一防线，故 apply 侧门禁最厚）
 > - **历史事故回链**：V6-08（两阶段 intent+幂等三态，治锁内长 git 崩窗）/V6-13（git 管线出锁，治锁占用风暴）/V6-35（teardown 后置降级，治 merge 已落仍抛）/V6-42 AUTH-08（qa 裸 verdict 纸门→四查链）/V6-10（coversPath 单一来源）/ENV-01（两慢 merge 场景套内重试稳定化，crv5-apply-envelope）
 > - **scope 注记**：本卡属 M4「不立项增强」（G1 同构裁定 K-6）；本卡只记现状契约。scope_paths 面写 allowlist 演进（v1.0 manifest 起取代 oob_allowlist 主口径）由 M2/M3 卡族承载，本卡按现状并记两参。

@@ -2,7 +2,7 @@
 
 > **行号声明（卡头）**：本文全部行号系 **2026-10-28 总装时点实测**（grep + 实码逐行核对，worker v12-m11，plugin v1.1.2：bg-sentinel.mjs 2517 行 / server.mjs 10657 行 / session-start.mjs 449 行 / bg-gate.mjs 526 行）。行号**不作跨版引用**；跨版定位以函数名/文件名锚为准（l-20261022-6a14d6）。
 >
-> - 归属模块：hooks/bg-sentinel.mjs（直至型哨兵，单文件 2517 行）＋消费端 hooks/{session-start,bg-gate,wake-kick}、watcher/、mcp/server.mjs
+> - 归属模块：hooks/bg-sentinel.mjs（直至型哨兵，单文件 2517 行）＋消费端 hooks/{session-start,bg-gate,wake-kick}、watcher/、mcp/server.mjs 入口+mcp/ 模块族
 > - 脆度双轴评级：**面广度=第一梯队**（10 文件 × 6 进程读写 × 跨进程时钟判死）；**后果重度=第一梯队（并列卡③）**（失效面横跨唤醒链/告警链/盯守链，但单文件失效多可自愈或降级，无 root.txt 型"全体失明"全局后果）
 > - 历史事故回链：锚劫持 2026-10-25 sess_7ac10f4b（-p 探针抢锚，W-A0 修复）；EXP10-findings R4（coord-workspace 缺失→watcher 盲取 workspaces[0]→b2 自愈劫持，G5 修复）；EXP10-findings R6（sess_subagent 前缀劫持，G14 修复）；V7-04（板不可读误报三连枪，观测型隔离）；l-20261019-d38f65（外部写者踩坑族）
 > - 断言锚总表：见文末 §5（含断言裸区实测标注）；本文 schema 为 impl-plan §9.3 债务的逐字段补全

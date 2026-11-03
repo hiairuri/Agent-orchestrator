@@ -1,6 +1,6 @@
 # 三视图契约：lessons 库的派生视图（digest / ORCH.md ver-sync / AGENTS.md orch-mem 标记区）
 
-- **归属模块**：mcp/server.mjs（digest 读校验组包面 + ORCH.md ver-sync 附带面 + 三视图闸/信号面）+ agents/orch-gleaner.md（归敛代理=三视图的唯一写者，GL 系规则）+ server 物化 glean-pack（digest 职责烘焙规则）；三视图同属 lessons 库（memory/lessons.jsonl）的**派生视图**，同步机制与失效语义是同一契约面的三个投影——分开写会重演「digest 有 STALE 检测而 ver-sync 无对应物」的口径漂移（DP2a R-4），故三视图合一卡
+- **归属模块**：mcp/server-memory.mjs（digest 读校验组包面 + ORCH.md ver-sync 附带面 + 三视图闸/信号面）+ agents/orch-gleaner.md（归敛代理=三视图的唯一写者，GL 系规则）+ server 物化 glean-pack（digest 职责烘焙规则）；三视图同属 lessons 库（memory/lessons.jsonl）的**派生视图**，同步机制与失效语义是同一契约面的三个投影——分开写会重演「digest 有 STALE 检测而 ver-sync 无对应物」的口径漂移（DP2a R-4），故三视图合一卡
 - **脆度评级**（面广度×后果重度双轴）：**中**——三视图均为只读投影（lessons 事件行才是源），坏视图不坏源；但三视图失效语义不对称（digest 有五级判定、ver-sync 有双因子基线、**orch-mem 标记区零检测**——本卡 §4.3 即补齐声明），消费方按「哪层坏了怎么降级」读本卡
 - **历史事故回链**：DP2a R-3（STALE 非缺陷是 fail-safe：缺的是恢复路径/分级/指纹粒度）、V7-01/CACHE-06（双因子教训）、v1.1 W6 QA P2-a（GL-32 帽判 body 非 all 行）、O2=N5 终裁（STALE 分级渲染，M8-1 落地——本卡 §5 预留消费面）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -109,7 +109,7 @@
 
 - **crv8-memory**：digest 判定链/帽/钳制、ver-sync 决策表、归敛闸——M8-1 落 STL 组（分级文案+digest 注入头样例断言，A-v0120-STL）扩展本卡 §5 消费面。
 - **po-static/crv 系**：GLOBAL MEMORY 段帽面（50 行/2KB，escapeDataBlock 行结构保持）——组包侧控制字符防线。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（readProjectDigest/digestSourcesNow/parseOrchMdHeader/orchMdAttachment/DIGEST_MAX_LINES/ORCH_MD_MAX_LINES 等）server.mjs grep 可见+卡存在非空。
+- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（readProjectDigest/digestSourcesNow/parseOrchMdHeader/orchMdAttachment/DIGEST_MAX_LINES/ORCH_MD_MAX_LINES 等）mcp/server-memory.mjs grep 可见+卡存在非空。
 
 ## 8. 维护规则
 

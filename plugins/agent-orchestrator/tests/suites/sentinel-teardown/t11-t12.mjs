@@ -628,11 +628,12 @@ export async function run(ctx) {
       // 照常渲染识别腿。载体=纯区脚手架形只读 import 被测组装模块（BUILD-DISPATCH-PURE 标记区
       // 抽取，crv2-pack/dispatch-pure 同形；断言文件恒落 W3 写面——被测模块只读 import 不构成
       // 写面，R-16 回退点=root-contract 追加节备用）。日志夹具：直投 v2 全形块（存量形态原样）
-      // + 写面 v3 块（带 sessionId 行）。
+      // + 写面 v3 块（带 sessionId 行）。v1.5 W2-A 重基：标记区迁 mcp/tool-dispatch/dispatch-prompt.mjs
+      //（逐字随迁，抽取面随迁；机制与断言零改动）。
       let dispatchPure = null;
       {
         const src = fs
-          .readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8")
+          .readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch", "dispatch-prompt.mjs"), "utf8")
           .replace(/\r\n/g, "\n");
         const beginMark = "/* BUILD-DISPATCH-PURE-BEGIN";
         const endMark = "/* BUILD-DISPATCH-PURE-END */";

@@ -1,6 +1,6 @@
 # 契约卡④：dispatch result-dir 三件套（分形态两节）
 
-- **归属模块**：mcp/server.mjs（dispatch 工具同步段+组合捕获+busy 闸）+ hooks/dispatch-runner.mjs（detached 子进程，唯一 result 文件写者）；wake-queue 旁挂目录归本卡（runner 同文 twin 在 mcp/tool-report.mjs `wakeQueueDirOf` 一份，零共享依赖纪律）
+- **归属模块**：mcp/tool-dispatch.mjs（dispatch 同步段+组合捕获+busy 闸）+ hooks/dispatch-runner.mjs（detached 子进程，唯一 result 文件写者）；wake-queue 旁挂目录归本卡（runner 同文 twin 在 mcp/tool-report.mjs `wakeQueueDirOf` 一份，零共享依赖纪律）
 - **脆度评级**（面广度×后果重度双轴）：**低-中**——协议年轻（v1.1.2 新落、v1.2 M3-1 又补三层兜底）、消费方仅 server 的闸/捕获面；但「index 缺失=在飞」的 busy 闸语义一旦失效即双跑或永久锁，后果中重
 - **历史事故回链**：R2 静默失败（ok:true+pending 掩盖快死→≤8s 组合捕获消除）、runner 早期失败只写 error 不写 index=busy 闸永久锁（v1.2 M3-1 Q2 双入口堵死）、taskkill /F 强杀无 index（O10 超龄豁免兜底）、l-20261026-792cf9（手写 mode=headless 零侧车形态——判据不取「侧车全无」腿的由来）、l-20261027-cc2f89（PROVIDER_BUSINESS_ERROR 1302 死亡实锤 error.json 侧车价值）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码，M3-1 已落）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -41,7 +41,7 @@ result-dir 三件套按拉起形态分两节：**headless**（§1-§5，runner �
 写点三态（v1.2 M3-1 Q2 双入口同堵后的全集）：
 1. **正常收场**（finish）：信封可解析→result+index（outcome=result）；不可解析→error.json+index（outcome=error）——:356-407；
 2. **早期失败**（fail）：error.json+**补写 index**（error=runner_early_fail，outcome=error）——spawn 失败/参数缺失/prompt 不可读路径，旧形态只写 error 致闸锁死已堵——:263-300；
-3. **进程自身死亡**（writeKilledIndex）：uncaughtException/unhandledRejection/exit handler 补写 index（killed:true，outcome=error）——:203-261；indexWritten 置位防覆盖正常 index。
+3. **进程自身死亡**（writeKilledIndex）：uncaughtException/unhandledRejection/exit handler 补写 index（killed:true，outcome=error）——:203-261；indexWritten 置位于 index 写入成功后；写败=置位未发生，writeKilledIndex 兜底接手（killed:true outcome=error）。
 
 ## 3. 读方清单（全部在 server 侧）
 

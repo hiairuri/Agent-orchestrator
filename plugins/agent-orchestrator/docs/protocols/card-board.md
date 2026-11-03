@@ -1,6 +1,6 @@
 # 契约卡⑤：board.json + p2p 记录（含 spool 事件信封引用的 board 字段面）
 
-- **归属模块**：mcp/server.mjs（board 全部读写经 server；`card-state-machine.md` 承载状态腿，两卡合起来才是完整写协议）
+- **归属模块**：mcp/server-board.mjs（board 全部读写经 server；`card-state-machine.md` 承载状态腿，两卡合起来才是完整写协议）
 - **脆度评级**（面广度×后果重度双轴）：**断言最厚=最不易坏；但语义最复杂**——crv6-statemachine+crv5-auth+crv2-pack 三套件锁面；失效后果限单 mission/单编排轮（不同于 root.txt 的全局性），复杂度集中在 merge 白名单/租约/p2p 鉴权三面
 - **历史事故回链**：v0.4.1 merge 白名单（QA：upsert 曾把未知键如 timeline_note 原样入库=schema 漂移）、V6-26 板损坏曾整工具面砖死、V6-49 畸形事件文件致 close 假 unread 永挂（QQagent）、v1.1.1 P2P schema 缺口、l-20261019-d38f65/l-20261023-576af5（写法禁区，详见状态机卡 §4）
 - **锚点声明**：本卡行号系总装时点（v1.1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -99,7 +99,7 @@ board.json **没有外部进程写方**——hooks/bg-sentinel/watcher 全是读
 |---|---|---|
 | 布局 | `p2p/p2p-<id>.json`；id=`<15位零填充epochMs>-<4hex>`；文件名正则 `^p2p-([A-Za-z0-9._-]+)\.json# 契约卡⑤：board.json + p2p 记录（含 spool 事件信封引用的 board 字段面）
 
-- **归属模块**：mcp/server.mjs（board 全部读写经 server；`card-state-machine.md` 承载状态腿，两卡合起来才是完整写协议）
+- **归属模块**：mcp/server-board.mjs（board 全部读写经 server；`card-state-machine.md` 承载状态腿，两卡合起来才是完整写协议）
 - **脆度评级**（面广度×后果重度双轴）：**断言最厚=最不易坏；但语义最复杂**——crv6-statemachine+crv5-auth+crv2-pack 三套件锁面；失效后果限单 mission/单编排轮（不同于 root.txt 的全局性），复杂度集中在 merge 白名单/租约/p2p 鉴权三面
 - **历史事故回链**：v0.4.1 merge 白名单（QA：upsert 曾把未知键如 timeline_note 原样入库=schema 漂移）、V6-26 板损坏曾整工具面砖死、V6-49 畸形事件文件致 close 假 unread 永挂（QQagent）、v1.1.1 P2P schema 缺口、l-20261019-d38f65/l-20261023-576af5（写法禁区，详见状态机卡 §4）
 - **锚点声明**：本卡行号系总装时点（v1.1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -226,7 +226,7 @@ board.json **没有外部进程写方**——hooks/bg-sentinel/watcher 全是读
 - **crv6-statemachine**：SM-01..08（closed 双门/白名单/reopen/清 ack/租约/answer 联动/closed 拒改板）+ A-v070-P2P-01..06（token 边界/零触碰/回放/失效/前置态/活性）+ WB-SRV-a..g（完成即唤队列）+ FA-1..5（dispatch 播种）。
 - **crv5-auth**：AUTH-01..08——fail-closed token 门（含"三探针零事件落箱+板面零改动"）、成对鉴权、claim 必换发。
 - **crv2-pack**：组包对拍基线（pack 字段面）；**crv1-scope**：scope_paths 注册/审计；**root-contract**：root 定位链（本卡的路径前置）。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（MERGEABLE_KEYS/ONE_LEVEL/p2pTokenGate 等）server.mjs grep 可见+卡存在非空。
+- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（MERGEABLE_KEYS/ONE_LEVEL/p2pTokenGate 等）mcp/server-board.mjs grep 可见+卡存在非空。
 
 ## 8. 维护规则
 

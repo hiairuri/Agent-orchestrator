@@ -158,10 +158,11 @@ export async function run(ctx) {
 
     // ---- REV-⑤：组包尾块缺席计数（无条件硬约束件）——pure 区抽取直测 + 接线静态锁
     {
-      // v1.3 切分重基（修复轮 C）：server 读取面走族 helper（薄入口+模块族拼接——BUILD-DISPATCH-PURE
-      // 标记区随段迁 mcp/tool-dispatch.mjs 原样保留，族拼接内标记恰一且 BEGIN<END 保序），
-      // 提取方式（标记区→临时 lib 注入 export→直测 pure 区）与断言期望值零改动。
-      const srvSrc = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"), { lf: true });
+      // v1.5 W2-A 重基（T7 裁 a 二拆）：读取面=tool-dispatch 族拼接（薄入口+三模块——BUILD-DISPATCH-PURE
+      // 标记区随段迁 mcp/tool-dispatch/dispatch-prompt.mjs 原样保留，族拼接内标记恰一且 BEGIN<END 保序；
+      // REV-⑤b 接线钉随主流程下沉 dispatch-core=同源读面），提取方式（标记区→临时 lib 注入 export→
+      // 直测 pure 区）与断言期望值零改动。
+      const srvSrc = familySource(PLUGIN_DIR, path.join("mcp", "tool-dispatch.mjs"), { lf: true });
       const beginMark = "/* BUILD-DISPATCH-PURE-BEGIN";
       const endMark = "/* BUILD-DISPATCH-PURE-END */";
       const i91 = srvSrc.indexOf(beginMark);
