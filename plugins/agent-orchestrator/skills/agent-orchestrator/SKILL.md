@@ -211,6 +211,7 @@ PR-12 迭代 mission：每次迭代 = 独立 mission（独立 pack/token/artifac
 PR-13 哨兵覆盖：全项目哨兵家族只一套，启动一次覆盖所有迭代的新派发（第 11 章）；实例开枪后其余实例继续值守。
 PR-14 轮次签收：`mailbox(read, mission_id=…)` 定向消费；done 先评审再 close（沙箱按第 12 章）；哨兵告警按 mission 处置，不阻塞其余迭代。
 PR-15 轮次命名：迭代编号写进 title（如「v2 迭代：搜索重构——实现」）。
+PR-16 子代理回合内禁挂内部后台命令：子代理（全角色）回合内禁止 `Bash(run_in_background=true)` 挂长命令、禁止 file-watch/事件监听类长挂源——内部后台命令的完成通知可能晚于主回合结束才唤醒该子代理，其「最后完成」可被吞为宿主不可见，mission 永滞=僵尸（T14 用户实证）。长任务改同步等待或拆 mission；主控面 `run_in_background` 派发不受本条约束（PR-1 口径）。
 
 ## 7. 模型选择两轨
 
@@ -238,6 +239,7 @@ RP-10 三个 archetype：worker（执行，cyan）/ scout（只读调研，blue�
 RP-11 转正：临时代理用得好 → `spawn_agent` 固化为项目角色，下次免注入。
 RP-12 派发权限红线（两形态同闸，工具面强制）：headless 子代理=`--mode yolo` 全放行、无交互闸；nested 子代理=宿主会话权限面，bg-gate 对宿主 Agent 调用只是提示面非防线（PT-5 fail-open 三层，且不知 mission scope）。两形态派发前必过同一 yolo 闸（工具面强制：只读/记忆域角色豁免；worker 类 mission 必须登记 `scope_paths`，越界可审计），高险写任务走沙箱（第 12 章）。
 RP-13 桌面可见性：headless 会话与主控会话同工作区同列可见（UI 呈现以用户目视为准，本手册不承诺 UI 面）。
+RP-14 契约卡语义同步检查行：行为变更波的任务包/详单须含「受影响契约卡语义同步」检查行。
 
 ## 9. 缺陷与坑位清单
 
@@ -285,7 +287,7 @@ MM-14 红线：不得直接读写平台会话库 db.sqlite；镜像与 `ReadSess
 
 MM-15 定位：lessons 是事件层，主控与子代理记忆视图是视图层——ORCH.md（主控记忆）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）；归敛 = 后台 orch-gleaner 定期把事件层整理进视图层（消费 ORCHTEMP、巡检候选、维护超帽裁剪、产报告）；设计权威 designs/agent-orchestrator-v0.8-DESIGN.md §6/§9。
 MM-16 到期信号：server 每次工具调用评估三键两腿——闲时腿：①距上次归敛 >idle_hours（缺省 48h）∧②双库自水印以来新增 ≥new_events（缺省 10 条）；常忙腿（v1.3）：③双库自水印以来新增 ≥busy_channel_events（缺省 40 条；0=关断；仅闲时腿时间门不过时兜底触发，防常忙期 48h 久不归敛）；三键与帽值集中 `glean.cfg.json` 可覆盖（cfg 全键：idle_hours / new_events / busy_channel_events / 锁过期键〔1.5h〕/ pack_global_section / orch_md_max_lines〔默认 120〕/ orch_md_max_bytes〔默认 10KB〕）；帽两键为 v1.3 W4 opt-in（默认零行为变更；上调帽值→主控上下文线性增长，每+10KB≈每变更事件注入 +10KB，操作者自担）；任一腿全过且锁闲 → 物化 `<全端目录>/glean-brief.json`（实测门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg 全文）+ 固定包 `glean-pack.md`（MM-29）并在响应附 `orch_memory.glean={due:true, reason, brief_path, pack_path, lock_state}`。
-MM-17 处置：`due:true` 且锁闲 → 后台 GP+orch-gleaner persona 派发（gate due 路径 = MM-29 一行 prompt 指固定包，主控零组装；手工拉起 = MM-28 骨架组包，包内 CONTEXT 内嵌 brief 快照）；TASK = 抢锁（位置=`<brief.lock_path>`，权威指针勿手写）→ 消费 ORCHTEMP（retire 置状态）→ 候选巡检 promote → 视图层维护（ORCH.md 重写 ver+1 / 标记区外科编辑 / 全端 AGENTS.md 更新）→ 锁置 done + watermarks → 写报告；`lock_state:"busy"` 或不感兴趣 → 忽略（信号不消费无后果，下次按门槛重新评估）。落位：全局后台任务（glean 等）默认落触发项目；插件 userConfig 键 `globalTaskProjectDir`（string，缺省 ""）可指定固定落位项目根——设值为存在的目录绝对路径即生效；键缺席/空/路径不存在=回退触发项目（哨兵 stderr 单行告警，不静默）。
+MM-17 处置：`due:true` 且锁闲 → 后台 GP+orch-gleaner persona 派发（gate due 路径 = MM-29 一行 prompt 指固定包，主控零组装；手工拉起 = MM-28 骨架组包，包内 CONTEXT 内嵌 brief 快照）；TASK = 抢锁（位置=`<brief.lock_path>`，权威指针勿手写）→ 消费 ORCHTEMP（retire 置状态）→ 候选巡检 promote → 视图层维护（ORCH.md 重写 ver+1 / 标记区外科编辑 / 全端 AGENTS.md 更新）→ 锁置 done + watermarks → 写报告；`lock_state:"busy"` 或不感兴趣 → 忽略（信号不消费无后果，下次按门槛重新评估）。落位：全局后台任务（glean 等）默认落触发项目；插件 userConfig 键 `globalTaskProjectDir`（string，缺省 ""）可指定固定落位项目根——设值为存在的目录绝对路径即生效；键缺席/空/路径不存在=回退触发项目（哨兵 stderr 单行告警，不静默）。键读取优先序：插件 userConfig 键＞根级 glean.cfg.json 同键（行为腿 tests/suites/glean-launch.mjs :1088-1090 B2-02 双键竞争）。落位跟随面=拉起路径（spawn cwd）+glean 消息行；盯守根不随落位迁移（OPEN-2=a 口径，行为腿 :452）。
 MM-18 组包校验：派发后 grep pack.md 验证 CONTEXT 物化（缺陷候选 #52 纪律）；路径类括注一律引权威指针（brief 字段/DESIGN 节号），不写绝对路径。
 MM-19 ORCH.md ver 同步：任一工具成功响应可能附主控记忆两 surfacing——content 面 result 顶层 `orch_md` 键（v1.3 起主通道，OV-9）＋顶层 `orch_memory.orch_md` 附件（尽力而为）——`reason:"initial"` 静默装载；`"changed"` 以新全文替换旧认知；`"removed"` 清空；`truncated:true` 视为超帽信号，考虑拉起归敛；主控不写 ORCH.md，只消费（消费纪律=OV-9 三通道）。
 MM-20 文件地图：

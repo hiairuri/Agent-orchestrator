@@ -18,7 +18,7 @@
 物理分解在当期**明确不做**，理由（DP2c 职责分解评估节实测结论，2026-10-27）：
 
 1. **断言面全量重钉**：黑盒套件 sentinel-teardown（T1-T10 加速参数驱动的生命周期断言，超千行量级）以「单文件黑盒」为被测对象——拆分即全部断言重钉，回归安全网重建成本远超收益；
-2. **hook 部署形态约束**：hook 脚本=独立进程单文件自包含（与 server.mjs 零依赖单文件同构约束）。拆模块必须引入加载器或构建物化，两者都破坏 hooks 的直接部署形态；
+2. **hook 部署形态约束**：hook 脚本=独立进程单文件自包含（与 v1.3 拆分前 server.mjs 零依赖单文件形态同构约束）。拆模块必须引入加载器或构建物化，两者都破坏 hooks 的直接部署形态；
 3. **状态机跨节纠缠**：租约 wx 守卫文件、槽位、quarantine、fired、冷却戳互相引用成网，静态切分线切在状态机关节上——拆分收益低、风险高。
 
 **物理拆分列观察项**（与 G1 虚拟分区同治理节奏）：仅当上述三理由逐一失效（断言面改造/部署形态变化/状态机解耦）时重议，走任务书显式立项，禁止顺手拆。
@@ -30,7 +30,7 @@
 | 行锚 | 分节（分节注释标题） | 职责 | 关键函数/文件锚 |
 |---|---|---|---|
 | hooks/bg-sentinel/core.mjs `locateRoot` | root-id 契约校验定根 | 存储根定位（五脚本 verbatim twin，server 站 server 侧） | `locateRoot`/`rootIdOf`（root-contract 套件锁） |
-| hooks/bg-sentinel/core.mjs `readBoardSafe` | board / wake-failure helpers | 板只读+唤醒失败判据；server.mjs & hooks verbatim twin | `readBoardSafe` 族（twin-lock 五文件矩阵） |
+| hooks/bg-sentinel/core.mjs `readBoardSafe` | board / wake-failure helpers | 板只读+唤醒失败判据；server 族（入口+模块族）& hooks verbatim twin | `readBoardSafe` 族（twin-lock 五文件矩阵） |
 | hooks/bg-sentinel/signals.mjs | 信号模块 | rollout 心跳/tool_usage/双空闲链（主控活性判定） | 信号读取族 |
 | hooks/bg-sentinel/signals.mjs `watcherCoverage` | watcher-signals 消费 | watcher 优先唤醒通道的在岗判定面（v0.8 W6 闭环） | `watcherCoverage` |
 | hooks/bg-sentinel/family.mjs | 家族槽位 | 槽位 wx 认领/心跳/接管/释放/清理 | `claimSlot`/`touchSlot`/`releaseSlot`/`pruneStaleSlots` |
@@ -53,7 +53,7 @@
 
 ## 3. twin 面（跨文件一致性义务）
 
-- **verbatim twin 三处**：root-id 定根（core.mjs `locateRoot`）与 board/wake-failure helpers（core.mjs `readBoardSafe`）系 server.mjs 与 hooks 多脚本 verbatim 同文——**改任一副本必须五处同波改**，行为矩阵由 twin-lock 套件锁定（五文件：server/session-start/stop-check/bg-sentinel/poller）。
+- **verbatim twin 三处**：root-id 定根（core.mjs `locateRoot`）与 board/wake-failure helpers（core.mjs `readBoardSafe`）系 server 族与 hooks 多脚本 verbatim 同文——**改任一副本必须五处同波改**，行为矩阵由 twin-lock 套件锁定（五文件：server/session-start/stop-check/bg-sentinel/poller）。
 - **异名值 twin**：心跳判死阈值在本文件、server（SENTINEL_HEARTBEAT_STALE_MS）、bg-gate（HEARTBEAT_STALE_MS）三处异名同值——VALUE_TWINS 值锁逐 site 锁定（三处定义=死锁风险点，P5 一致性锁首要对象）。
 - **fmtAge**：分叉点已统一到 server 版裸 `min` 形态（行为等价，W0 速赢落定）；后续新增 twin 函数走 twin-lock TWIN_SPEC 声明表登记。
 

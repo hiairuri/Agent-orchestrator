@@ -60,7 +60,11 @@ try {
   // ---- 静态红线：SB09/M-07 server.mjs 无 git transfer argv（注释剥离后扫描）
   // v1.3 切分重基（m-20261101-034720-a7a6）：源码读面=server/bg-sentinel 族（入口+模块族，
   //   familySource helper）——拆分后单文件读会把零残留 ban 弱化为薄入口假绿，族面保同强度。
-  const src = familySource(PLUGIN_DIR, "mcp/server.mjs");
+  // v1.5 W2-A 重基（主控 2026-11-02 scope 增补授权，m-20261102-223500-w15-2a）：+tool-dispatch 族
+  //   拼接——T7 裁 a 二拆后主流程/handler 读取面（toolDispatch/toolDispatchInner，DP-02 DELEGATES
+  //   表既有行）下沉 mcp/tool-dispatch/ 子目录模块，顶层族面不可见；与 NST-04/m91-scp-rev 同款
+  //   （LM-06-SCAN familySource 形态），ban 串四新件零命中已复核（台账 §W2-A-5 记）。
+  const src = familySource(PLUGIN_DIR, "mcp/server.mjs") + "\n" + familySource(PLUGIN_DIR, "mcp/tool-dispatch.mjs");
   const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, "");
   const lines = noBlock.split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"));
   const badArgv = [];

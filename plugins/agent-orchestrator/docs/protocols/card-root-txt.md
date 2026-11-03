@@ -30,7 +30,7 @@
 | 写点 | 语义（实测锚） |
 |---|---|
 | **server 启动·发布**（唯一常规写方） | 运行根=非默认且非 temp → 对默认根 `root.txt` **无条件重写 v2 双行**（mcp/server-core.mjs 发布段，atomicWriteFileSync；注释：id 恒与「最近在此运行的根」一致——多项目共用默认根时指针天然指向最后运行者，消费端按读时校验兜底） |
-| **server 启动·自愈**（唯一删除方） | 运行根=默认根 → 读存量指针五分支判定（mcp/server-core.mjs 自愈段）：①dangling（目标不存在）→ unlink；②目标在 temp 目录（isTempDirPath，mcp/server-core.mjs，os.tmpdir() relative 判定）→ unlink（测试根不粘滞 "test root must not stick"）；③v1 单行格式 → 目标**已升级**（有 root-id）才保留，否则 unlink（旧 server 下次启动自行升级）；④v2 双行 id 失配（或目标 root-id 不可读）→ unlink（stale）；⑤其余保留。全 best-effort（catch 兜底） |
+| **server 启动·自愈**（唯一删除方） | 运行根=默认根 → 读存量指针六分支判定（mcp/server-core.mjs 自愈段）：①dangling（目标不存在）→ unlink；②目标在 temp 目录（isTempDirPath，mcp/server-core.mjs，os.tmpdir() relative 判定）→ unlink（测试根不粘滞 "test root must not stick"）；③v1 单行格式 → 目标**已升级**（有 root-id）才保留，否则 unlink（旧 server 下次启动自行升级）；④v2 双行 id 失配（或目标 root-id 不可读）→ unlink（stale）；⑤其余保留；⑥**本根优先例外**（F1-01，v1.4 W3 行为腿 root-contract S6 锁；判定序先于⑤）——混配场景：运行根=默认根 ∧ 存量指针 v2 自洽（双行 id 与目标根 root-id 对得上）∧ 本根有 board.json → **unlink**（「混配=误配置」非支持面，G1-4；删除=本根优先，是⑤「其余保留」的例外腿）。全 best-effort（catch 兜底） |
 | **server 启动·root-id 落根** | ensureRootId（mcp/server-core.mjs）：根内无合法 root-id（`^[0-9a-f]{16}$` 校验，rootIdOf 强校验）→ 生成写入；已有 → 原样沿用 |
 | **temp 测试根豁免** | isTempRoot（mcp/server-core.mjs）→ 既不发布指针也不进入自愈分支——套件/探针零真实根污染 |
 | **hooks** | **零写方**——hooks 不删指针（session-start.mjs 契约头注释现址 :186「删除职责全归 server 自愈」，2026-11-02 实测；bg-gate :75／journal :33／stop-check :708 同文在册）、不改写指针；watcher 也从不触碰（watcher/watcher.mjs :12 明示从不读） |
@@ -55,7 +55,7 @@
 
 无 schema 校验=裸 txt；hooks 侧对 L1/L2 的唯一结构假设=按 `\r?\n` split＋trim＋滤空。
 
-### 失效语义（hooks 消费侧五分支 + server 自愈侧五分支）
+### 失效语义（hooks 消费侧六分支 + server 自愈侧六分支）
 
 **hooks 侧（locateRoot，任一失败 → 回退默认根＋stderr 告警一行 `fail-loud`，hooks 永不删指针）**：
 
@@ -64,10 +64,11 @@
 3. **悬空指针**（目标不存在/非目录）→ 拒采信回退（`fail-loud`，stderr"目标不存在或不是目录"）。
 4. **v2 强校验失败**：目标缺 root-id → 拒（`fail-loud`）；root-id 与指针内嵌 id 失配 → 拒（`fail-loud`）——AGENTS.md 遗留清单第 7 条的残留失真由此被读端拦截为"回退默认根"而非"全体失明"。
 5. **v1 弱校验**（v0.4.1-v0.5.1 兼容）：目标存活 ∧ 目标有 root-id 即采信（值不比对）＋stderr 旧格式提示"重启 server 后自动升级"（`静默降级`＋`fail-loud` 提示）；目标无 root-id → 拒（V6-30 ≤v0.4.0 劫持形态天然中和）。
+6. **board.json 存在性校验**（v1.4 W3 F1-02，root-contract P11 腿 B 锁）：指针目标缺 board.json ∧ 默认根有 board.json → 拒采信回退默认根＋stderr 告警一行 `[orch-root-contract] root.txt target lacks board.json; falling back to default root`（rootContractStderr 五处 twin 同款）——NOBOARD（有 root-id 无板）=本链唯一因板缺席否决点，五实现矩阵同形（journal/bg-gate/session-start/stop-check 镜像/bg-sentinel）。
 
-**server 侧自愈（唯一删除方，`自愈`）**：dangling/temp/v1-目标未升级/v2-id 失配 四类 stale 指针在下次默认根 server 启动时 unlink（mcp/server-core.mjs 自愈段）；删除后 hooks 下次定根自然回落默认根或祖先根。
+**server 侧自愈（唯一删除方，`自愈`）**：dangling/temp/v1-目标未升级/v2-id 失配/混配自洽指针（F1-01 本根优先例外，v1.4 W3 S6 锁）五类 stale 指针在下次默认根 server 启动时 unlink（mcp/server-core.mjs 自愈段）；删除后 hooks 下次定根自然回落默认根或祖先根。
 
-**全局后果链（本卡评级依据）**：指针失真未被自愈清除时（如用户手工改路径、存储根迁移后旧根复活），五 hooks 一致解析到失效根 → board/spool/memory 全部读空（"hooks 全体失明"）→ bg-gate 无板可判（误报面）→ bg-sentinel 在错误根盯守（"哨兵自毁"）。防线=读端五分支拦截（fail-loud 留痕）＋server 自愈（唯一删方）＋root-id 绑定（路径复用失效）。
+**全局后果链（本卡评级依据）**：指针失真未被自愈清除时（如用户手工改路径、存储根迁移后旧根复活），五 hooks 一致解析到失效根 → board/spool/memory 全部读空（"hooks 全体失明"）→ bg-gate 无板可判（误报面）→ bg-sentinel 在错误根盯守（"哨兵自毁"）。防线=读端六分支拦截（fail-loud 留痕）＋server 自愈（唯一删方）＋root-id 绑定（路径复用失效）。
 
 **竞态面**：指针发布（server 启动）与 hooks 读取无锁——atomicWriteFileSync tmp+rename 保证读侧只见完整旧/新文件；id 失配窗口由「发布无条件重写＋hooks 采信前比对」收敛。
 

@@ -1,6 +1,6 @@
 # 契约卡：M1 mission 状态机（ALLOWED_TRANSITIONS）
 
-- **归属模块**：mcp/server.mjs（board 写路径的迁移门 + 各内部写点）；配套字段/merge 语义见 `card-board.md`（卡⑤）
+- **归属模块**：mcp/server-board.mjs（board 写路径的迁移门 + 各内部写点）；配套字段/merge 语义见 `card-board.md`（卡⑤）
 - **脆度评级**（面广度×后果重度双轴）：**后果重度=第一梯队**——crv6-statemachine 厚锁面（代码冻结，改动高危）；白名单写错一条腿=要么死锁（腿缺失）要么假归档/双跑（腿放水）。面广度中等（单文件单表）
 - **历史事故回链**：l-20261019-d38f65（外部 upsert 直写 running 被拒——只有负面清单没有正面矩阵的踩坑根源）、l-20261023-576af5（upsert 缺 mission.id 误新建）、V6-11/V6-20/V6-21/V6-28 设计裁定（W-A1 §1 表文逐条）
 - **锚点声明**：本卡行号系总装时点（v1.1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威。实测基线：`ALLOWED_TRANSITIONS`（mcp/server-board.mjs）、守卫 `upsertMission`（mcp/server-board.mjs）、`sweepGraph`（mcp/server-board.mjs）

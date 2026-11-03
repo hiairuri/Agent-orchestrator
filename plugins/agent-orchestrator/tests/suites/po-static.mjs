@@ -75,7 +75,14 @@ const countRe = (hay, re) => (hay.match(re) || []).length;
 //   源码字面钉（W4_PINS/M10-04/M10-05/D11-03/W4-03/W4-05b/W3/W6）扫描面=server 族
 //   （入口+模块族拼接，familySource helper；族文件清单 readdir 动态取）。
 //   计数锁语义不变：族拼接≈原单文件（字节级搬移）+import/export 接线行，钉面计数同口径。
-const SERVER = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
+// v1.5 W2-A 重基（主控 2026-11-02 scope 增补授权，m-20261102-223500-w15-2a）：+tool-dispatch 族拼接
+//   ——T7 裁 a 二拆后纪律段 BODY/CONTRACT 串/buildDispatchPrompt 定义随段下沉 mcp/tool-dispatch/
+//   子目录模块，顶层族面不可见；两族拼接与 NST-04/m91-scp-rev 同款（LM-06-SCAN familySource 形态），
+//   钉面期望值零改动（18 项保持性探针预核全绿，台账 §W2-A-5 记）。
+const SERVER =
+  familySource(PLUGIN_DIR, path.join("mcp", "server.mjs")) +
+  "\n" +
+  familySource(PLUGIN_DIR, path.join("mcp", "tool-dispatch.mjs"));
 const SKILL = read(path.join("skills", "agent-orchestrator", "SKILL.md"));
 const WORKER = read(path.join("agents", "orch-worker.md"));
 const STOP_CHECK = read(path.join("hooks", "stop-check.mjs"));
@@ -194,7 +201,10 @@ try {
   // D11-03 派发纪律第 11 条核心句双源逐字一致（O13=a 漂移兜底；协议卡指针行 O1① 同组）
   const D11_CORE = "尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报";
   ck.ok("D11-03 第 11 条核心句双源逐字一致（server DISPATCH_DISCIPLINE_BODY 恰 1 + SKILL §17 恰 1）", count(SERVER, D11_CORE) === 1 && count(SKILL, D11_CORE) === 1, { server: count(SERVER, D11_CORE), skill: count(SKILL, D11_CORE) });
-  ck.ok("D11-03 fence 引言行随第 12 条同步（12 条纪律；v1.2.1 主控追加）", count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 11 条纪律") === 0, { n12: count(SERVER, "以下 12 条纪律也已随本消息进入你的上下文"), n11: count(SERVER, "以下 11 条纪律") });
+  ck.ok("D11-03 fence 引言行随第 13 条同步（T14-b 计数三态自证：13===1/12===0/11===0）", count(SERVER, "以下 13 条纪律也已随本消息进入你的上下文") === 1 && count(SERVER, "以下 12 条纪律") === 0 && count(SERVER, "以下 11 条纪律") === 0, { n13: count(SERVER, "以下 13 条纪律也已随本消息进入你的上下文"), n12: count(SERVER, "以下 12 条纪律"), n11: count(SERVER, "以下 11 条纪律") });
+  // T14-a PR-16 双源钉（v1.5 W1 T14；镜像 D11-03 双源型制：SKILL §6 新条在位 ∧ server 纪律段第 13 条表格行权威列在位——
+  //   SERVER 侧钉表格行形态「| SKILL 第 6 章 PR-16 |」而非裸串，:55 fence 注释「（SKILL 第 6 章 PR-16）」括注同串经施工自纠排除）
+  ck.ok("T14-a PR-16 双源钉（SKILL「PR-16 子代理回合内禁挂内部后台命令」恰 1 ∧ SERVER BODY 第 13 条权威列「| SKILL 第 6 章 PR-16 |」恰 1）", count(SKILL, "PR-16 子代理回合内禁挂内部后台命令") === 1 && count(SERVER, "| SKILL 第 6 章 PR-16 |") === 1, { skill: count(SKILL, "PR-16 子代理回合内禁挂内部后台命令"), server: count(SERVER, "| SKILL 第 6 章 PR-16 |") });
   // D11-04 §1 场景表行 + 协议卡指针行（O1①：SKILL 只加指针行，卡本体在 docs/protocols/）
   ck.ok("D11-04 §1 场景表尾块态行在位", count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |") === 1, count(SKILL, "| 子代理上报只收尾块态（结论/计数/产物指针） | 第 17 章 |"));
   ck.ok("D11-04 协议卡指针行在位（docs/protocols/ 恰 1，SKILL 只留指针）", count(SKILL, "docs/protocols/") === 1, count(SKILL, "docs/protocols/"));

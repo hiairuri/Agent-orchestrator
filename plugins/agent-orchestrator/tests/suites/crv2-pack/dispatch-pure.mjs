@@ -16,12 +16,10 @@ export async function runDispatchPure() {
   // 旧→新/≤10 块/字节确定性/30000 拒。夹具一律 v2 双标签形制（grill#3 G3-5）。
   let dispatchPure = null;
   {
-    // v1.3 切分重基（修复轮 D）：BUILD-DISPATCH-PURE 标记区已迁 mcp/tool-dispatch.mjs（拆分布局
-    // 原样保留），抽取读面由 server.mjs 单文件读改模块文件直读——纯区自含零外部标识符，
-    // 抽取机制（标记对切片+临时模块导入）与断言零改动。
-    const src = fs
-      .readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8")
-      .replace(/\r\n/g, "\n");
+    // v1.5 W2-A 重基（T7 裁 a 二拆）：标记区迁 mcp/tool-dispatch/dispatch-prompt.mjs（标记区逐字随迁），
+    // 抽取读面改 tool-dispatch 族拼接（familySource：薄入口+三模块，条文 2 族面扫描纪律）——纯区自含
+    // 零外部标识符，抽取机制（标记对切片+临时模块导入）与断言零改动。
+    const src = familySource(PLUGIN_DIR, path.join("mcp", "tool-dispatch.mjs"), { lf: true });
     const beginMark = "/* BUILD-DISPATCH-PURE-BEGIN";
     const endMark = "/* BUILD-DISPATCH-PURE-END */";
     const i = src.indexOf(beginMark);
@@ -245,8 +243,10 @@ export async function runDispatchPure() {
       );
       // A1-05：指针行路径同源=resolveDispatchPersona 返回值（role 腿=安装根绝对路径）；
       // 接线静态钉=tool-dispatch 调用点 personaPointerMode ? personaFile : personaText（同源传位）。
+      // v1.5 W2-A 重基：钉面随主流程下沉改 mcp/tool-dispatch/dispatch-core.mjs（R1-L3 主流程下沉口径，
+      // 薄入口零业务谓词红线=钉不可钉入口；免 import 形态 l-ddcb75 保持，钉随标识符实际归属迁移）。
       const roleLegPath = path.join(PLUGIN_DIR, "agents", "orch-worker.md");
-      const tdSrc = fs.readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8").replace(/\r\n/g, "\n");
+      const tdSrc = fs.readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch", "dispatch-core.mjs"), "utf8").replace(/\r\n/g, "\n");
       const wired = tdSrc.includes("personaPointerMode ? personaFile : personaText");
       const ptrSrc = buildDispatchPrompt(missionTyped, packFixture, logFixture, roleLegPath, digestFixture, { absent: 0, mode: "nested" }, true);
       ck.ok(
@@ -441,8 +441,9 @@ export async function runDispatchPure() {
       { diff: w3.ok && w3.text !== w1.text, discLen: discFace(w1.text) },
     );
     {
-      // v1.3 切分重基（修复轮 D）：标记区已迁 mcp/tool-dispatch.mjs，扫描读面随迁（模块文件直读）。
-      const src = fs.readFileSync(path.join(PLUGIN_DIR, "mcp", "tool-dispatch.mjs"), "utf8");
+      // v1.5 W2-A 重基：标记区迁 dispatch-prompt.mjs（逐字随迁），扫描读面改 tool-dispatch 族拼接
+      //（familySource：条文 2 族面扫描纪律——纯区确定性锁与 W4-PREFIX-04 断言期望值零改动）。
+      const src = familySource(PLUGIN_DIR, path.join("mcp", "tool-dispatch.mjs"), { lf: true });
       const i = src.indexOf("/* BUILD-DISPATCH-PURE-BEGIN");
       const j = src.indexOf("/* BUILD-DISPATCH-PURE-END */");
       const region = i >= 0 && j > i ? src.slice(i, j) : "";
@@ -460,18 +461,20 @@ export async function runDispatchPure() {
       const row10 = body.includes("\n| 10 | ");
       const row11 = body.includes("\n| 11 | 尾块态上报");
       const row12 = body.includes("\n| 12 | 编辑效率");
+      const row13 = body.includes("\n| 13 | 子代理回合内禁挂");
       ck.ok(
-        "W4-DISPATCH-10 纪律段章号锁（新增-1，沿 C1-09 型制；v1.2 M6-2 扩 11 行；v1.2.1 第 9 条改写+主控追加第 12 条）：fence 置顶常量在位，表格 12 行齐（| 1 |..| 12 |），每行携 SKILL 章号权威，第 9 条=P2P 默认工作通道，第 11 条=尾块态上报，第 12 条=编辑效率",
+        "W4-DISPATCH-10 纪律段章号锁（新增-1，沿 C1-09 型制；v1.2 M6-2 扩 11 行；v1.2.1 第 9 条改写+主控追加第 12 条；v1.5 W1 T14-c 第 13 条=子代理回合内禁挂）：fence 置顶常量在位，表格 13 行齐（| 1 |..| 13 |），每行携 SKILL 章号权威，第 9 条=P2P 默认工作通道，第 11 条=尾块态上报，第 12 条=编辑效率，第 13 条=子代理禁挂内部后台命令",
         fence.startsWith("【纪律（") &&
           fence.includes("与包 RULES 冲突时以包 RULES 为准") &&
           rows.length === 9 &&
           row10 &&
           row11 &&
           row12 &&
-          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every((n) => body.includes(`\n| ${n} | `)) &&
+          row13 &&
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].every((n) => body.includes(`\n| ${n} | `)) &&
           (body.match(/SKILL 第 \d+/g) || []).length >= 12 &&
           body.includes("| 9 | P2P 是默认工作通道之一"),
-        { rows: rows.length, row10, row11, row12, fenceHead: fence.slice(0, 20) },
+        { rows: rows.length, row10, row11, row12, row13, fenceHead: fence.slice(0, 20) },
       );
       const noDigest = buildDispatchPrompt(
         mkMission("mD", "packs/mD/pack.md"),
@@ -500,14 +503,14 @@ export async function runDispatchPure() {
       );
       ck.ok(
         "W4-DISPATCH-13 循环形态条字面锁（v1.2.1 按 aggregated §4.4④ 升格改写，前值=迭代闭环条 2026-10-26 MaimaiBOT R3）：第 10 条在位——配对循环默认形态/milestone 保持 running/意见吸收后 done/done=退出/回落开新轮",
-        body.includes("以下 12 条纪律") &&
+        body.includes("以下 13 条纪律") &&
           body.includes("配对循环是默认工作形态") &&
           body.includes("report(kind=milestone) 保持 running") &&
           body.includes("全部意见吸收并通过自验后 report(kind=done)") &&
           body.includes("done=退出循环") &&
           body.includes("后续 p2p 将无人应答") &&
           body.includes("回落=等主控开新轮 mission"),
-        { has12: body.includes("以下 12 条纪律"), hasLoop: body.includes("配对循环是默认工作形态") },
+        { has13: body.includes("以下 13 条纪律"), hasLoop: body.includes("配对循环是默认工作形态") },
       );
       ck.ok(
         "W4-DISPATCH-14 尾块态上报条字面锁（v1.2 M6-2，O13=a 执行面拷贝）：第 11 条携三要素（结论/计数/产物指针）+文件直投/邮箱两形态+不塞 details+主控只转指针+done 缺产物指针=无效上报，权威=SKILL 第 17 章（主控信息面）",

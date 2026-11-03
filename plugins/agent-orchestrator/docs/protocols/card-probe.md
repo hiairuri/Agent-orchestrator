@@ -1,6 +1,6 @@
 # 契约卡⑥：probe 分区（四动作只读探针）
 
-- **归属模块**：mcp/server.mjs probe 分区（mcp/tool-probe.mjs probe 分区：四动作处理器+统一信封+page_token 机制+会话缓存挂点）；db.query 经进程外 node:sqlite 子进程（server 头注释 :10-12 的第三类 subprocess 用途）；会话缓存机制分立 `cache-policy.md`（G1 虚拟分区：probe 不物理拆，文档分立非拆面）
+- **归属模块**：probe 分区（mcp/tool-probe.mjs：四动作处理器+统一信封+page_token 机制+会话缓存挂点）；db.query 经进程外 node:sqlite 子进程（server 头注释 :10-12 的第三类 subprocess 用途）；会话缓存机制分立 `cache-policy.md`（G1 虚拟分区：probe 不物理拆，文档分立非拆面）
 - **脆度评级**（面广度×后果重度双轴）：**低**——纯只读（零 board/lock 交互、零写面）、caps 全部 server 端机械强制（SKILL §15.4 语义从「对模型的劝告」转为「server 强制帽」，V6-01）；残余风险=SQL 门前瞻绕过与二进制误读，均有 fail-closed 设计
 - **历史事故回链**：V6-01（caps 从纪律变机制）、V7-01（会话读缓存=LRR64，细节归 cache-policy.md）、SKILL §15.4（cap 语义权威源）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
@@ -81,7 +81,7 @@ token 校验（`probeDecodeToken`（mcp/tool-probe.mjs））：形状失败=Tool
 ## 5. 断言锚
 
 - **probe-caps**（在册套件，v1.2 不变名单 §4.2）：PROBE 系（caps 语义/二进制拒/eof 分页）+ CACHE-01..06 专组（缓存折存根/no_cache/page_token 不读写缓存——缓存机制断言面，细节见 cache-policy.md §5）。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（probeValidateSql/probeDecodeToken/probeEnvelope/probeLooksBinary/PROBE_MAX_ROWS 等）server.mjs grep 可见+卡存在非空。
+- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（probeValidateSql/probeDecodeToken/probeEnvelope/probeLooksBinary/PROBE_MAX_ROWS 等）mcp/tool-probe.mjs grep 可见+卡存在非空。
 - **SKILL §15.4**：cap 语义的文档权威源——本卡与彼节若漂移，以源码实码为仲裁再同步两文档。
 
 ## 6. 维护规则

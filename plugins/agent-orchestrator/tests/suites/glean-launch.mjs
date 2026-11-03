@@ -37,6 +37,18 @@ const BASE = makeTempRoot({ prefix: "orch-gleanlaunch-" });
 const KIDS = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HOUR = 3600 * 1000;
+
+// ---- T5-a SKILL 键名静态钉（v1.5 W1 T5；B2 cfg 键契约落文档防漂移——键名=最易漂移且承载
+//      行为的字面；长句二分语义不钉防易碎。design §1.5/impl-plan §2.1 T5-a） ----
+{
+  const SKILL_MD = fs.readFileSync(path.join(PLUGIN_DIR, "skills", "agent-orchestrator", "SKILL.md"), "utf8");
+  const t5aHits = SKILL_MD.split("globalTaskProjectDir").length - 1;
+  ck.ok(
+    "T5-a SKILL 键名静态钉：「globalTaskProjectDir」在 SKILL 恰 ≥1（MM-17 B2 键契约句：userConfig 键＞根级 glean.cfg.json 同键+落位二分语义）",
+    t5aHits >= 1,
+    { hits: t5aHits },
+  );
+}
 const readText = (f) => {
   try {
     return fs.readFileSync(f, "utf8");
@@ -397,13 +409,23 @@ try {
     await sleep(200);
   }
 
-  /* ---- G4 桩立即退出非 0/1（黑盒）→ 短冷却 + 锁回退 + stderr ---- */
+  /* ---- G4 桩立即退出非 0/1（黑盒）→ 短冷却 + 锁回退 + stderr ----
+     T1-a 计时腿稳定化（v1.5 W3-M3；波首步 5ms 生命周期探针定性：结算=同进程同步事务三连写
+     （回退→戳→stderr 间隙 0ms），settle 全程空载 ≤27ms、cpu-1 加压 ≤223ms——一过性红死因=
+     极端负载尖峰下秒级 stall 尾部打满 5s 硬窗；until_ms 墙钟窗漂移仅 ms 级（5min 容差）不构成
+     死因。修法选 a 状态可达语义：等待谓词=结算事务完整态（锁回退+短冷却戳双条件），窗值=
+     状态可达上限非计时断言；行为断言面与 stubDelayMs:10 逐字保持，生产文件零触碰） */
   {
     const c = makeCase("g4-early-exit", { lockRaw: LOCK_DONE_OLD });
     const s = startSentinel(c, { stubExit: 2, stubDelayMs: 10 });
-    const launched = await waitFor(() => stubRecords(c).length >= 1, 10000);
-    const restored = await waitFor(() => readText(c.lockFile) === LOCK_DONE_OLD, 5000);
-    await waitFor(() => s.stderr.includes("glean 自动拉起失败"), 5000);
+    // T1-a-3：launch 等待窗 10s→15s（探针加压尾观：饱和启动拖尾 2/12 轮 >20s；纯余量放宽，
+    // 谓词仍=记录在场状态可达）
+    const launched = await waitFor(() => stubRecords(c).length >= 1, 15000);
+    // T1-a-1：状态可达语义（锁回退 done 快照 ∧ 短冷却戳在场=结算事务完整态双条件），
+    // 5s 计时硬窗→15s 状态可达上限（去「依赖墙钟 5s」）
+    const restored = await waitFor(() => readText(c.lockFile) === LOCK_DONE_OLD && stampOf(c)?.kind === "short", 15000);
+    // T1-a-2：stderr 等待窗 5s→15s（同事务第三写，窗对齐）
+    await waitFor(() => s.stderr.includes("glean 自动拉起失败"), 15000);
     const stamp = stampOf(c);
     ck.ok("G4 桩被拉起后立即退出 code=2", launched, { recs: stubRecords(c).length });
     ck.ok("G4 立即退出非 0/1 → 锁回退 done 快照（字节原样）", restored && readText(c.lockFile) === LOCK_DONE_OLD, readText(c.lockFile));
@@ -421,8 +443,24 @@ try {
       s.stderr.includes("glean 自动拉起失败") && s.stderr.includes("early-exit"),
       s.stderr.slice(0, 240),
     );
-    await sleep(2200);
-    ck.ok("G4 失败后短冷却期内不重试（桩恰一次）", stubRecords(c).length === 1, stubRecords(c).length);
+    // T1-a-4：sleep→状态触发 soak——结算完整态为前置，连跨 ≥2 个 poll 周期（poll-sec 1）
+    // 150ms 步进连续采样不重试；记录文件只追加（计数单调），读抖动（rig 侧 I/O，探针加压
+    // 2/12 轮实测）重试读不判红，真重拉（计数增长）仍判红
+    let noRelaunch = true;
+    const soakUntil = Date.now() + 2200;
+    while (Date.now() < soakUntil) {
+      await sleep(150);
+      let n = stubRecords(c).length;
+      for (let i = 0; i < 4 && n !== 1; i++) {
+        await sleep(120);
+        n = stubRecords(c).length;
+      }
+      if (n !== 1) {
+        noRelaunch = false;
+        break;
+      }
+    }
+    ck.ok("G4 失败后短冷却期内不重试（桩恰一次）", noRelaunch, stubRecords(c).length);
     s.kill();
     await sleep(200);
   }

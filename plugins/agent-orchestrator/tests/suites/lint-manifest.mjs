@@ -18,6 +18,13 @@
  *   规则 2 = tests/module-index.md 表行 ≡ suites/*.mjs 文件集（双向全等+无重复）；
  *   规则 3 = run-all.mjs REGISTRY 条目名单 ≡ suites/*.mjs 文件集（双向全等+无重复）。
  *   三条只锁集合全等，套件总数字面数不作门（impl-plan M-5/O6=a 口径）；
+ *   规则 4（v1.5 W3-M2 T13，grill#1 G1-1 裁 a）=注册对账扩域两腿：4a 残渣腿（suites/ 全深度
+ *   非 .mjs 文件=红，白名单=无）+4b 子目录接线腿（每子目录 .mjs 须在同目录聚合入口
+ *   tests/suites/<dir>.mjs 静态 import 闭包内可达，闭包外=红孤儿；聚合口径=run-all 现行
+ *   注册语义：REGISTRY 只挂顶层入口，子目录模块经入口 import 接线）——规则 3 锁顶层双向
+ *   +规则 4 合成 suites/ 全深度双向对账（沿革 l-20261027-df4725/l-20261027-2300d6：
+ *   规则 3 治顶层孤儿，规则 4 治残渣/子目录孤儿；nit-1 扩域=字面量动态 import("…") 形
+ *   亦入闭包，非字面量形仍不入=静态锁口径不变）；
  *   LM-06（v1.3 切分 S1，A-v130-SPLIT-*）——族面锁三腿：SCAN（α 读 API×入口字面共现 /
  *   β 入口字面逃逸网，判定域排除两扫描器本体=β 零自指）+ DEP（mcp 族依赖单向四规则+层映射
  *   表双向全等）+ CAP（行数帽双域：软帽域豁免 2 件触发器钉 / 硬帽域 9+52 族面文件 ≤900）
@@ -201,7 +208,10 @@ const LM05_CARD_ANCHORS = [
   {
     card: "card-result-dir.md",
     targets: [
-      { rel: "mcp/tool-dispatch.mjs", ids: ["dispatchHasResultIndex", "dispatchScanNewResults", "dispatchCaptureOutcome", "DISPATCH_DEFAULT_TIMEOUT_MIN", "ORCH_DISPATCH_BUSY_STALE_MIN"] },
+      // v1.5 W2-A T7 裁 a 二拆：单件 rel 拆模块级（条文 7 新锚登记必须模块级）——
+      // dispatch-core=IO/主流程四锚；DISPATCH_DEFAULT_TIMEOUT_MIN 随角色常量区迁 dispatch-prompt。
+      { rel: "mcp/tool-dispatch/dispatch-core.mjs", ids: ["dispatchHasResultIndex", "dispatchScanNewResults", "dispatchCaptureOutcome", "ORCH_DISPATCH_BUSY_STALE_MIN"] },
+      { rel: "mcp/tool-dispatch/dispatch-prompt.mjs", ids: ["DISPATCH_DEFAULT_TIMEOUT_MIN"] },
       { rel: "hooks/dispatch-runner.mjs", ids: ["writeKilledIndex", "runner_early_fail", "outcome", "timed_out", "exit_code", "killed"] },
     ],
   },
@@ -413,6 +423,72 @@ try {
     lm04Stems.length > 0 && regNames.length > 0 && problems.length === 0, { suites: lm04Stems.length, registry: regNames.length, problems: problems.slice(0, 12) });
 }
 
+// 规则 4（v1.5 W3-M2 T13，grill#1 G1-1 裁 a）：suites 注册对账扩域两腿——既有 readdir :342-344/
+//   规则 1-3 零触碰（impl-plan §6.2），本区只增域不锁总数（字面数不作门口径同规则 1-3）。
+//   import 提取面=「from|import+相对字面量」∪「字面量动态 import("…")」三形态并集（side-effect
+//   import 与 re-export from 皆入闭包；非字面量动态形不入=静态锁口径，现仓 suites/ 零字面量动态
+//   相对导入为既有事实；v1.5 W3-M2 评审 nit-1 顺手修扩域）。
+const LM04_R4_IMPORT_RE = /(?:\bfrom\s+|\bimport\b\s*\(?\s*)["'](\.[^"']+)["']/g;
+{
+  // 全深度文件集（4a/4b 共用收集；域=suites/ 递归全部文件，rules 1-3 顶层 readdir 基建零触碰）
+  const r4Files = [];
+  (function walkR4(d) {
+    let es;
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const ent of es) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) walkR4(p);
+      else r4Files.push(p);
+    }
+  })(LM04_SUITES_DIR);
+  const r4Rel = (p) => path.relative(LM04_SUITES_DIR, p).split("\\").join("/");
+
+  // 腿 4a（残渣腿）：suites/ 全深度非 .mjs 文件=红（白名单=无）
+  const residue = r4Files.filter((p) => !p.endsWith(".mjs")).map(r4Rel).sort();
+  ck.ok("LM-04 规则4a（残渣腿）：suites/ 全深度非 .mjs 文件=0（白名单=无）",
+    r4Files.length > 0 && residue.length === 0, { files: r4Files.length, residue: residue.slice(0, 12) });
+
+  // 腿 4b（子目录接线腿）：每子目录 .mjs 全集 ≡ 同目录聚合入口静态 import 闭包
+  //   闭包=入口 suites/<dir>.mjs 的相对导入（./<dir>/x.mjs 形态）→其 import 的同目录模块
+  //   （./x.mjs 形态）→递归；解析结果落在子目录域外（../ 逃逸/node: 裸名/动态 import）不跟随。
+  const r4Problems = [];
+  const r4Subdirs = [];
+  const r4ClosureStats = {};
+  try {
+    for (const ent of fs.readdirSync(LM04_SUITES_DIR, { withFileTypes: true }))
+      if (ent.isDirectory()) r4Subdirs.push(ent.name);
+  } catch { r4Problems.push("tests/suites/ 不可读"); }
+  r4Subdirs.sort();
+  for (const dir of r4Subdirs) {
+    const dirAbs = path.join(LM04_SUITES_DIR, dir);
+    const members = r4Files.filter((p) => p.startsWith(dirAbs + path.sep) && p.endsWith(".mjs"));
+    const memberKeys = members.map(r4Rel).sort();
+    if (memberKeys.length === 0) { r4Problems.push("tests/suites/" + dir + "/ 无 .mjs 成员（空目录）"); r4ClosureStats[dir] = 0; continue; }
+    const closure = new Set();
+    const queue = [];
+    const admit = (resolved) => {
+      if (!resolved.startsWith(dirAbs + path.sep) || !resolved.endsWith(".mjs")) return;
+      const k = r4Rel(resolved);
+      if (!closure.has(k)) { closure.add(k); queue.push(resolved); }
+    };
+    let entrySrc = "";
+    try { entrySrc = fs.readFileSync(path.join(LM04_SUITES_DIR, dir + ".mjs"), "utf8"); }
+    catch { r4Problems.push("聚合入口缺席/不可读: tests/suites/" + dir + ".mjs"); r4ClosureStats[dir] = memberKeys.length; continue; }
+    for (const m of entrySrc.matchAll(LM04_R4_IMPORT_RE)) admit(path.resolve(LM04_SUITES_DIR, m[1]));
+    while (queue.length) {
+      const p = queue.pop();
+      let modSrc = "";
+      try { modSrc = fs.readFileSync(p, "utf8"); } catch { r4Problems.push(r4Rel(p) + " 不可读"); continue; }
+      for (const m of modSrc.matchAll(LM04_R4_IMPORT_RE)) admit(path.resolve(path.dirname(p), m[1]));
+    }
+    const orphans = memberKeys.filter((k) => !closure.has(k));
+    if (orphans.length) r4Problems.push("tests/suites/" + dir + "/ 闭包外孤儿: " + orphans.join(","));
+    r4ClosureStats[dir] = memberKeys.length;
+  }
+  ck.ok("LM-04 规则4b（子目录接线腿）：每子目录 .mjs 全集 ≡ 同目录聚合入口静态 import 闭包（闭包外孤儿/入口缺席=红）",
+    r4Subdirs.length > 0 && r4Problems.length === 0, { subdirs: r4Subdirs.length, members: r4ClosureStats, problems: r4Problems.slice(0, 12) });
+}
+
 // ---- LM-06：v1.3 切分族面锁三腿+登记全景钉（S1 m-20261101-070724-6958；A-v130-SPLIT-*，
 //      断言文案逐字=split-impl-design §10 总表 / impl-plan-split §2 S1；计划QA R2 M-1 双补随落） ----
 // 机械口径（§2.4）：登记值一律 src.split("\n").length - 1 入册（本仓 .mjs 全尾换行，与 wc -l 等价），
@@ -580,26 +656,44 @@ const lm06Rel = (p) => path.relative(PLUGIN_DIR, p).split("\\").join("/");
   ck.ok("LM-06-DEP 规则④（族隔离）：hooks/bg-sentinel/*.mjs import 相对目标零 mcp/ 路径",
     hooksViolations.length === 0, { violations: hooksViolations.slice(0, 12) });
 
-  // MAP：层映射表 ≡ mcp 族文件集（LAYER_OF 22 键与 readdir(mcp/) 双向全等；键带 .mjs 后缀按 stem 归一比对；
-  //   新模块漏登记=红）
+  // MAP：层映射表 ≡ mcp 族文件集（LAYER_OF 25 键与 readdir(mcp/) 递归 stem 双向全等；键带 .mjs 后缀按 stem 归一比对；
+  //   v1.5 W2-A 起 mcp/ 含子目录族（tool-dispatch 三模块）→递归收集 bare stem（准入规则②：新模块各登记一行，漏登=红）；
+  //   DEP 域（deps builder）维持顶层 22 文件口径不变——子目录族模块不入 DEP 图（bg-sentinel 族规则④先例同构，
+  //   族内接线=「入口 import 枚举只作接线核对」域，横向边白名单不受族内边污染）
+  const mcpAllStems = [];
+  (function walkMcpStems(d) {
+    let es;
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const ent of es) {
+      const p2 = path.join(d, ent.name);
+      if (ent.isDirectory()) walkMcpStems(p2);
+      else if (ent.name.endsWith(".mjs")) mcpAllStems.push(ent.name.replace(/\.mjs$/, ""));
+    }
+  })(path.join(PLUGIN_DIR, "mcp"));
+  mcpAllStems.sort();
   const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x)) && b.every((x) => a.includes(x));
   const layerKeys = Object.keys(LAYER_OF);
   const layerStems = layerKeys.map((k) => k.replace(/\.mjs$/, ""));
-  ck.ok("LM-06-DEP 层映射表≡mcp 族文件集（LAYER_OF 22 键双向全等）", sameSet(layerStems, mcpStems),
-    { missing: mcpStems.filter((s) => !layerStems.includes(s)), extra: layerKeys.filter((k) => !mcpStems.includes(k.replace(/\.mjs$/, ""))) });
+  ck.ok("LM-06-DEP 层映射表≡mcp 族文件集（LAYER_OF 25 键双向全等，含子目录族模块）", sameSet(layerStems, mcpAllStems),
+    { missing: mcpAllStems.filter((s) => !layerStems.includes(s)), extra: layerKeys.filter((k) => !mcpAllStems.includes(k.replace(/\.mjs$/, ""))) });
 }
 
 // ---- LM-06-CAP：行数帽双域（G-帽裁定 a：软帽域豁免 2 件+触发器+200 / 硬帽域全量 ≤900） ----
 const LM06_CAP_SOFT = 900;
 const LM06_CAP_EXEMPT = [
   // 登记值=机械口径行数（§2.4，S1 步 1③ 全量重测定格，与 F-1 wc -l 值 ±0）；触发器=+200 量级（split-design OS-4）
-  // v1.4 W3 增补（EXTRA ③-B）：tool-dispatch 登记值 1428→1646（沙箱态 wc -l 实测，W1 A1/D3 增行+W3 C2-a 注入面随行）；
-  //   二拆另案评估欠账→v1.5 backlog（2026-11-02 W1 触发越线，本版不拆）。
-  { rel: "mcp/tool-dispatch.mjs", lines: 1646, wcSource: "v1.4-W3 实测", note: "八波 W5/WG 施工域；≥1846 即红=二拆另案评估入口（21cba5 形态预案见 split-impl-design §8）；二拆另案评估欠账→v1.5 backlog（2026-11-02 W1 触发越线，本版不拆）" },
+  // v1.5 W2-A（T7 裁 a 二拆+OPEN-E 判则 b=G3-3 不等式判则机械承载）：原 mcp/tool-dispatch.mjs 单件登记
+  //   （v1.3 S1=1428→v1.4 W3=1646）随拆分注销——薄入口 28 行+dispatch-prompt 281+dispatch-model 296 全入帽
+  //   =豁免语义消失；超帽件=dispatch-core（主流程下沉 R1-L3 口径：拆分切面=组装纯区 vs IO 主流程，再下切=
+  //   主流程手术另案评估）→准入即族口径登记、仅登记超帽件（OPEN-E 判则 b）。登记值 1108=拆分搬运+接线终值
+  //   （首测 1106+插件根重锚注记 2 行；G3-3 预填 ≈1078，实值差 +30 如实记台账 §W2-A-1）。
+  { rel: "mcp/tool-dispatch/dispatch-core.mjs", lines: 1108, wcSource: "v1.5-W2A 实测", note: "dispatch IO/主流程模块（组装纯区 vs IO 主流程二拆的 IO 侧承载件；再下切=主流程手术另案，零行为变更 doctrine 红线）；≥1308 即红=再评估入口（LM-06-CAP 同源判则）；沿革=v1.3 S1 单件 1428→v1.4 W3 1646→v1.5 W2-A 拆分后本件 1108 接册（旧单件登记同批注销，沿革由本注记承载）" },
   { rel: "mcp/server-lessons.mjs", lines: 932, wcSource: "F-1.1", note: "lessons 域写意图跨三模块（F-4.2）；≥1132 即红同上" },
   // v1.4 W3 主控裁决①（m-20261102-043942-9c1a）：glean-launch 硬帽域恰线观察件转豁免登记（与 tool-dispatch 同构），
   //   随豁免域出硬帽域（腿 B 跳过豁免 rel）；登记值=990（wc -l 沙箱实测）。
-  { rel: "hooks/bg-sentinel/glean-launch.mjs", lines: 990, wcSource: "v1.4-W3 实测", note: "glean 拉起域（W2 B1/B2/C1 施工域）；≥1190 即红=二拆另案评估入口；二拆另案评估欠账→v1.5 backlog（2026-11-02 W2 B1 合法增量落于恰线观察件触发；与 tool-dispatch 1639 同批 v1.5 评估）" },
+  // v1.5 W2-A T8 评估回写（impl-plan §5.1 步 3；只评估不实施，零代码零断言改动——腿 A 只读 e.lines 不读 note，
+  //   note 改写零红险）：评估完成=留池+理由指针。
+  { rel: "hooks/bg-sentinel/glean-launch.mjs", lines: 990, wcSource: "v1.4-W3 实测", note: "glean 拉起域（W2 B1/B2/C1 施工域）；≥1190 即红=二拆另案评估入口。v1.5 T8 评估完成=留池（2026-11-02 W2-A 现值对拍 990 恰合复核；触发器 ≥1190 未越）：函数地图=组装纯区 buildGleanMessage :718-750（~33 行，占比小）vs IO 主体（tryLaunchGlean :777-978/killGleanTree :562/housekeepGleanLaunch/maybeLaunchGlean+锁/守卫/冷却族）——拆分收益低不具性价比；微波侵蚀趋势=glean 域后续功能波预计继续 +几十行量级，触 ≥1190 按触发器再评估；理由指针=v1.5.0.md §W2-A T8 评估节" },
 ];
 // 硬帽域口径钉（偏差声明）：设计档 §2.3 草案常量系宽面 glob（hooks/*.mjs、tests/suites/*.mjs），
 //   实测会把两件非族面存量拽入域内（hooks/stop-check.mjs=921、tests/suites/glean-launch.mjs=976
@@ -608,7 +702,10 @@ const LM06_CAP_EXEMPT = [
 //   （readdir 动态，新模块自动入域）实现；宽面 glob 草案弃用，偏差随 done 上报主控。
 const LM06_CAP_HARD_FAMILIES = ["hooks/bg-sentinel.mjs", "tests/suites/crv8-memory.mjs", "tests/suites/crv6-resilience.mjs",
   "tests/suites/crv6-statemachine.mjs", "tests/suites/crv2-pack.mjs", "tests/suites/watcher-core.mjs",
-  "tests/suites/sentinel-teardown.mjs"];
+  "tests/suites/sentinel-teardown.mjs",
+  // v1.5 W2-A T7 裁 a：tool-dispatch 族入硬帽域（familyFiles readdir 动态：薄入口+三模块；超帽件
+  // dispatch-core 由豁免登记出域——OPEN-E 判则 b 腿 B 跳过语义与 glean-launch 同构）
+  "mcp/tool-dispatch.mjs"];
 {
   // 腿 A：豁免触发器钉（红=二拆另案评估入口，不拦小步增长）
   const measured = {};
@@ -639,7 +736,7 @@ const LM06_CAP_HARD_FAMILIES = ["hooks/bg-sentinel.mjs", "tests/suites/crv8-memo
     if (v > LM06_CAP_SOFT) hardViolations.push(rel + "=" + v);
     if (rel === "hooks/bg-sentinel/glean-launch.mjs") gleanWatch = v;
   }
-  ck.ok("LM-06-CAP 腿 B（硬帽域≤900）：hooks 族+六套件族实测行数≤900（豁免登记件出域——v1.4 W3 裁① glean-launch 转豁免登记）",
+  ck.ok("LM-06-CAP 腿 B（硬帽域≤900）：hooks 族+六套件族+dispatch 族实测行数≤900（豁免登记件出域——v1.4 W3 裁① glean-launch/v1.5 W2-A dispatch-core 转豁免登记）",
     hardViolations.length === 0, { violations: hardViolations.slice(0, 12), files: hardFiles.size, exempt: [...exemptRels], watch: "glean-launch=" + gleanWatch });
 }
 
@@ -648,8 +745,8 @@ const LM06_CAP_HARD_FAMILIES = ["hooks/bg-sentinel.mjs", "tests/suites/crv8-memo
   const famSrcText = fs.readFileSync(path.join(PLUGIN_DIR, "tests", "harness", "source-family.mjs"), "utf8");
   const famKeys = [...famSrcText.matchAll(/"([^"]+)"\s*:\s*\{\s*modDir:/g)].map((m) => m[1]);
   const expected = [...LM06_SCAN_ENTRIES, ...LM06_CAP_HARD_FAMILIES.filter((k) => !LM06_SCAN_ENTRIES.includes(k))];
-  ck.ok("LM-06 FAMILIES 登记全景：FAMILIES 键集≡8 族",
-    famKeys.length === 8 && expected.every((k) => famKeys.includes(k)) && famKeys.every((k) => expected.includes(k)),
+  ck.ok("LM-06 FAMILIES 登记全景：FAMILIES 键集≡9 族（v1.5 W2-A T7 裁 a：+mcp/tool-dispatch 族）",
+    famKeys.length === 9 && expected.every((k) => famKeys.includes(k)) && famKeys.every((k) => expected.includes(k)),
     { got: famKeys });
 }
 

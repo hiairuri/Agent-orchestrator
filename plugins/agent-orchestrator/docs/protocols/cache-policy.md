@@ -51,7 +51,7 @@
 ## 5. 断言锚
 
 - **probe-caps**：CACHE-01..06 专组——CACHE-01 首探全量/同参折存根（stub 键面预排序断言）、CACHE-02 三动作可缓存+db.query 显式排除、CACHE-03 no_cache 恒全量零残留+schema 增参、CACHE-04 续页不读写缓存（误写被首页存根 prior_hash 当场抓获）——tests/suites/probe-caps.mjs。
-- **LM-05**（lint-manifest，M1-3 注册）：PROBE_CACHE_ACTIONS/PROBE_CACHE_MAX_ENTRIES/probeCacheKey/probeCacheStub 等 server.mjs grep 可见+本文存在非空。
+- **LM-05**（lint-manifest，M1-3 注册）：PROBE_CACHE_ACTIONS/PROBE_CACHE_MAX_ENTRIES/probeCacheKey/probeCacheStub 等 mcp/tool-probe.mjs grep 可见+本文存在非空。
 
 ## 6. 维护规则
 
