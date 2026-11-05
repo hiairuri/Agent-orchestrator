@@ -1,0 +1,10 @@
+.zcode/
+*.log
+node_modules/
+*.tmp
+.mimosa/
+**/.mimosa/
+
+# repo 根 sentinel/=shim 缺省 root(cwd) 拉起时的状态残留（10-23 实验期；正统根在 .zcode/orchestrator/sentinel/）
+/sentinel/
+.mimosa/
