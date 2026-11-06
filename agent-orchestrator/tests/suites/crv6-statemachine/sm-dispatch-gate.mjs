@@ -116,7 +116,7 @@ export async function run(ctx) {
     let all = true;
     for (const [id, st] of NEG) {
       const r = await dispatchNested(id);
-      hits[st] = r.isError === true && r.text.includes("不可派发") && r.text.includes("drafted/dispatched/ready");
+      hits[st] = r.isError === true && r.text.includes("not dispatchable") && r.text.includes("drafted/dispatched/ready");
       all = all && hits[st];
     }
     ck.ok(

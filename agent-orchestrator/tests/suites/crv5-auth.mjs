@@ -94,7 +94,7 @@ try {
   // ---- SCOPE-01：apply 越界门——["src"] 拒 src-evil/evil.js（75232b0 形态回归）；["src/"] 行为一致
   {
     const r1 = await sandboxApplyFlow("m-sc1", { oob: ["src"], files: { "src-evil/evil.js": "evil\n" } });
-    ck.ok("SCOPE-01a oob=[src] 时 src-evil/evil.js 判越界拒合", r1.isError === true && r1.text.includes("越界") && r1.text.includes("src-evil/evil.js"), r1.text.slice(0, 120));
+    ck.ok("SCOPE-01a oob=[src] 时 src-evil/evil.js 判越界拒合", r1.isError === true && r1.text.includes("out-of-scope") && r1.text.includes("src-evil/evil.js"), r1.text.slice(0, 120));
     const r2 = await sandboxApplyFlow("m-sc2", { oob: ["src/"], files: { "src-evil/evil2.js": "evil\n" } });
     ck.ok("SCOPE-01b oob=[src/]（带尾分隔符）与 [src] 行为一致", r2.isError === true && r2.text.includes("src-evil/evil2.js"), r2.text.slice(0, 120));
   }
@@ -158,7 +158,7 @@ try {
     const ok3 = resultText(await s.call("agent_harvest", { mission_id: "m-inj1" }));
     ck.ok("INJ-01e mission_id 定位回归（经板面解析 agent_id）", ok3.ok === true && ok3.mission_id === "m-inj1" && ok3.session_id === `sess_subagent_agent_${AGENT}`, ok3.session_id);
     const e3 = await s.call("agent_harvest", { mission_id: "m-inj2" });
-    ck.ok("INJ-01f 无 agent_id mission 保留既定报错（不误伤）", e3.isError === true && e3.text.includes("无 dispatch.agent_id"), e3.text.slice(0, 100));
+    ck.ok("INJ-01f 无 agent_id mission 保留既定报错（不误伤）", e3.isError === true && e3.text.includes("has no dispatch.agent_id"), e3.text.slice(0, 100));
   }
 
   // ================= 场景 B：AUTH-01..06/08（A3 鉴权波增例） =================
@@ -387,10 +387,10 @@ try {
     ck.ok(
       "AUTH-08a..e 四查负例五连各自 ToolError 且含缺项名（reviewed_by/不存在或未完成/reviewer/互指）",
       n1.isError === true && n1.text.includes("reviewed_by") &&
-        n2.isError === true && n2.text.includes("不存在或未完成") &&
+        n2.isError === true && n2.text.includes("does not exist or is not finished") &&
         n3.isError === true && n3.text.includes("done/closed") &&
         n4.isError === true && n4.text.includes("reviewer") &&
-        n5.isError === true && n5.text.includes("互指"),
+        n5.isError === true && n5.text.includes("does not point back"),
       [n1, n2, n3, n4, n5].map((r) => r.text.slice(0, 60)),
     );
     ck.ok("AUTH-08neg 负例全程板面零改动（status 仍 done、未 closed）", m8neg.status === "done", m8neg.status);

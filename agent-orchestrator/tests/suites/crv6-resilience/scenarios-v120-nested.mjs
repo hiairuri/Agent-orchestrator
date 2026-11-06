@@ -120,14 +120,14 @@ export async function runV120NestedScenarios() {
       ck.ok(
         "NST-02a nested 在飞拒二次组装：dispatched+nested（worker 结果未落板）→ isError，文案含 nested busy 闸" +
           "与恢复指引（板语义在飞=凭据已交付主控）",
-        r1.ok === true && rb.isError === true && /busy 闸（nested）/.test(rb.text) && /drafted/.test(rb.text),
+        r1.ok === true && rb.isError === true && /busy gate \(nested\)/.test(rb.text) && /drafted/.test(rb.text),
         { ok: r1.ok, err: rb.text.slice(0, 140) },
       );
       const rd = await sX.call("dispatch", { mission_id: "m-nst2" }); // 缺省 mode（v1.6 W-p 起=nested）同拒
       ck.ok(
         "NST-02b 分叉按 mission.mode 判非按请求 mode：nested 在飞 mission 用缺省重派同拒" +
           "（v1.6 W-p W10 label 半改写：缺省 mode=nested〔-p parked〕，防绕道双发语义不变；D5 断言体零触）",
-        rd.isError === true && /busy 闸（nested）/.test(rd.text),
+        rd.isError === true && /busy gate \(nested\)/.test(rd.text),
         rd.text.slice(0, 140),
       );
       const rec = await sX.call("board", { action: "upsert", mission: { id: "m-nst2", status: "drafted" } });
@@ -164,7 +164,7 @@ export async function runV120NestedScenarios() {
       ck.ok(
         "NST-03a token 鉴权内嵌：包 CONTRACT token ≠ mission.dispatch.token → isError（陈旧包/异源包" +
           "在组装面即拒——worker report/p2p 闸 expected token 前置一致）",
-        ra.isError === true && /token 鉴权不过/.test(ra.text),
+        ra.isError === true && /token (gate|mismatch)|token.*does not match/.test(ra.text),
         { err: ra.text.slice(0, 140), packed: packed3.token },
       );
       // 03b CONTRACT 缺三行：无 context_pack 的 mission（无 mission.pack.path）→ 显式 pack_path
@@ -177,7 +177,7 @@ export async function runV120NestedScenarios() {
       ck.ok(
         "NST-03b CONTRACT 三行内嵌强制：包缺 [channel]/[worker]/[token] 三行 → isError" +
           "（组装出口不产无契约凭据的 prompt——派发纪律工具面保证 §8.7）",
-        rb.isError === true && /CONTRACT 三行解析失败/.test(rb.text),
+        rb.isError === true && /(contract|three-line|\[channel\])/.test(rb.text),
         rb.text.slice(0, 140),
       );
     } finally {
@@ -208,7 +208,7 @@ export async function runV120NestedScenarios() {
       "NST-04b 触发面②接线：nested 分支内 ensureSentinelFamily() 调用在源（「无哨兵不派发」" +
         "组装出口同探活，M9-1 既有实现复用）+ strictTokens 拒收分支在组装出口在源",
       /if \(dispatchMode === "nested"\) \{[\s\S]*?ensureSentinelFamily\(\);/.test(src) &&
-        /strict-tokens 模式下不接受无派发 token 的组装/.test(src),
+        /not accepted in --strict-tokens mode/.test(src),
       "",
     );
     ck.ok(

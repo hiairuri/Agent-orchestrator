@@ -290,15 +290,15 @@ try {
   // ---- fmtAge 行为矩阵（分界值；poller 无 fmtAge 副本，§0 D1） ----
   const FA_FILES = mods.filter((f) => f.spec.fns.includes("fmtAge"));
   twinCase("TW-FA-01 fmtAge(0)/(0.5) → 刚刚（<1 分界）", FA_FILES,
-    (mod) => [mod.fmtAge(0), mod.fmtAge(0.5)], ["刚刚", "刚刚"]);
+    (mod) => [mod.fmtAge(0), mod.fmtAge(0.5)], ["just now", "just now"]); // v1.6.2 W5 重订=W2 英文 fmtAge 钉值（feed② TW-FA）
   twinCase("TW-FA-02 fmtAge(59) → 59 分钟前（<60 分界）", FA_FILES,
-    (mod) => mod.fmtAge(59), "59 分钟前");
+    (mod) => mod.fmtAge(59), "59 min ago");
   twinCase("TW-FA-03 fmtAge(60) → 1 小时 0 分钟前（≥60 进位分界）", FA_FILES,
-    (mod) => mod.fmtAge(60), "1 小时 0 分钟前");
+    (mod) => mod.fmtAge(60), "1h 0m ago");
   twinCase("TW-FA-04 fmtAge(90) → 1 小时 30 分钟前", FA_FILES,
-    (mod) => mod.fmtAge(90), "1 小时 30 分钟前");
+    (mod) => mod.fmtAge(90), "1h 30m ago");
   twinCase("TW-FA-05 fmtAge(125) → 2 小时 5 分钟前", FA_FILES,
-    (mod) => mod.fmtAge(125), "2 小时 5 分钟前");
+    (mod) => mod.fmtAge(125), "2h 5m ago");
   twinCase("TW-FA-06 fmtAge(null)/(NaN)/(Infinity) → 空串三连", FA_FILES,
     (mod) => [mod.fmtAge(null), mod.fmtAge(NaN), mod.fmtAge(Infinity)], ["", "", ""]);
 

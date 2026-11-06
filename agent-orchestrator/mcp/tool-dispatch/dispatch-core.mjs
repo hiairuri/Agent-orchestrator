@@ -184,12 +184,12 @@ function toolDispatchInner(args) {
   const dispatchMode = args.mode == null || args.mode === "" ? "nested" : String(args.mode);
   if (dispatchMode !== "nested") {
     throw new ToolError(
-      `dispatch mode 非法：${dispatchMode}（enum: nested——headless 通道已 parked at v1.6 W-p，archived: parked/agent-orchestrator/）`,
+      `invalid dispatch mode: ${dispatchMode} (enum: nested - the headless channel is parked, archived: parked/agent-orchestrator/)`,
     );
   }
   const mission = findMission(loadBoard(), missionId);
   if (!mission) {
-    throw new ToolError(`mission 不在板：${missionId}（先 board upsert + context_pack）`);
+    throw new ToolError(`mission not on the board: ${missionId} (run board upsert + context_pack first)`);
   }
   const status = String(mission.status ?? "");
   // v1.3 WG G-a (O13-a): the dispatch gate now accepts ready as well. The
@@ -199,15 +199,15 @@ function toolDispatchInner(args) {
   // semantic conflict; this closes the ready-trap (dispatch gate was the
   // single conflicting point, l-20261027-9908d0 family).
   if (status !== "drafted" && status !== "dispatched" && status !== "ready") {
-    throw new ToolError(`mission 状态 ${status} 不可派发（dispatch 只接受 drafted/dispatched/ready）`);
+    throw new ToolError(`mission status ${status} is not dispatchable (dispatch accepts drafted/dispatched/ready only)`);
   }
   // §1.6 yolo 闸：只读 persona（scout/reviewer）豁免〔v1.6 W3b 起双角色，记忆域 gleaner 件已删〕；worker 类必须登记非空写集。
   const bareRole = dispatchRoleBare(mission.agent_type);
   const scope = Array.isArray(mission.scope_paths) ? mission.scope_paths.filter(Boolean) : [];
   if (!DISPATCH_READONLY_ROLES.has(bareRole) && scope.length === 0) {
     throw new ToolError(
-      "yolo 闸：worker 类 mission 的 scope_paths 为空——嵌套子代理按 scope_paths 审计写面，" +
-        "必须先登记写集 scope_paths（越界可审计），或改走宿主 Agent 通道",
+      "yolo gate: the worker-type mission has empty scope_paths - nested subagents get their writes audited against scope_paths," +
+        "register the write-set scope_paths first (out-of-scope writes are auditable), or use the host Agent channel instead",
     );
   }
   // v1.6 W-p 剥离：headless busy 闸半区（result-dir index 判据+O10=a 超龄豁免）随 -p 通道
@@ -219,22 +219,22 @@ function toolDispatchInner(args) {
   // （dispatched→drafted 合法腿）后重派，或等 worker report 演进状态。
   if (mission.dispatch && mission.dispatch.mode === "nested" && status === "dispatched") {
     throw new ToolError(
-      `busy 闸（nested）：mission ${missionId} 已有 nested 组装凭据在飞（board dispatched、` +
-        "worker 结果未落板），拒二次组装——恢复：首个嵌套 Agent 已死时 " +
-        'board upsert status:"drafted"（dispatched→drafted 合法腿）后重派，或等 worker report',
+      `busy gate (nested): mission ${missionId} already has a nested assembly credential in flight (board dispatched, ` +
+        "the worker result is not on the board yet); second assembly refused - recovery: if the first nested Agent is dead, " +
+        'board upsert status:"drafted" (dispatched->drafted is a legal leg) then re-dispatch, or wait for the worker report',
     );
   }
   const packFile = resolveDispatchPack(mission, args.pack_path);
   if (!packFile) {
     throw new ToolError(
-      `任务包不可读：mission.pack.path / pack_path / ${displayPath(path.join(root, "packs", missionId, "pack.md"))} 三级均未命中`,
+      `task pack unreadable: none of mission.pack.path / pack_path / ${displayPath(path.join(root, "packs", missionId, "pack.md"))} hit`,
     );
   }
   let packText;
   try {
     packText = fs.readFileSync(packFile, "utf8");
   } catch (err) {
-    throw new ToolError(`任务包读取失败：${displayPath(packFile)}（${err && err.message ? err.message : err}）`);
+    throw new ToolError(`task pack read failed: ${displayPath(packFile)} (${err && err.message ? err.message : err})`);
   }
   // v1.6 W3a 回执编号化：CONTRACT 三行解析（下沉件 dispatchParseContract）——
   // worker/channel/token 自包 CONTRACT 解析（回执三元组）；缺三行在派发面即拒
@@ -242,8 +242,8 @@ function toolDispatchInner(args) {
   const contract = dispatchParseContract(packText);
   if (!contract.channel || !contract.worker || !contract.token) {
     throw new ToolError(
-      "包 CONTRACT 三行解析失败：需要 [channel] / [worker] / [token] 三行（启动器不另铸；" +
-        "固定包如 glean-pack 声明「以派发 prompt 尾块为准」时须先在 mission 预铸 dispatch.token）",
+      "pack CONTRACT three-line parse failed: the [channel] / [worker] / [token] lines are required (the launcher mints nothing itself;" +
+        " fixed packs like the glean-pack, whose CONTRACT defers to the dispatch prompt tail block, must have mission.dispatch.token pre-minted)",
     );
   }
   const sandbox = mission.pack && mission.pack.sandbox;
@@ -251,7 +251,7 @@ function toolDispatchInner(args) {
   if (sandbox && sandbox.isolation === "worktree") {
     const sandboxRoot = String(sandbox.root || "");
     if (!sandboxRoot || !fs.existsSync(sandboxRoot)) {
-      throw new ToolError(`沙箱工作区不可用：${sandboxRoot || "(空)"}（worktree 丢失，先 sandbox_discard 重派）`);
+      throw new ToolError(`sandbox workspace unavailable: ${sandboxRoot || "(empty)"} (worktree lost; run sandbox_discard first, then re-dispatch)`);
     }
     cwd = sandboxRoot;
   }
@@ -278,13 +278,13 @@ function toolDispatchInner(args) {
     if (boardToken != null) {
       if (contract.token !== boardToken) {
         throw new ToolError(
-          "组装出口 token 鉴权不过：包 CONTRACT token 与 mission.dispatch.token 不一致" +
-            "（重新 context_pack 铸发后重派，或核对 pack_path 指向陈旧包）",
+          "nested assembly exit token auth failed: the pack CONTRACT token does not match mission.dispatch.token" +
+            " (re-mint via context_pack and re-dispatch, or check whether pack_path points at a stale pack)",
         );
       }
     } else if (strictTokens) {
       throw new ToolError(
-        "组装出口 token 鉴权：--strict-tokens 模式下不接受无派发 token 的组装（先 context_pack 铸发 token 再派发）",
+        "nested assembly exit token auth: calls without a dispatch token are not accepted in --strict-tokens mode (mint the token via context_pack first, then dispatch)",
       );
     }
     // 记账（mode=nested 先于宿主 Agent 存在即板上可见；spawned_by_session=W3 归因锚

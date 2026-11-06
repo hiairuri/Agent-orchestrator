@@ -177,7 +177,7 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       const src = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
       ck.ok("LOCK-04a 结构：owner 文档 wx 写失败重试 3 次", /for \(let wxAttempt = 0; wxAttempt < 3/.test(src), "");
       ck.ok("LOCK-04b 结构：wx 仍失败撤销本次 mkdir（undo our mkdir only）", src.includes("undo our mkdir only"), "");
-      ck.ok("LOCK-03c 结构：撤销分支遵守 deadline 并抛存储忙", /ownerWritten[\s\S]{0,600}存储忙，请重试（root lock 等待超时）/.test(src), "");
+      ck.ok("LOCK-03c 结构：撤销分支遵守 deadline 并抛存储忙", /ownerWritten[\s\S]{0,900}storage busy, please retry \(root lock wait timed out\)/.test(src), "");
       ck.ok("LOCK-03d 结构：release 非己锁跳过删除", src.includes("release skipped (not owner)"), "");
     }
   } finally {
@@ -453,7 +453,7 @@ const resultText = (r) => r.json ?? { _raw: r.text };
         r4.isError !== true && j4.ok === true && j4.worktree_removed === false,
         r4.text.slice(0, 160),
       );
-      ck.ok("ENV-04b 响应 warning 含残留指引（sandbox_discard 强弃/重走评审）", typeof j4.warning === "string" && j4.warning.includes("残留"), j4.warning?.slice(0, 100));
+      ck.ok("ENV-04b 响应 warning 含残留指引（sandbox_discard 强弃/重走评审）", typeof j4.warning === "string" && j4.warning.includes("leftover"), j4.warning?.slice(0, 100));
       ck.ok("ENV-04c applied_at 已落板（V6-35：板事务先于 teardown，merge 不被拖死）", Boolean(sbOf(T4, "m-env4").applied_at) && missionIn(T4, "m-env4").status === "closed", "");
       ck.ok("ENV-04d worktree 目录确仍在（真降级非假成功）", fs.existsSync(wt), "");
       const rd = await s.call("sandbox_discard", { mission_id: "m-env4" }); // 残留可 discard 清理
@@ -486,7 +486,7 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       const r6a = await s.call("sandbox_discard", { mission_id: "m-env6a" });
       ck.ok(
         "ENV-06a discard 撞新鲜 intent → isError 拒绝（apply 在飞互斥），沙箱未被清理",
-        r6a.isError === true && r6a.text.includes("apply 在飞") && fs.existsSync(path.join(T6, "sandboxes", "m-env6a")),
+        r6a.isError === true && r6a.text.includes("apply is in flight") && fs.existsSync(path.join(T6, "sandboxes", "m-env6a")),
         r6a.text.slice(0, 140),
       );
       // ---- ENV-06b：过期 intent → discard 放行（出锁 git 三连回归）
@@ -531,7 +531,7 @@ const resultText = (r) => r.json ?? { _raw: r.text };
       const src6 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
       ck.ok(
         "ENV-06d 结构：真竞态仲裁在源（applied_at 新现 → discard 中止，!p1.sawApplied 守卫 + 「discard 中止」报错）",
-        src6.includes("!p1.sawApplied") && src6.includes("discard 中止：mission 已被并发 apply 收口"),
+        src6.includes("!p1.sawApplied") && src6.includes("discard aborted: the mission was concurrently finalized by apply"),
         "",
       );
     } finally {
@@ -682,7 +682,7 @@ const resultText = (r) => r.json ?? { _raw: r.text };
     });
     ck.ok(
       "G-B-3 清单外 hooks/gb3-evil.js 仍拒（越界文案含双源计数，增补不放宽边界；并集去重后 board 净增补=docs 1 项）",
-      r3.isError === true && r3.text.includes("越界") && r3.text.includes("hooks/gb3-evil.js") && r3.text.includes("board scope_paths 增补 1 项"),
+      r3.isError === true && r3.text.includes("out-of-scope") && r3.text.includes("hooks/gb3-evil.js") && r3.text.includes("board scope_paths additions"),
       r3.text.slice(0, 200),
     );
   } finally {

@@ -109,8 +109,8 @@ export async function scenTrajectory() {
       try {
         const r3 = await s3.call("trajectory", { kind: "short", next: "无基线" });
         ck.ok(
-          "TRAJ-03 短形无全形基线：isError 当场拒（error 含「缺全形基线」）∧ 日志零产生",
-          r3.isError === true && (r3.text ?? "").includes("缺全形基线") &&
+          "TRAJ-03 短形无全形基线：isError 当场拒（error 含「missing the full-form baseline」）∧ 日志零产生",
+          r3.isError === true && (r3.text ?? "").includes("missing the full-form baseline") &&
             !fs.existsSync(path.join(R3, "context", "coord-tail-log.md")),
           { err: r3.text, exists: fs.existsSync(path.join(R3, "context", "coord-tail-log.md")) },
         );
@@ -164,8 +164,8 @@ export async function scenTrajectory() {
       const before6 = readLog();
       const r6 = await call({ kind: "full", project: "x".repeat(950), stage: "s", ruled: "r", next: "n" });
       ck.ok(
-        "TRAJ-06 全形超帽（>900B）：isError 当场拒（error 含「超帽」）∧ 日志逐字节保留（旧静默拒写改善为调用即知）",
-        r6.isError === true && (r6.text ?? "").includes("超帽") && readLog() === before6,
+        "TRAJ-06 全形超帽（>900B）：isError 当场拒（error 含「over cap」）∧ 日志逐字节保留（旧静默拒写改善为调用即知）",
+        r6.isError === true && (r6.text ?? "").includes("over cap") && readLog() === before6,
         { err: (r6.text ?? "").slice(0, 80), unchanged: readLog() === before6 },
       );
     }

@@ -115,9 +115,9 @@ export async function run(ctx) {
       const r = await runKick({ rootDir: root, argv: ["--rollout-dir", rolloutDir], watcherDeps: kickDeps(relay), err: () => {} });
       const sh = shellTextOf(relay);
       const cmds = relay.captured.filter((c) => c.header && c.header[3] === "sendConversationCommandV4");
-      ck.ok("WB-KICK-a1 3 事件→恰一次注入合并：单一 conversation 命令帧；壳=最新事件签名 mission（m-kb3 state=done）+计数行「另有 2 项待处理，详見板」+真实 spool 指针；注入目标=锚会话；壳合规（单行/≤1000/指针形）",
+      ck.ok("WB-KICK-a1 3 事件→恰一次注入合并：单一 conversation 命令帧；壳=最新事件签名 mission（m-kb3 state=done）+计数行「+2 more pending - see the board」+真实 spool 指针；注入目标=锚会话；壳合规（单行/≤1000/指针形）",
         r.action === "drained" && cmds.length === 1 && sh.env && sh.env.sessionId === ANCHOR &&
-        sh.text.startsWith("[orch-watch] mission=m-kb3 state=done") && sh.text.includes("另有 2 项待处理，详見板") &&
+        sh.text.startsWith("[orch-watch] mission=m-kb3 state=done") && sh.text.includes("+2 more pending - see the board") &&
         sh.text.includes("spool/m-kb3/unread/000000000000001-abcdef12.json（路径指针，非正文）") && shellCompliant(sh.text),
         { r, cmds: cmds.length, text: sh.text.slice(0, 160) });
       ck.ok("WB-KICK-a2 成功面清队+认领释放+锚零改写：3 事件文件全移除（队列零 .json 事件）、claim.json 不在（kick 释自己的认领）、coord-session.txt 字节不变（b1 happy 无 b2 无刷新）",
@@ -199,12 +199,12 @@ export async function run(ctx) {
       const relay2 = new MockRelay();
       const r2 = await runKick({ rootDir: root, argv, watcherDeps: kickDeps(relay2), err: () => {} });
       const sh2 = shellTextOf(relay2);
-      ck.ok("WB-KICK-d1 溢出分批（W-E 腿 1）：14 事件 > WAKE_BATCH_MAX(12) → 取最新 12 一次注入（签名=最新 m-kd14、计数行「另有 13 项待处理，详見板」诚实计数含留队余量）、最旧 2 件留队",
+      ck.ok("WB-KICK-d1 溢出分批（W-E 腿 1）：14 事件 > WAKE_BATCH_MAX(12) → 取最新 12 一次注入（签名=最新 m-kd14、计数行「+13 more pending - see the board」诚实计数含留队余量）、最旧 2 件留队",
         r1.drained === 12 && r1.kept === 2 && left1.length === 2 && left1[0].endsWith("m-kd01.json") && left1[1].endsWith("m-kd02.json") &&
-        sh1.text.includes("mission=m-kd14") && sh1.text.includes("另有 13 项待处理，详見板"),
+        sh1.text.includes("mission=m-kd14") && sh1.text.includes("+13 more pending - see the board"),
         { drained: r1.drained, kept: r1.kept, left: left1, text: sh1.text.slice(0, 140) });
       ck.ok("WB-KICK-d2 留队余量经下一轮消费（延迟跳变可达确认腿：哨兵滞留 drain 补脚同形）：二次 kick → 最旧 2 件 drain（签名 m-kd02、另有 1 项）→ 队列空",
-        r2.drained === 2 && r2.kept === 0 && qeventsOf(root).length === 0 && sh2.text.includes("mission=m-kd02") && sh2.text.includes("另有 1 项待处理，详見板"),
+        r2.drained === 2 && r2.kept === 0 && qeventsOf(root).length === 0 && sh2.text.includes("mission=m-kd02") && sh2.text.includes("+1 more pending - see the board"),
         { drained: r2.drained, text: sh2.text.slice(0, 140) });
     }
 
@@ -381,9 +381,9 @@ export async function run(ctx) {
       const echoD = readText(path.join(sd.sentDir, "echo.jsonl")) || "";
       const spawnMarkerD = path.join(sd.sentDir, "wake-kick-last-spawn");
       const firedD = (() => { try { return fs.readdirSync(path.join(sd.sentDir, "fired")).filter((n) => n.startsWith("m-sd--")).length; } catch { return 0; } })();
-      ck.ok("WB-SENT-d1 W-E 腿 2·C1 兜底不破坏（kick spawn 失败/失败遗留回落既有行为）：滞留件+未签收 done 到期 → 哨兵同 tick 双效应——drain 补脚照跑（last-spawn 标记在位）∧ C1 唤醒失败告警照旧开枪（fired m-sd--* 认领+echo 告警+exit 1）",
-        rD.code === 1 && echoD.includes("唤醒失败告警") && firedD >= 1 && fs.existsSync(spawnMarkerD),
-        { code: rD.code, echoHasC1: echoD.includes("唤醒失败告警"), fired: firedD, marker: fs.existsSync(spawnMarkerD) });
+      ck.ok("WB-SENT-d1 W-E 腿 2·C1 兜底不破坏（kick spawn 失败/失败遗留回落既有行为）：滞留件+未签收 done 到期 → 哨兵同 tick 双效应——drain 补脚照跑（last-spawn 标记在位）∧ C1 wake failure alert照旧开枪（fired m-sd--* 认领+echo 告警+exit 1）",
+        rD.code === 1 && echoD.includes("wake failure alert") && firedD >= 1 && fs.existsSync(spawnMarkerD),
+        { code: rD.code, echoHasC1: echoD.includes("wake failure alert"), fired: firedD, marker: fs.existsSync(spawnMarkerD) });
     } finally {
       for (const k of sentKids) { try { k.kill(); } catch { /* 已退 */ } }
     }

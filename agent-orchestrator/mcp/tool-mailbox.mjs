@@ -23,7 +23,7 @@ import { loadLessons, saveLessons } from "./server-lessons.mjs";
  * sentence (the artifacts advice survives). peek never carried details and
  * stays byte-for-byte as before.
  */
-const DETAILS_POINTER_HINT = "details 全文见 details_path（长文应写文件走 artifacts，邮箱只传摘要）";
+const DETAILS_POINTER_HINT = "full details at details_path (long content goes to files via artifacts; the mailbox carries summaries only)";
 
 function presentMailboxDetails(details, spoolPath) {
   const s = String(details ?? "");
@@ -137,8 +137,8 @@ function toolMailbox(args) {
       // terminal result must never be washed back into an in-flight state.
       if (mission.status === "done" || mission.status === "failed" || mission.status === "closed") {
         throw new ToolError(
-          `mission ${missionFilter} 已是终态（${mission.status}）：answer 拒绝执行（终态结果不可洗成在飞）。` +
-            `请改用 board(action="ack", mission_id="${missionFilter}") 暂缓签收，或保持终态直接处置`,
+          `mission ${missionFilter} is already terminal (${mission.status}): answer refused (a terminal result cannot be washed back into running).` +
+            `use board(action="ack", mission_id="${missionFilter}") to defer the ack instead, or keep it terminal and dispose directly`,
         );
       }
       const at = nowIso();
@@ -206,13 +206,13 @@ function toolMailbox(args) {
           summary: truncateStr(answer, 200),
           message:
             answer +
-            "\n\n请按以上答复继续执行任务包中的 TASK/RULES；完成后继续用 " +
+            "\n\nContinue the pack's TASK/RULES per the answer above; when done, keep reporting via " +
             REPORT +
-            " 汇报（kind=milestone/done；done 必带 artifacts 路径）。" +
-            "若该答复引出新阻塞，再次 report(kind=blocked, question=…)。",
+            " (kind=milestone/done; done requires artifact paths)." +
+            "if the answer raises a new blocker, report(kind=blocked, question=...) again.",
         },
         note:
-          "运行中=steer；已终态=后台恢复续聊；跨会话/无 agentId=用 context_pack 重建后重新派发",
+          "running = steer; terminal = resume the chat in the background; cross-session/no agentId = rebuild with context_pack and re-dispatch",
       };
     });
   }

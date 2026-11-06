@@ -275,7 +275,7 @@ function markHint(rootDir) {
 
 function sentinelHintText() {
   const p = SENTINEL_SCRIPT.split(path.sep).join("/");
-  return `派发完成 → 仅当无存活哨兵家族时后台拉起哨兵：Bash(command="node ${p} --once", run_in_background=true) 连发 3 次（防完成通知丢失的错峰冗余）；家族已在岗（standby 亦在岗）勿连发——新派发由待命实例自动接管。全部签收后转待命静默值守（常态 0 通知）；未签收分级告警阈值与补员规则见 SKILL 第 11 章，健康查 board list 顶层 sentinel_health。`;
+  return `After a dispatch completes -> raise a background sentinel only when no live sentinel family exists: Bash(command="node ${p} --once", run_in_background=true) fired 3 times (staggered redundancy against lost completion notices); if the family is already on duty (standby counts as on duty) do not re-fire - new dispatches are taken over by the standby instances automatically. After everything is acked it goes standby for silent duty (normally zero notifications); graded unsigned-off alert thresholds and replenish rules per the orchestration manual; check board list top-level sentinel_health for health.`;
 }
 
 /**
@@ -317,7 +317,7 @@ function contractWarn(prompt, rootDir) {
     const channel = ch ? String(ch[1]) : "";
     const token = tk ? String(tk[1]) : "";
     if (!token) {
-      return `派发契约头缺 [token] 行（channel=${channel || "?"}）：worker 上报会被拒收，请补 context_pack 返回的 token。`;
+      return `dispatch contract head missing the [token] line (channel=${channel || "?"}): the worker\'s report will be rejected; include the token returned by context_pack.`;
     }
     let board = null;
     try {
@@ -336,15 +336,15 @@ function contractWarn(prompt, rootDir) {
         m.status !== "closed",
     );
     if (!hit) {
-      return `派发契约头未匹配任何在册 mission（token=${token} 未登记或已 closed）：worker 的 report 将被 isError 拒收。请先 context_pack 建 mission 记 dispatch，或核对 token 后再派发。`;
+      return `dispatch contract head matched no registered mission (token=${token} unregistered or already closed): the worker\'s report will be rejected with isError. Run context_pack to create the mission and record the dispatch first, or verify the token before dispatching.`;
     }
     if (channel && String(hit.id) !== channel) {
-      return `派发契约头不匹配：token=${token} 属于 mission ${hit.id}，而 [channel] 写的是 ${channel}——worker 的 report 会对不上频道，请修正后重发。`;
+      return `dispatch contract head mismatch: token=${token} belongs to mission ${hit.id}, but [channel] says ${channel} - the worker\'s report would miss the channel; fix and resend.`;
     }
     // v0.5 (C4): token 在册但 prompt 无 [channel] 行——旧包重派或新建漏登记，
     // 不再静默通过；追加一句提醒（DESIGN §7.4 逐字），区分旧 mission 与新 mission。
     if (!channel) {
-      return `该 token 属 mission ${hit.id}——若这是新 mission 请先 context_pack 建 mission 记新 token`;
+      return `this token belongs to mission ${hit.id} - if this is a new mission, run context_pack first to create it and record a new token`;
     }
     return "";
   } catch {
@@ -354,9 +354,9 @@ function contractWarn(prompt, rootDir) {
 
 function longTaskWhy(ti) {
   const prompt = typeof ti.prompt === "string" ? ti.prompt : "";
-  if (CONTRACT_HEAD.test(prompt)) return "含派发契约头 [channel]";
+  if (CONTRACT_HEAD.test(prompt)) return "carrying a dispatch contract head ([channel])";
   if (prompt.length >= MIN_PROMPT_CHARS) {
-    return `prompt ${prompt.length} 字符 ≥ ${MIN_PROMPT_CHARS}`;
+    return `prompt ${prompt.length} chars >= ${MIN_PROMPT_CHARS}`;
   }
   return null;
 }
@@ -369,8 +369,8 @@ function emitContractAsk(contractMsg) {
         hookEventName: "PreToolUse",
         permissionDecision: "ask",
         permissionDecisionReason:
-          "bg-gate：派发契约校验未通过——" + contractMsg +
-          " 请核对 context_pack 返回的 [channel]/[token] 后确认或修正重发。",
+          "bg-gate: dispatch contract check failed - " + contractMsg +
+          " verify the [channel]/[token] returned by context_pack, then confirm or fix and resend.",
       },
     }),
   );
@@ -405,9 +405,9 @@ function main() {
   // v1.1.1 (W22): 文案追加解析根的 board.json 路径（cwd 漂移排障；既有子串断言不破）。
   const contractSkip =
     !contractMsg && boardUnreadable
-      ? "契约校验跳过：板不可读（fail-open），本次派发未做契约核验。（" +
+      ? "contract check skipped: board unreadable (fail-open), no contract verification this dispatch. (" +
         path.join(rootDir, "board.json") +
-        "）"
+        ")"
       : "";
 
   if (policy === "off") {
@@ -493,7 +493,7 @@ function main() {
           hookEventName: "PreToolUse",
           permissionDecision: "ask",
           permissionDecisionReason:
-            `bg-gate：前台子代理派发疑似长任务（${why || "含派发契约头"}）。后台运行可避免占用主控回合并被用户消息连带取消；短任务可直接放行。` +
+            `bg-gate: this foreground subagent dispatch looks like a long task (${why || "dispatch contract head present"}). Running in the background avoids hogging the coordinator turn and being cancelled along with it by a user message; short tasks can proceed directly.` +
             contractSuffix,
           ...(sentinelSuffix ? { additionalContext: sentinelSuffix } : {}),
         },
@@ -509,8 +509,8 @@ function main() {
         permissionDecision: "allow",
         permissionDecisionReason: "bg-gate: remind",
         additionalContext:
-          "[agent-orchestrator] 该前台子代理派发疑似长任务。前台运行占住主控回合，且用户一条消息会取消" +
-          "整回合并连带取消子代理；长任务建议 run_in_background=true。短任务可直接放行。" +
+          "[agent-orchestrator] this foreground subagent dispatch looks like a long task. Foreground runs hold the coordinator turn, and one user message cancels" +
+          "the whole turn and the subagent with it; for long tasks prefer run_in_background=true. Short tasks can proceed directly." +
           contractSuffix +
           sentinelSuffix,
       },
@@ -530,7 +530,7 @@ try {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
           permissionDecisionReason: "bg-gate: fail-open",
-          additionalContext: "[agent-orchestrator] 契约校验跳过：bg-gate 内部异常（fail-open），本次检查未执行。",
+          additionalContext: "[agent-orchestrator] contract check skipped: bg-gate internal error (fail-open); this check did not run.",
         },
       }),
     );

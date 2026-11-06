@@ -1,46 +1,45 @@
-# 契约卡① sentinel/ 目录族（11 文件，A-E 五组）
+# Contract card (1): the sentinel/ directory family (11 files, five groups A-E)
 
-> **行号声明（卡头）**：本文全部行号系 **2026-10-28 总装时点实测**（grep + 实码逐行核对，worker v12-m11，plugin v1.1.2：bg-sentinel.mjs 2517 行 / server.mjs 10657 行 / session-start.mjs 449 行 / bg-gate.mjs 526 行）。行号**不作跨版引用**；跨版定位以函数名/文件名锚为准（l-20261022-6a14d6）。
+> **Line-number declaration (card head)**: all line numbers in this document were measured at assembly time (grep + line-by-line source verification). Line numbers are **not referenced across versions**; cross-version locating relies on function/file-name anchors (l-20261022-6a14d6).
 >
-> - 归属模块：hooks/bg-sentinel.mjs（直至型哨兵入口）＋消费端 hooks/{session-start,bg-gate,wake-kick}、watcher/、mcp/server.mjs 入口+mcp/ 模块族
-> - 互指：行→职责导航地图=`card-bg-sentinel-map.md`（两卡分工：彼卡管「行→职责」，本卡管「文件→契约」——互指不合并）
-> - 脆度双轴评级：**面广度=第一梯队**（10 文件 × 6 进程读写 × 跨进程时钟判死）；**后果重度=第一梯队（并列卡③）**（失效面横跨唤醒链/告警链/盯守链，但单文件失效多可自愈或降级，无 root.txt 型"全体失明"全局后果）
-> - 历史事故回链：锚劫持 2026-10-25 sess_7ac10f4b（-p 探针抢锚，W-A0 修复）；EXP10-findings R4（锚缺失盲取→b2 自愈劫持，G5 修复）；EXP10-findings R6（sess_subagent 前缀劫持，G14 修复）；V7-04（板不可读误报三连枪，观测型隔离）；l-20261019-d38f65（外部写者踩坑族）
-> - 断言锚总表：见文末 §5（含断言裸区实测标注）
+> - Home module: hooks/bg-sentinel.mjs (the until-type sentinel entry) + the consumers hooks/{session-start,bg-gate,wake-kick}, watcher/, and the mcp/server.mjs entry + mcp/ module family
+> - Cross-reference: the line->duty navigation map = `card-bg-sentinel-map.md` (the two cards' division: that card governs "line -> duty", this card governs "file -> contract" - cross-referenced, not merged)
+> - Brittleness dual-axis rating: **surface breadth = top tier** (10 files x 6 processes reading/writing x cross-process clock death judgments); **consequence severity = top tier (tied with the root-txt card)** (failure faces span the wake/alarm/watch chains, but a single-file failure mostly self-heals or degrades - no root.txt-style "everyone blind" global consequence)
+> - Assertion anchor master table: see §5 at the end (with bare-zone notes)
 
-**失效语义三分类记法**：`fail-loud`（显式报错/告警，行为可见）／`自愈`（自动恢复到正确态）／`静默降级`（按安全缺省继续，不留痕或留痕有限）。
+**Invalidity semantics, three classes of notation**: `fail-loud` (explicit error/alarm, behavior visible) / `self-healing` (automatically restores to the correct state) / `silent degradation` (continues on the safe default, no or limited traces).
 
 ---
 
-## 导读
+## Reading guide
 
-| 组/节 | 内容 | 速查锚 |
+| Group/section | Content | Quick anchor |
 |---|---|---|
-| §0 | sentinel/ 目录面+卡外邻接件+W-p parked 计数注记 | bg-sentinel 入口启动段（mkdirSync recursive） |
-| A 组 | 哨兵存活面：槽位族/teardown/cfg 三件 | `claimSlot`/`touchSlot`（hooks/bg-sentinel/family.mjs）；`writeSentinelCfg`（mcp/server-boot.mjs） |
-| B 组 | 告警与回声面：fired/quarantine/echo 三件 | `claimShots`（hooks/bg-sentinel/fired.mjs）；`appendEcho`（hooks/bg-sentinel/echo.mjs） |
-| C 组 | 唤醒锚对 coord-session/coord-workspace+锚劫持纵深防线（补记） | `publishWakeAnchor`（hooks/session-start.mjs） |
-| D 组 | 信号与状态面：watcher-signals（D1）+glean-launch-state（D2 parked） | `watcherCoverage`（hooks/bg-sentinel/signals.mjs） |
-| E 组 | 派发拥塞降级面（E1，v1.6 W-p parked 存档） | 恢复=parked/agent-orchestrator/README 指引 |
-| §5 | 断言锚总表（逐文件+裸区结论列） | sentinel-teardown/watcher-core/twin-lock 套件 |
+| §0 | the sentinel/ directory face + out-of-card neighbors + the parked count notes | the bg-sentinel entry startup section (mkdirSync recursive) |
+| Group A | sentinel liveness face: the slot family / teardown / cfg trio | `claimSlot`/`touchSlot` (hooks/bg-sentinel/family.mjs); `writeSentinelCfg` (mcp/server-boot.mjs) |
+| Group B | alarm and echo face: fired/quarantine/echo trio | `claimShots` (hooks/bg-sentinel/fired.mjs); `appendEcho` (hooks/bg-sentinel/echo.mjs) |
+| Group C | the wake anchor pair coord-session/coord-workspace + the anchor-hijack defense-in-depth (addendum) | `publishWakeAnchor` (hooks/session-start.mjs) |
+| Group D | signal and state face: watcher-signals (D1) + glean-launch-state (D2, parked) | `watcherCoverage` (hooks/bg-sentinel/signals.mjs) |
+| Group E | dispatch congestion degradation face (E1, parked archive) | recovery = the parked/agent-orchestrator/README guide |
+| §5 | assertion anchor master table (per file + bare-zone conclusion column) | sentinel-teardown/watcher-core/twin-lock suites |
 
-watcher 客户端协议面归 `card-watcher.md`（职责互换见其 §4）。
+The watcher client protocol face belongs to `card-watcher.md` (duty swap: its §4).
 
-## 0. 目录面与卡外邻接件
+## 0. Directory face and out-of-card neighbors
 
-`<存储根>/sentinel/` 目录由 bg-sentinel 启动时 `mkdirSync(recursive)` 创建（hooks/bg-sentinel.mjs 入口启动段）；server 恒不创建该目录（G5 filler 仅在目录已存在时补写 coord-workspace.txt，详 C2 写方③——保 sentinel_health `available` 信号语义=l0 V13）。
+The `<storage root>/sentinel/` directory is created by bg-sentinel at startup with `mkdirSync(recursive)` (the hooks/bg-sentinel.mjs entry startup section); the server never creates it (the G5 filler only backfills coord-workspace.txt when the directory already exists - detail C2 writer (3); this preserves the sentinel_health `available` signal semantics = l0 V13).
 
-本卡 11 文件族（DP2a R-5 计数实测维持；v1.3 W5 增 E1 一件，2026-11-01；**v1.6 W-p 起 D2/E1 两件随 -p 通道归档 parked/agent-orchestrator/=历史语义**，详见各节注记与 §5 表，其余九件+哨兵本体零触保留）——A-E 五组逐文件见下（`sentinel.cfg.json` 注：在存储根**本级**，不在 sentinel/ 内，随 A 组收录）。
+This card's 11-file family (**D2/E1 moved to parked/agent-orchestrator/ with the -p channel = historical semantics**; see each section's notes and the §5 table; the other nine files + the sentinel body stay zero-touch) - the five groups A-E, file by file, below (`sentinel.cfg.json` note: it sits at the storage root **itself**, not inside sentinel/, cataloged with group A).
 
-**卡外邻接件**（实测同目录在册、不属本卡协议面，仅注记防误认）：
-- `wake-kick-alerts/`＋`wake-kick-last-spawn`——hooks/wake-kick.mjs 告警去重戳（L237 wx 标记）
-- `watcher-heartbeat`——watcher/watcher.mjs 60s 心跳自证（L166，bg-sentinel 反向监控消费面）
-- `sentinel.lock`（存储根本级，legacy ≤0.3.1）——bg-gate L235 升级窗口内仍认（freshHeartbeat）
-- `.mimosa`——外部工具残留，非本插件写面
+**Out-of-card neighbors** (measured present in the same directory, not part of this card's protocol face, noted only to prevent misreading):
+- `wake-kick-alerts/` + `wake-kick-last-spawn` - hooks/wake-kick.mjs alert de-duplication stamps
+- `watcher-heartbeat` - watcher/watcher.mjs 60s heartbeat self-attestation (consumed by bg-sentinel's reverse monitoring)
+- `sentinel.lock` (storage root level, legacy <=0.3.1) - still honored inside the bg-gate upgrade window (freshHeartbeat)
+- `.mimosa` - external tool residue, not this plugin's write face
 
 ---
 
-## A 组·哨兵存活面（槽位/轮换/配置）
+## Group A - sentinel liveness face (slots/rotation/config)
 
 ### A1 `instance-<k>.json`（k=0..family_size-1）
 
@@ -79,7 +78,7 @@ watcher 客户端协议面归 `card-watcher.md`（职责互换见其 §4）。
 
 ---
 
-## B 组·告警与回声面
+## Group B - alarm and echo face
 
 ### B1 `fired/<key>--<category>--<ms>.json`
 
@@ -110,9 +109,9 @@ watcher 客户端协议面归 `card-watcher.md`（职责互换见其 §4）。
 
 ---
 
-## C 组·唤醒锚对（P1 修复所在面；W4-M4-1 前置素材）
+## Group C - the wake anchor pair (the P1-fix face)
 
-> 本组=成对锚（session+workspace 两文件，同源同刻发布保互信根一致）；已修面坐标以 2026-10-28 实测口径写入（回归腿描述，已修面不重修）；终裁与防线纵深见下方 C 组补记。
+> This group = the paired anchors (session + workspace, two files published by the same source at the same moment to keep the trust root consistent); the fixed-face coordinates are written per the measured accounting (regression-leg descriptions; fixed faces are not re-fixed); the final rulings and defense-in-depth are in the group C addendum below.
 
 ### C1 `coord-session.txt`
 
@@ -134,21 +133,21 @@ watcher 客户端协议面归 `card-watcher.md`（职责互换见其 §4）。
 
 ---
 
-### C 组补记（M4-1 分支 B · 2026-10-28）：P1 判别闸不落，两道兜底升格为正式防线
+### Group C addendum - the P1 discrimination gate did not land; the two fallbacks are promoted to formal defenses
 
-> **分支终裁（M0-2 findings 消费完毕）**：判别面三证（env 注入点/hook input 字段构造/transcript 形态）实测**三证皆空**——CLI 无 -p 特征变量注入点；hook input 字段集由单一构造器产出（两表面同构，值差异仅旗标派生量）；`transcript_path` 恒为 temp 合成件。→ **O4=b 终裁：不落判别闸**；两道消费端兜底自本补记起为**正式防线**（非临时缓解），与写面三重守卫（闸1 env／闸2 前缀／消费端前缀忽略）共同构成锚劫持纵深防御。三证方法与原始证据＝`designs/agent-orchestrator-v1.2-planning/dp2c/p1-discrimination-findings.md`（判定矩阵/三证/活体复现分节）。本节行号同卡头声明口径（2026-10-28 时点实测，不作跨版引用）。
+> **Branch final ruling**: the discrimination face's three proofs (env injection point / hook input field construction / transcript shape) all measured **empty** - the CLI has no -p characteristic-variable injection point; the hook input field set is produced by a single constructor (the two surfaces isomorphic, value differences only flag-derived); `transcript_path` is always a temp synthetic file. -> **Final ruling: no discrimination gate lands**; the two consumer-side fallbacks are **formal defenses** from this addendum onward (not temporary mitigations), forming the anchor-hijack defense-in-depth together with the write-side triple guards (gate 1 env / gate 2 prefix / consumer-side prefix ignore). The three-proof method and original evidence = `designs/agent-orchestrator-v1.2-planning/dp2c/p1-discrimination-findings.md` (the ruling matrix / three proofs / live reproduction sections). This section's line numbers follow the card-head declaration accounting (not referenced across versions).
 >
-> **判别面负面结论（防误用，钉死）**：会话 id 前缀（`session_*` vs `sess_*`）**不可作判别闸**——前缀语义=派生面（桌面 app-server vs CLI 生成）而非交互性，且历史已漂移（v0.10→现状前缀归属互换，findings §4-FA）。落闸将误杀终端 TUI 主控（唤醒链断）；「闸2 扩展为前缀过滤」类捷径同此否证。后续判别闸提案须先推翻该实测再议。
+> **The discrimination face's negative conclusion (pinned, to prevent misuse)**: session id prefixes (`session_*` vs `sess_*`) **must not be a discrimination gate** - the prefix semantics mark the derivation face (desktop app-server vs CLI generation), not interactivity, and the prefixes have drifted historically. A gate would mis-kill terminal TUI coordinators (breaking the wake chain); shortcuts like "extend gate 2 into prefix filtering" are refuted the same way. Any future discrimination-gate proposal must first overturn this measurement.
 
-**防线一·消费端字节校验（hooks/wake-kick.mjs；kick 净效果=「锚零改写、绝不认新会话」）**：注入前对 `coord-session.txt`＋`watcher-signals.jsonl` 取字节快照（`guardAnchor`/`guardSignals`）；注入后逐文件重读比对，字节被改（=watcher 注入链内 b2 刷新锚发生）即**原子还原快照**（快照缺失→还原为缺失）并按失败处置——事件留队＋`anchor-rewritten` 告警。signals 同款还原=kick 瞬时 D1/D2 信号不落共享面（防哨兵 W6 消费面把 kick 重试误读为「watcher 在岗」而静默 C1 兜底告警）。失效语义：劫持在注入窗内即时还原＋告警可见（`自愈`＋`fail-loud`），兜住 W-A0 残留面（手工裸 -p 会话抢锚）最后一道闸。
+**Defense 1 - consumer-side byte verification (hooks/wake-kick.mjs; the kick's net effect = "the anchor is never rewritten, a new session is never recognized")**: before injection, take byte snapshots of `coord-session.txt` + `watcher-signals.jsonl` (`guardAnchor`/`guardSignals`); after injection, re-read and compare each file - if bytes changed (= the b2 anchor refresh fired inside the watcher injection chain), **atomically restore the snapshot** (missing snapshot -> restore to missing) and handle as a failure - the event stays queued + an `anchor-rewritten` alarm. The signals-side restoration is the same: the kick's transient D1/D2 signals never land on the shared face (preventing the sentinel's W6 consumer from misreading kick retries as "watcher on duty" and silently falling to the C1 backstop alarm). Invalidity semantics: hijacking inside the injection window is restored immediately + the alarm is visible (`self-healing` + `fail-loud`) - the last gate covering the residual face (manual bare -p sessions grabbing the anchor).
 
-**防线二·活体回读刷新（watcher/inject.mjs C11 节；b2 stale 目标自愈面）**：b1 活体目标=零重写；b2 stale（死路）目标→以 createSession 应答回读活体会话 id（`resolveLiveSessionId`；应答无 sessionId 字段→只建会话不刷新，OPEN-10.4；回读缺省窗 `RESP_TIMEOUT_MS=25000` 超窗不刷新）**tmp+rename 原子刷新** coord-session.txt。刷新过四重闸（`workspaceVerified`，任一不过即保持原锚＋`b2-refresh-blocked:*` warnings 落告警面）：①子代理形状拒绝（subagent-session-target）；②无工作区锚拒绝（no-workspace-anchor）；③应答工作区与锚不一致拒绝（response-workspace-mismatch）；④本次桥工作区与锚不一致拒绝（bridge-workspace-mismatch）；回读活体 id 仍为子代理形状绝不写锚（与 G14 写锚过滤/G4-04 工作区守卫并列，任一不过即拦截）；子代理目标在入口即拒（不建桥不发帧不刷新锚）。best-effort 永不 fatal（`自愈`）。
+**Defense 2 - live read-back refresh (watcher/inject.mjs section C11; the b2 stale-target self-healing face)**: a b1 live target = zero rewrite; a b2 stale (dead-end) target -> read back the live session id from the createSession answer (`resolveLiveSessionId`; an answer without a sessionId field -> create the session only, no refresh; a read-back default window `RESP_TIMEOUT_MS=25000`, no refresh past the window) - **tmp+rename atomic refresh** of coord-session.txt. The refresh passes four gates (`workspaceVerified`; failing any keeps the original anchor + `b2-refresh-blocked:*` warnings onto the alarm face): (1) subagent-shape rejection (subagent-session-target); (2) no workspace anchor rejection (no-workspace-anchor); (3) answer workspace vs anchor mismatch rejection (response-workspace-mismatch); (4) this bridge's workspace vs anchor mismatch rejection (bridge-workspace-mismatch); a read-back live id still in subagent shape never writes the anchor; subagent targets are rejected at the entrance (no bridge, no frames, no anchor refresh). best-effort, never fatal (`self-healing`).
 
-**防线分工与互斥语义**：防线一保「锚被劫持→kick 注入窗内还原＋告警」（向后还原），防线二保「锚指向死会话→常规唤醒链内自动追活」（向前刷新），方向相反互补成环。**kick 复活路径内 b2 刷新被显式禁用**（wake-kick 注释 L27-32「b2 自愈禁用=锚劫持防线（硬要求）」）：kick 窗内若 b2 刷新锚发生即被防线一还原并按失败处置——该互斥系设计意图，非竞争缺陷。
+**Defense division and mutual-exclusion semantics**: Defense 1 guarantees "anchor hijacked -> restored inside the kick injection window + alarmed" (restoring backward); Defense 2 guarantees "anchor points to a dead session -> auto re-tracking of the live session within the regular wake chain" (refreshing forward) - opposite directions, complementary into a loop. **The b2 refresh is explicitly disabled inside the kick revival path** (per the wake-kick comment "b2 self-heal disabled = anchor-hijack defense (hard requirement)"): if a b2 anchor refresh fires inside the kick window, Defense 1 restores it and handles it as a failure - this mutual exclusion is design intent, not a race defect.
 
 ---
 
-## D 组·信号与状态面
+## Group D - signal and state face
 
 ### D1 `watcher-signals.jsonl`
 
@@ -159,34 +158,34 @@ watcher 客户端协议面归 `card-watcher.md`（职责互换见其 §4）。
 | **字段** | 行 schema（§9.3 补全）：`at:ISO8601`／`cls:"D1"\|"D2"\|"D3"\|"kicked"`（D2=瞬时重试中仍在岗；D1/D3/kicked=终态 standby）／`mission:string\|null`／`reason:string`（redact 脱敏）。JSONL，无 schema 校验 |
 | **失效语义** | watcher 未运行=文件缺失=无信号走既有兜底（`静默降级`，设计内）；读失败/坏行/无有效条目 → 不覆盖走兜底（`静默降级`，绝不因信号面故障哑火或误哑）；信号新鲜刻度 TTL（默认 10min，cfg watcher_signal_ttl_min）过期 → 兜底；C2 stall/C3 crash 为 watcher 事件中继盲区，哨兵无条件保留永不静默（§15 裁决） |
 
-### D2 `glean-launch-state.json`〔v1.6 W-p parked 注记：本节所述归敛自动拉起面（写方/读方/字段三行——glean-launch.mjs 全模块）随 -p 通道迁 parked/agent-orchestrator/，文件面退役为历史语义；哨兵本体与其余 sentinel/ 文件零触保留。LM-05 锚行随迁出删除（恢复=parked README 指引+行回植）〕
+### D2 `glean-launch-state.json` [parked note: the gleaning auto-launch face described here (the writer/reader/field rows - the whole glean-launch.mjs module) moved to parked/agent-orchestrator/ with the -p channel; the file face is retired to historical semantics; the sentinel body and the other sentinel/ files stay zero-touch. The LM-05 anchor row was removed with the migration (recovery = the parked README guide + replanting the row)]
 
 ---
 
-## E 组·派发拥塞降级面（server 侧；v1.3 W5 F-C8 新增）
+## Group E - dispatch congestion degradation face (server side)
 
-### E1 `dispatch-congestion.json`〔v1.6 W-p parked：随 -p 通道迁 parked/agent-orchestrator/，本节=历史语义存档〕
+### E1 `dispatch-congestion.json` [parked: moved to parked/agent-orchestrator/ with the -p channel; this section = historical-semantics archive]
 
-headless 播种拥塞降级戳域（v1.3 W5，mcp/tool-dispatch.mjs 写/读双侧）：headless 派发失败回执命中拥塞白名单正则（`/1305|429|overloaded|rate.?limit/i`）且播种对在场时写戳 `{providerId/modelId: untilMs}`（TTL 30min；读时懒清除；首选播种对在戳→跳另一源候选，全部在戳→照旧首选+`congestion_skipped_all` 警示；自动重派不做=N-3 红线）。锚清单：`ORCH_DISPATCH_CONGESTION_TTL_MIN`/`ORCH_DISPATCH_CONGESTION_OFF`/`congestion_skipped[]`/`downgraded_to`/断言组 crv6-resilience CG 十臂 A-v0130-W5-CG-01..10+DS-09——全档细则随 -p 通道退役迁 parked（恢复=parked/agent-orchestrator/README 指引）。**server 恒不创建 sentinel/ 目录**（§0 不变量、l0 V13）：目录缺席=写戳静默跳过；原子写。
+The headless seeding congestion degradation stamp domain (written/read on both sides by mcp/tool-dispatch.mjs): a headless dispatch failure receipt hitting the congestion allowlist regex (`/1305|429|overloaded|rate.?limit/i`) with the seeding pair present writes the stamp `{providerId/modelId: untilMs}` (TTL 30min; lazily cleared on read; the preferred seeding pair stamped -> skip to the other-source candidate, all stamped -> keep the preferred + a `congestion_skipped_all` warning; no auto re-dispatch = the N-3 red line). Anchor list: `ORCH_DISPATCH_CONGESTION_TTL_MIN`/`ORCH_DISPATCH_CONGESTION_OFF`/`congestion_skipped[]`/`downgraded_to`/the assertion group crv6-resilience CG ten arms A-v0130-W5-CG-01..10 + DS-09 - the full details moved to parked with the -p channel (recovery = the parked/agent-orchestrator/README guide). **The server never creates the sentinel/ directory** (the §0 invariant, l0 V13): directory absent = the stamp write silently skips; atomic write.
 
 ---
 
-## §5 断言锚总表（含裸区实测标注）
+## §5 Assertion anchor master table (with bare-zone notes)
 
-| 文件 | 断言面（实测） | 裸区结论 |
+| File | Assertion face (measured) | Bare-zone conclusion |
 |---|---|---|
-| instance-<k>.json | sentinel-teardown T1/T2/T5/T6/WS-9d（state 三态/on_duty/took_over/root/心跳）；root-contract V6-56 root 字段；l0 V13（缺 sentinel/ → available:false）；server sentinelHealth 形状经 WS-9d | **非裸区**（prev 字段无直接断言=残余注记） |
-| family-teardown.json | sentinel-teardown T3（T3d 标记随最后赢家更新） | **非裸区** |
-| sentinel.cfg.json | sentinel-teardown T11（A-v090-CLN-05 全 sparse 形状+零漂移对拍，tests/assertions/v0.9.x.md §16 在册）；crv5-auth CFG 组联动 | **非裸区** |
-| fired/ | sentinel-teardown T2d/T5/T10（文件名协议+计数+前缀过滤） | **裸区（字段级）**：条目 8 字段零 JSON.parse 断言 |
-| quarantine.json | sentinel-teardown T8/WS-5（reason/evidence.ticks/echo 类别计数） | **半裸区**：at/pid/slot 与夺位竞争语义无断言 |
-| echo.jsonl | sentinel-teardown T1c/T2c/T6c/T8（存在性/类别计数/行数快照） | **半裸区**：字段级+256 行滚动帽无断言 |
-| coord-session.txt | watcher-core（G14-b 存量锚零触碰、C11 双分支刷新、W2-02 形状闸）；crv6-resilience DSP-08（server 归因值源）；bg-sentinel coordSessionId 前缀闸经 watcher-core 套件族源文本锁（静态形态锁非行为断言） | C 组主断言面在 watcher-core/crv6（**非裸区**；bg-sentinel 消费端闸为静态锁=弱覆盖注记） |
-| coord-workspace.txt | watcher-core（C11/G4/G5 守卫、workspace-anchor-missing）；root-contract fixture 面 | **非裸区** |
-| watcher-signals.jsonl | watcher-core W-DGR-05（256 行滚动帽）+WB-KICK-f1（kick 瞬时失败零落地）；sentinel-teardown T10（W6 消费让位） | **非裸区** |
-| glean-launch-state.json | 〔v1.6 W-p parked〕glean-launch.mjs 套件已退役迁 parked（原在跑状态/接管/清理全链断言域消亡；恢复=parked README 指引） | **非裸区→已退役** |
-| dispatch-congestion.json | 〔v1.6 W-p parked〕crv6-resilience CG 组十臂（A-v0130-W5-CG-01..10）＋dispatch-supply DS-09 随 -p 通道退役迁 parked（scenario 文件退役空壳；恢复=parked README 指引） | **非裸区→已退役** |
+| instance-<k>.json | sentinel-teardown T1/T2/T5/T6/WS-9d (state three-way / on_duty / took_over / root / heartbeat); root-contract V6-56 root field; l0 V13 (missing sentinel/ -> available:false); the server sentinelHealth shape via WS-9d | **not bare** (the prev field has no direct assertion = residual note) |
+| family-teardown.json | sentinel-teardown T3 (the T3d stamp updates with the last winner) | **not bare** |
+| sentinel.cfg.json | sentinel-teardown T11 (A-v090-CLN-05 all-sparse shape + zero-drift comparison, in tests/assertions/v0.9.x.md §16); the crv5-auth CFG group interplay | **not bare** |
+| fired/ | sentinel-teardown T2d/T5/T10 (filename protocol + counts + prefix filtering) | **bare (field level)**: the entry's 8 fields have zero JSON.parse assertions |
+| quarantine.json | sentinel-teardown T8/WS-5 (reason / evidence.ticks / echo category counts) | **half-bare**: at/pid/slot and the seize-race semantics have no assertions |
+| echo.jsonl | sentinel-teardown T1c/T2c/T6c/T8 (existence / category counts / line-count snapshots) | **half-bare**: field level + the 256-line rolling cap have no assertions |
+| coord-session.txt | watcher-core (G14-b existing anchors zero-touch, C11 dual-branch refresh, the W2-02 shape gate); crv6-resilience DSP-08 (the server attribution value source); the bg-sentinel coordSessionId prefix gate via the watcher-core suite family's source-text lock (a static shape lock, not a behavioral assertion) | group C's main assertion face is in watcher-core/crv6 (**not bare**; the bg-sentinel consumer gate is a static lock = weak-coverage note) |
+| coord-workspace.txt | watcher-core (the C11/G4/G5 guards, workspace-anchor-missing); the root-contract fixture face | **not bare** |
+| watcher-signals.jsonl | watcher-core W-DGR-05 (the 256-line rolling cap) + WB-KICK-f1 (a kick transient failure lands nothing); sentinel-teardown T10 (the W6 consumer yields) | **not bare** |
+| glean-launch-state.json | [parked] the glean-launch.mjs suite was retired to parked (the original running-state/takeover/cleanup assertion domain is gone; recovery = the parked README guide) | **not bare -> retired** |
+| dispatch-congestion.json | [parked] the crv6-resilience CG ten arms (A-v0130-W5-CG-01..10) + dispatch-supply DS-09 retired to parked with the -p channel (the scenario file retired as an empty shell; recovery = the parked README guide) | **not bare -> retired** |
 
-**脆度依据（双轴第一梯队定性）**：裸 txt/JSON 无 schema 校验 × 多写方 wx 竞态（C 组多写方=锚劫持攻击面）× 跨进程时钟判死（HEARTBEAT_STALE_MS 三处 twin 常量，P5 twin-lock 已锁字面值 90000）× 成对锚多写方多消费面 × 直至型进程常驻（残留文件跨代存活）；对照卡③ root.txt：本族面最广但后果多可自愈/降级，root.txt 全局性最重。
+**Brittleness basis (the dual-axis top-tier qualification)**: bare txt/JSON with no schema validation x multi-writer wx races (group C's multi-writer = the anchor-hijack attack face) x cross-process clock death judgments (the HEARTBEAT_STALE_MS three-site twin constants, P5 twin-lock pins the literal 90000) x paired anchors with many writers and consumers x a resident until-type process (residual files survive across generations); compared with the root.txt card: this family has the broadest face but consequences mostly self-heal/degrade - root.txt is the most global.
 
-**M9-1 协同注记（E10 修订腿·已落地 2026-10-28）**：M9-1 已落 scoping（A 组缺口标注已按现行机制改写，见 A1 ⚠ 块）+复活补员（触发面①②）+补告警（REV③）+O10 协同；断言组=A-v0120-SCP/REV（sentinel-teardown SCP/REV 组+bggate REV 组）。LM-05 文档卡同步锁在册（lint-manifest LM05_CARD_ANCHORS 26 锚 grep 兜底）。
+**M9-1 interop note (landed)**: M9-1 landed scoping (group A's gap annotation rewritten per the current mechanism - the A1 warning block) + revival replenishment (trigger faces (1)(2)) + catch-up alarms (REV (3)) + the O10 interop; the assertion groups = A-v0120-SCP/REV (sentinel-teardown SCP/REV + the bggate REV group). The LM-05 card sync lock is registered (lint-manifest LM05_CARD_ANCHORS grep backstop).

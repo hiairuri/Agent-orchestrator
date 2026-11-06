@@ -35,7 +35,7 @@ try {
     ck.ok("CRV1-02 exactly 1 warning with_mission_id=m1", Array.isArray(w) && w.length === 1 && w[0].with_mission_id === "m1", r.json?.scope_warnings);
     ck.ok("CRV1-03 overlap === [src/a.js]", !!w && JSON.stringify(w[0].overlap) === JSON.stringify(["src/a.js"]), w && w[0].overlap);
     const hint = w && w[0].hint;
-    ck.ok("CRV1-04 hint keywords（m1+blockedBy+沙箱+独占）", typeof hint === "string" && hint.includes("m1") && hint.includes("blockedBy") && hint.includes("沙箱") && hint.includes("独占"), hint);
+    ck.ok("CRV1-04 hint keywords（m1+blockedBy+沙箱+独占）", typeof hint === "string" && hint.includes("m1") && hint.includes("blockedBy") && hint.includes("sandboxes") && hint.includes("one side"), hint);
     // CRV1-07（G-2）：对 m1 自身重复 upsert 同 scope_paths（title 变化触发写事务）→ 无自指警告
     r = await s.call("board", { action: "upsert", mission: { id: "m1", title: "m1-retitle", scope_paths: ["src/"] } });
     const w7 = r.json?.scope_warnings || [];

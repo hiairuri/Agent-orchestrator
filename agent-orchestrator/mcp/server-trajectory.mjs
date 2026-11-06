@@ -130,8 +130,8 @@ function trajCapError(blockText, form) {
   const cap = TRAJ_CAPS[form];
   const lines = blockText.split("\n").length;
   const bytes = Buffer.byteLength(blockText, "utf8");
-  if (lines > cap.lines) return new ToolError(`块超帽（${lines} 行 > ${cap.lines} 行），本调用拒绝`);
-  if (bytes > cap.bytes) return new ToolError(`块超帽（${bytes}B > ${cap.bytes}B），本调用拒绝`);
+  if (lines > cap.lines) return new ToolError(`block over cap (${lines} lines > ${cap.lines} lines); this call is rejected`);
+  if (bytes > cap.bytes) return new ToolError(`block over cap (${bytes}B > ${cap.bytes}B); this call is rejected`);
   return null;
 }
 
@@ -179,10 +179,10 @@ export function toolTrajectory(args) {
     } else {
       const items = trajFlyingItems(args.flying);
       if (items.some((x) => /^[+-]/.test(x))) {
-        throw new ToolError("全形 flying 必须是整表（禁 +/- 前缀）");
+        throw new ToolError("full-form flying must be the whole list (+/- prefixes banned)");
       }
       if (items.length > TRAJ_FLYING_MAX) {
-        throw new ToolError(`flying 超过 ${TRAJ_FLYING_MAX} 条`);
+        throw new ToolError(`flying exceeds ${TRAJ_FLYING_MAX} items`);
       }
       flying = items.join(", ") || "无";
     }
@@ -194,13 +194,13 @@ export function toolTrajectory(args) {
       return null;
     })();
     if (!baselineBlock) {
-      throw new ToolError("缺全形基线（文件内无全形块），短形不立文件；请先写全形");
+      throw new ToolError("missing the full-form baseline (no full block in the file); a short form never creates the file - write a full form first");
     }
     const items = trajFlyingItems(trajBlockField(baselineBlock, "flying"));
     if (args.flying != null) {
       for (const token of trajFlyingItems(args.flying)) {
         if (!/^[+-]\S+$/.test(token)) {
-          throw new ToolError(`短形 flying 必须 +id/-id：${token}`);
+          throw new ToolError(`short-form flying must be +id/-id: ${token}`);
         }
         const id = token.slice(1);
         const at = items.indexOf(id);
@@ -212,7 +212,7 @@ export function toolTrajectory(args) {
       }
     }
     if (items.length > TRAJ_FLYING_MAX) {
-      throw new ToolError(`flying 合并后超过 ${TRAJ_FLYING_MAX} 条`);
+      throw new ToolError(`flying exceeds ${TRAJ_FLYING_MAX} items after the merge`);
     }
     flying = items.join(", ") || "无";
   }

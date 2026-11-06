@@ -287,9 +287,9 @@ export function lastActivityMs(m) {
 
 export function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  return `${Math.floor(min / 60)}h ${min % 60}m ago`;
 }
 
 /** 读 board：null = 本 tick 无正据（文件缺失/读取/解析失败）——计数并连续跟踪。 */

@@ -380,12 +380,29 @@ export async function scenInj08() {
         .replace(/进度与结果一律用 (mcp__plugin_agent-orchestrator_orch__report) 上报[；。]/g, "REPORT-CHANNEL $1")
         .replace(/kind ∈ \{milestone, blocked, question, done\}。\nsummary ≤ 200 字。\nkind=done 必带 artifacts 路径。/g, "REPORT-KIND summary artifacts")
         .replace(/kind ∈ \{milestone, blocked, question, done\}；summary ≤ 200 字；done 必带 artifacts 路径[^\n]*/g, "REPORT-KIND summary artifacts")
-        .replace(/受阻\/目标矛盾\/必败门禁：立即 report\(kind=blocked, question=…\)[^\n]*/g, "RULES-BLOCKED")
+        .replace(/- ?受阻\/目标矛盾\/必败门禁：立即 report\(kind=blocked, question=…\)[^\n]*/g, "RULES-BLOCKED")
         .replace(/也出现在派发 prompt (?:头部|尾块)/g, "也出现在派发 prompt 尾块")
         .replace(/## CONTEXT（[^）]*）/g, "## CONTEXT 节头")
         .replace(/## LESSONS（[^）]*）/g, "## LESSONS 节头")
-        .replace(/\n*## STATE（态势面[\s\S]*?(?=\n## )/, "\n")
-        .replace(/## RETURN[\s\S]*$/, "## RETURN-SECTION（v1.6 W3a 指针态文案掩码）");
+        .replace(/\n*## STATE\s*[（(][\s\S]*?(?=\n## )/g, "\n")
+        .replace(/## RETURN[\s\S]*$/, "## RETURN-SECTION（v1.6 W3a 指针态文案掩码）")
+        // v1.6.2 W5（#17 审计池清空）：W2 P0 组包模板全量英化预期增量掩码——模板文案两侧
+        //   归一为规范形，载荷行（task/rules/read_first/upstream/lessons 行）仍逐字节对拍；
+        //   台账 tests/assertions/v1.6.2.md §W5 载沿革。
+        .replace(/# 任务包：\s*|# Task pack:\s*/g, "# Task pack: ")
+        .replace(/\s*[（(](m[\w-]*)[）)]/g, "($1)")
+        .replace(/## CONTRACT\s*[（(][^)\n]*[）)]/g, "## CONTRACT HEAD")
+        .replace(/Report progress and results exclusively via (mcp__plugin_agent-orchestrator_orch__report)[.。]?/g, "REPORT-CHANNEL $1")
+        .replace(/kind \u2208 \{milestone, blocked, question, done\}[.。\u3002]?/g, "REPORT-KIND")
+        .replace(/summary <= 200 chars[.。]?/g, "")
+        .replace(/kind=done must carry artifact paths[.。]?/g, "")
+        .replace(/- Blocked \/ goal conflict \/ unwinnable gate: immediately report\(kind=blocked, question=\.\.\.\)[.。]?/g, "RULES-BLOCKED")
+        .replace(/## (CONTEXT|EXTRA|LESSONS|GLOBAL MEMORY|RECENT CONTEXT|SUMMARY|OWNERSHIP|BUDGET|SANDBOX)\s*[（(][^)\n]*[）)]/g, "## $1 HEAD")
+        .replace(/[（(]无[）)]|\(none\)/g, "EMPTY-MARKER")
+                .replace(/REPORT-KIND summary artifacts|REPORT-KIND(?! summary)/g, "REPORT-KIND")
+        .replace(/## (CONTEXT|LESSONS) 节头/g, "## $1 HEAD")
+        .replace(/- Work only within this pack's scope; do not modify files outside it\.|- 只在本包范围内工作，不改包外文件/g, "RULES-SCOPE")
+.replace(/\n\s*\n/g, "\n\n");
     const s71 = startServer({ serverPath: baseline, root: T71 });
     const s80 = startServerX({ root: T80, args: ["--memory-root", MEM80] });
     try {

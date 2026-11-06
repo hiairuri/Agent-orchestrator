@@ -218,7 +218,7 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
   ck.ok("P1b 无指针：静默（stderr 无 root.txt 告警）", !r.stderr.includes("root.txt"), r.stderr.slice(0, 120));
   cleanArtifacts();
   const g = runGate(ENV_PROJ);
-  ck.ok("P1c 无指针：bg-gate 落默认根（哨兵提示戳在 DEF）", stampAt(DEF) && !stampAt(CUSTOM) && g.stdout.includes("拉起哨兵"), { stderr: g.stderr.slice(0, 120) });
+  ck.ok("P1c 无指针：bg-gate 落默认根（哨兵提示戳在 DEF）", stampAt(DEF) && !stampAt(CUSTOM) && g.stdout.includes("raise a background sentinel"), { stderr: g.stderr.slice(0, 120) });
 }
 
 /* ================================================================== */
@@ -353,7 +353,7 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
   writePointer(CUSTOM, RID);
   cleanArtifacts();
   const ok = runStopMain(ENV_FAKETMP);
-  ck.ok("P10a v2 匹配：stop-check 主清点读 CUSTOM 板", ok.stdout.includes("收工前清点") && ok.stdout.includes("m-open"), { out: ok.stdout.slice(0, 120) });
+  ck.ok("P10a v2 匹配：stop-check 主清点读 CUSTOM 板", ok.stdout.includes("shutdown sweep") && ok.stdout.includes("m-open"), { out: ok.stdout.slice(0, 120) });
   writePointer(CUSTOM, BADID);
   cleanArtifacts();
   const bad = runStopMain(ENV_FAKETMP);
@@ -437,7 +437,7 @@ async function runSentinel(env, waitRoot, cwd = PROJ) {
   cleanAnc();
   const r5a = runStopMain(ENV_ANC, ANC_SUB);
   ck.ok("W24-RC5a stop-check 主清点 env 态：祖先回退命中（读祖先根板 m-anc，子目录默认根零写）",
-    r5a.stdout.includes("收工前清点") && r5a.stdout.includes("m-anc") && !fs.existsSync(ANC_TOP),
+    r5a.stdout.includes("shutdown sweep") && r5a.stdout.includes("m-anc") && !fs.existsSync(ANC_TOP),
     { out: r5a.stdout.slice(0, 160), stderr: r5a.stderr.slice(0, 160) });
   cleanAnc();
   const r5b = runStopMain(ENV_ANC_CWD, ANC_SUB);

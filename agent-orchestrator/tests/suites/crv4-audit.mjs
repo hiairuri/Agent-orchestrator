@@ -129,14 +129,14 @@ try {
     ck.ok("CR-V19 非 isError", r.ok === true);
     const sc = JSON.parse(fs.readFileSync(path.join(T, "packs", "m7", "manifest.json"), "utf8"));
     ck.ok("CR-V19 违规条不入 sidecar", sc.entries.length === 1 && sc.entries[0].ref.path === "d", sc.entries.length);
-    ck.ok("CR-V19 note 列丢弃数+原因", typeof r.manifest_note === "string" && r.manifest_note.includes("3 条") && r.manifest_note.includes("layer") && r.manifest_note.includes("type") && r.manifest_note.includes("title"), r.manifest_note);
+    ck.ok("CR-V19 note 列丢弃数+原因", typeof r.manifest_note === "string" && r.manifest_note.includes("dropped for shape violations: 3") && r.manifest_note.includes("layer") && r.manifest_note.includes("type") && r.manifest_note.includes("title"), r.manifest_note);
   }
   // ---- CR-V20
   {
     const many = Array.from({ length: 13 }, (_, i) => ({ layer: "T1", type: "conclusion", title: `t${i}`, text: "正文" + i, ref: { path: `f${i}` } }));
     const r = resultText(await report({ mission_id: "m8", worker: "w#1", kind: "done", summary: "s", manifest_entries: many }));
     const sc = JSON.parse(fs.readFileSync(path.join(T, "packs", "m8", "manifest.json"), "utf8"));
-    ck.ok("CR-V20a 13→12 丢尾+note", sc.entries.length === 12 && typeof r.manifest_note === "string" && r.manifest_note.includes("丢弃尾部 1 条"), r.manifest_note);
+    ck.ok("CR-V20a 13→12 丢尾+note", sc.entries.length === 12 && typeof r.manifest_note === "string" && r.manifest_note.includes("dropped the tail 1"), r.manifest_note);
   }
   {
     await upsert({ id: "m8c", title: "T0/T1 截断标记" });
@@ -145,9 +145,9 @@ try {
     await report({ mission_id: "m8c", worker: "w#1", kind: "done", summary: "s", manifest_entries: [bigT0, bigT1] });
     const sc = JSON.parse(fs.readFileSync(path.join(T, "packs", "m8c", "manifest.json"), "utf8"));
     const t0 = sc.entries.find((e) => e.layer === "T0");
-    ck.ok("CR-V20b T0 字节截断标记", t0 && Buffer.byteLength(t0.text.replace(/…\[截断于\d+字节\]$/, ""), "utf8") <= 4000 && /…\[截断于\d+字节\]$/.test(t0.text), t0 && t0.text.slice(-14));
+    ck.ok("CR-V20b T0 字节截断标记", t0 && Buffer.byteLength(t0.text.replace(/\.\.\.\[truncated at \d+ bytes\]$/, ""), "utf8") <= 4000 && /\.\.\.\[truncated at \d+ bytes\]$/.test(t0.text), t0 && t0.text.slice(-14));
     const t1 = sc.entries.find((e) => e.ref.path === "big1");
-    ck.ok("CR-V20c T1 字截断标记", t1 && /^[\s\S]{500}…\[截断于500字\]$/.test(t1.text), t1 && t1.text.slice(-12));
+    ck.ok("CR-V20c T1 字截断标记 (W5 re-pin English marker)", t1 && /^[\s\S]{500}\.\.\.\[truncated at 500 chars\]$/.test(t1.text), t1 && t1.text.slice(-12));
   }
   {
     await upsert({ id: "m8b", title: "32KB 总帽" });
@@ -166,7 +166,7 @@ try {
     const mm = resultText(await get("m2"));
     ck.ok("CR-V21a 指针已设", mm.manifest && mm.manifest.entry_count === 2);
     const rb = resultText(await report({ mission_id: "m3b", worker: "w#1", kind: "done", summary: "s" }));
-    ck.ok("CR-V21b 零申报零产物：无 sidecar 无指针+note", !fs.existsSync(path.join(T, "packs", "m3b", "manifest.json")) && typeof rb.manifest_note === "string" && rb.manifest_note.includes("manifest 未写入"), rb.manifest_note);
+    ck.ok("CR-V21b 零申报零产物：无 sidecar 无指针+note", !fs.existsSync(path.join(T, "packs", "m3b", "manifest.json")) && typeof rb.manifest_note === "string" && rb.manifest_note.includes("manifest not written"), rb.manifest_note);
     const M3b = resultText(await get("m3b"));
     ck.ok("CR-V21b 指针缺席", !(M3b.manifest));
   }
@@ -189,11 +189,11 @@ try {
     // ②sidecar 删去 → L2 server 桩直接吃任务板上的 report 写回 artifacts。
     await s.call("context_pack", { mission_id: "mR14", title: "下游牵引L1", task: "t", inputs: ["m14"] });
     const p14 = fs.readFileSync(path.join(T, "packs", "mR14", "pack.md"), "utf8");
-    ck.ok("QA-A4a 下游牵引非 L3（L1 寻址行在包）", p14.includes("——来自 m14#c01"), p14.split("\n").find((l) => l.includes("——来自 m14")));
+    ck.ok("QA-A4a 下游牵引非 L3（L1 寻址行在包）", p14.includes(" - from m14#c01"), p14.split("\n").find((l) => l.includes("——来自 m14")));
     fs.rmSync(path.join(T, "packs", "m14", "manifest.json"));
     await s.call("context_pack", { mission_id: "mR14b", title: "下游牵引L2", task: "t", inputs: ["m14"] });
     const p14b = fs.readFileSync(path.join(T, "packs", "mR14b", "pack.md"), "utf8");
-    ck.ok("QA-A4b 无 sidecar 仍非 L3（server 桩吃写回 artifacts）", p14b.includes("out/from-report.md——来自 m14（server 桩）") && p14b.includes("out/late.md——来自 m14（server 桩）"), p14b.split("\n").find((l) => l.includes("server 桩")));
+    ck.ok("QA-A4b 无 sidecar 仍非 L3（server 桩吃写回 artifacts）", p14b.includes("out/from-report.md - from m14 (server stub)") && p14b.includes("out/late.md - from m14 (server stub)"), p14b.split("\n").find((l) => l.includes("server 桩")));
   }
   // ---- CR-V29
   {
@@ -203,7 +203,7 @@ try {
     const r2 = resultText(await report({ mission_id: "m10", worker: "w#1", kind: "done", summary: "s", manifest_entries: [{ layer: "T0", type: "assertion", title: "断言", text: tampered, ref: { path: "tests/assertions/sample.md", loc: "A-V050-T01" } }] }));
     ck.ok("CR-V29b 篡改→恰 1 条 warning 非阻断", r2.ok === true && Array.isArray(r2.manifest_warnings) && r2.manifest_warnings.length === 1, r2.manifest_warnings);
     const r3 = resultText(await report({ mission_id: "m11", worker: "w#1", kind: "done", summary: "s", manifest_entries: [{ layer: "T0", type: "assertion", title: "断言", text: ASSERT_MAIN, ref: { path: "tests/assertions/missing.md" } }] }));
-    ck.ok("CR-V29c 不可读→未比对警示", Array.isArray(r3.manifest_warnings) && r3.manifest_warnings.length === 1 && r3.manifest_warnings[0].includes("未比对"), r3.manifest_warnings);
+    ck.ok("CR-V29c 不可读→未比对警示", Array.isArray(r3.manifest_warnings) && r3.manifest_warnings.length === 1 && r3.manifest_warnings[0].includes("assertion not compared"), r3.manifest_warnings);
     const r4 = resultText(await report({ mission_id: "m12", worker: "w#1", kind: "done", summary: "s", manifest_entries: [
       { layer: "T0", type: "conclusion", title: "c", text: "绝不一致的字串", ref: { path: "tests/assertions/sample.md" } },
       { layer: "T0", type: "directive", title: "d", text: " directives 不比对", ref: { path: "tests/assertions/sample.md" } },

@@ -85,7 +85,7 @@ export const RECYCLE_LIST = [
     id: "R-1",
     file: FILES.skill,
     // v1.4 W1 改2（design v1.4 §2.2；SKILL RP-1 尾句 v1.4 翻面）：anchor 随新字面。
-    anchor: "typed 派发为主形态",
+    anchor: "The primary dispatch form = the nested assembly exit", // v1.6.2 W5 重订=英文现态句（RP-1）
     // v1.5 W3-M1 注记压缩：v1.4 W1 改2 括注（typed 主形态/GP+persona 降级备选表述已落装）随双模退役收编（见头注回收机制段）。
     recycleAction: "已于 v1.4.0 翻面执行",
     trigger: "host-fixed",
@@ -95,7 +95,7 @@ export const RECYCLE_LIST = [
     id: "R-2",
     file: FILES.skill,
     // v1.4 W1 改3：anchor→「GP+persona 注入为降级备选」（按逐字稿）；「保留不删」附属不动。
-    anchor: "GP+persona 注入为降级备选",
+    anchor: "Protocol (host fallback)", // v1.6.2 W5 重订=英文现态句（RP-3 宿主降级通道头）
     // v1.5 W3-M1 注记压缩：永久不变量语义保留（承载面=A-COMPAT-1+头注回收机制段）。
     recycleAction: "已于 v1.4.0 翻面执行（「report 全名保留不删」为永久不变量，不在回收范围）",
     trigger: "host-fixed",
@@ -106,7 +106,7 @@ export const RECYCLE_LIST = [
     file: FILES.skill,
     // v1.4 W1 改4：R-3 锚实位=SKILL :379 DL-6 行（research R1.1 记 :230 RP-3 系坐标偏差；
     // 波首步 grep 复位——「宿主快照缺陷期间」限定语随 M-5 语义保留取向同批翻面）。
-    anchor: "GP 降级备选通道形态下池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发",
+    anchor: "prompt=<archetype body>", // v1.6.2 W5 重订=英文现态句（RP-3 注入形）
     recycleAction: "已于 v1.4.0 翻面执行（池工降级通道限定语已翻面）",
     trigger: "host-fixed",
     issue: "TODO-V661（上游 issue 编号，V6-61 定稿提交后回填）",
@@ -116,7 +116,7 @@ export const RECYCLE_LIST = [
     file: FILES.agentsMd,
     // v1.4 W1 改8：活体 AGENTS.md 已于 2026-11-01 翻面（typed-probe-20261101.md）——
     // anchor 改锚活体在盘字面「勿盲降级」（波首步 grep 复核命中=1）；recycleAction 同步。
-    anchor: "勿盲降级",
+    anchor: "do not blindly downgrade", // v1.6.2 W5 重订=活体英文字面（域外数据面外部重写，波外事件）
     // v1.5 W3-M1 注记压缩：v1.4 W1 改8 括注（活体归因段已翻面，锚随新字面）随双模退役收编。
     recycleAction: "已于 v1.4.0 翻面执行",
     trigger: "host-fixed",
@@ -186,20 +186,38 @@ function main() {
     // v1.4 W1 改5（基线红复位，H-2）：活体 AGENTS.md 已于 2026-11-01 翻面——need 改锚
     // 活体在盘字面（波首步 grep 复核：「归因已翻面终定」:54 命中=1、「勿盲降级」命中=1）；
     // AGENTS.md 正文零写入（活体已翻面，只改锚）。
-    subGroup(ck, "A-AGENTS-1", "AGENTS.md", agentsMd, { need: ["归因已翻面终定", "勿盲降级"], ban: ["原生角色派发需全新会话"] }, "E-01");
+    // v1.6.2 W6b 4low-4（w6a-review §三 #4 主控裁定 (a)）：「恢复主形态」need 悬于 orch-mem
+    // 记忆区（AGENTS.md 归敛代理维护、每轮浓缩可改写=已知脆面）——降级容错断言：该 need 在场=
+    // 全量断言不弱化（两 need+ban 照核）；缺席=[SKIP] 带标记容错（gleaning-maintained block
+    // rewritten，归敛改写不再红）。硬腿不降级：ban 串（旧措辞「原生角色派发需全新会话」）在场
+    // 仍=FAIL；稳定 need（"do not blindly downgrade"）仍硬断言。AGENTS.md 本体零触（域外数据面）。
+    const legacyModeNeedPresent = agentsMd.includes("恢复主形态");
+    subGroup(
+      ck,
+      "A-AGENTS-1",
+      "AGENTS.md",
+      agentsMd,
+      legacyModeNeedPresent
+        ? { need: ["恢复主形态", "do not blindly downgrade"], ban: ["原生角色派发需全新会话"] }
+        : { need: ["do not blindly downgrade"], ban: ["原生角色派发需全新会话"] },
+      "E-01",
+    ); // v1.6.2 W5 重订：AGENTS.md=域外数据面已外部英化重写（波外事件），锚随活体字面（v1.6.2.md 台账注记）；W6b 4low-4 need 串容错化
+    if (!legacyModeNeedPresent) {
+      ck.ok("A-AGENTS-1 need[恢复主形态] @ AGENTS.md orch-mem block [SKIP: gleaning-maintained block rewritten - tolerance per v1.6.2 4low-4 ruling (a), w6a-review §3 #4]", true);
+    }
   } else {
     ck.ok("A-AGENTS-1 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
   }
-  subGroup(ck, "A-SKILL-1", "SKILL.md §8（主派发形态）", skill8, { need: [REPORT, "双通道", "KIND="] }, "E-04");
+  subGroup(ck, "A-SKILL-1", "SKILL.md §8 (primary dispatch form)", skill8, { need: [REPORT, "Dual channels", "KIND="] }, "E-04"); // v1.6.2 W5 重订=英文 RP-4
 
   { // A-SKILL-2：「仅终态」与「哨兵联动」须同句（E-04 降级通道缺口声明）
-    const sent = skill8.split("。").find((s) => s.includes("仅终态"));
-    const cond = Boolean(sent && sent.includes("哨兵联动"));
-    ck.ok("A-SKILL-2 @ SKILL.md §8 同句含「仅终态」+「哨兵联动」", cond,
+    const sent = skill8.split("\n").find((l) => l.includes("final state only"));
+    const cond = Boolean(sent && sent.includes("sentinel linkage"));
+    ck.ok("A-SKILL-2 @ SKILL.md §8 same sentence carries final-state-only + sentinel linkage (W5 re-pin English)", cond,
       `A-SKILL-2 缺失同句声明（仅终态+哨兵联动） @ SKILL.md §8 —— 回写指针: 见 ${POINTER} §1 E-04`);
   }
 
-  subGroup(ck, "A-SKILL-3", "SKILL.md §9（坑位清单）", skill9, { need: [SNAPSHOT_ERR, "校验面", "执行面", "回退", "勿重试"] }, "E-05");
+  subGroup(ck, "A-SKILL-3", "SKILL.md §9（坑位清单）", skill9, { need: [SNAPSHOT_ERR, "validation face", "execution face", "fallback", "never retry"] }, "E-05"); // v1.6.2 W5 重订=英文 PT-8 行四锚
   // A-SKILL-4 语义更新（W2 重排裁决，策划档 §4.2）：原钉 §3 模板内「## REPORT（双通道）」示例节；
   // buildPackMarkdown 实际不产出该节（Stage A §0 实测），W2 删幻影示例并改钉「模板同构 + 无幻影节」。
   // v1.1 W3（C 面）：`prompt_template` 回显已从 context_pack 返回删除（回执=包 CONTRACT 单源；
@@ -209,21 +227,22 @@ function main() {
   // RETURN ≤3 行指针态模板行；旧「**派发 prompt 尾块**」粗体锚随组装退役改列 ban（A-SKILL-4
   // 过渡态红收口，台账 v1.6.0.md §W3b）。
   subGroup(ck, "A-SKILL-4", "SKILL.md §3 模板结构", skill3, {
-    need: ["## CONTRACT（三行契约", "也出现在派发 prompt 尾块", "**派发头模板**", "三行契约唯一权威=包 CONTRACT", "[channel] {mission_id}", "[worker] {worker 名，如 orch-worker#1}", "[token] {token}", "KIND=<kind>｜artifacts: <路径列表>｜遗留: <一句话>"],
+    // v1.6.2 W5 重订=英文双位形（tool-pack 发射串同文）；D2-20 三行+{pack_path} 槽位冻结
+    need: ["## CONTRACT (three-line contract; also mirrored at the tail of the dispatch prompt)", "**Dispatch header template**", "the three-line contract's sole authority is the pack CONTRACT", "[channel] {mission_id}", "[worker] {worker 名}", "[token] {token}", "KIND=<kind> | artifacts: <paths> | leftover: <one sentence>"],
     ban: ["## REPORT（双通道）", "**派发 prompt 尾块**"],
   }, "E-06+v1.6.0.md §W3b");
   // v1.4 W1 改1（防御性改锚，design v1.4 §2.2）：SNAPSHOT_ERR 症状格保留+「GP+persona」
   // 保留字样维持；新增 ba92054 翻面锚（:183 处置格新字面）防漂移。
-  subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "GP+persona", "ba92054"] }, "E-07");
-  subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB 字节帽", "整文件轮转"], ban: ["400 条"] }, "E-08");
-  subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["时间常数"], ban: ["30 天半衰"] }, "E-09");
-  subGroup(ck, "A-DOC-V4P12", "SKILL.md", skill, { need: ["V7-05 起桥接可达", "桥接键", "两枪最小间隔"], ban: ["无实际效果", "v0.3 兼容存根"] }, "E-10");
-  subGroup(ck, "A-DOC-V4P23/24", "SKILL.md", skill, { need: ["软约束", "仅 schema 声明"] }, "E-11");
-  subGroup(ck, "A-DOC-V4P31", "SKILL.md", skill, { need: ["action ∈ upsert/get/list/ack/claim"] }, "E-12");
-  subGroup(ck, "A-DOC-SIGNALS", "SKILL.md", skill, { need: ["signals", "空串语义 = 哨兵侧内建默认"] }, "E-13");
-  subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["闸门是提示面不是防线", "timeoutMs=10000"] }, "E-14");
+  subGroup(ck, "A-SKILL-5", "SKILL.md §4", skill4, { need: [SNAPSHOT_ERR, "host typed-dispatch defect", "fixed in-repo"] }, "E-07"); // v1.6.2 W5 重订=英文现态句；ba92054 版本字面随 W3 沿革清理由退役（R-D/喂账③裁定）
+  subGroup(ck, "A-DOC-V4P11", "SKILL.md", skill, { need: ["2MB cap", "rolling eviction"], ban: ["400 条"] }, "E-08"); // W5 重订英文
+  subGroup(ck, "A-DOC-V4P21", "SKILL.md", skill, { need: ["decay time constant"], ban: ["30 天半衰"] }, "E-09"); // W5 重订英文
+  subGroup(ck, "A-DOC-V4P12", "SKILL.md", skill, { need: ["bridge keys are reachable", "bridge keys", "minimum gap between two shots"], ban: ["无实际效果", "v0.3 兼容存根"] }, "E-10"); // W5 重订英文 WU-4
+  subGroup(ck, "A-DOC-V4P23/24", "SKILL.md", skill, { need: ["[soft: the server does not enforce presence", "schema-declared only"] }, "E-11"); // W5 重订英文 TS-12
+  subGroup(ck, "A-DOC-V4P31", "SKILL.md", skill, { need: ["action=upsert/get/list/ack/claim"] }, "E-12"); // W5 重订英文 TS-1
+  subGroup(ck, "A-DOC-SIGNALS", "SKILL.md", skill, { need: ["signals", "= the sentinel-side built-in defaults"] }, "E-13"); // W5 重订英文 TS-8
+  subGroup(ck, "A-DOC-FAILOPEN", "SKILL.md", skill, { need: ["not a defense line", "timeoutMs=10000"] }, "E-14"); // W5 重订英文 PT-5
   if (agentsMdExists) {
-    subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["勿以行数作锚点"] }, "E-02");
+    subGroup(ck, "A-DOC-V4P25", "AGENTS.md", agentsMd, { need: ["never use line count as an anchor"] }, "E-02"); // v1.6.2 W5 重订=活体英文字面
   } else {
     ck.ok("A-DOC-V4P25 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
   }
@@ -234,7 +253,7 @@ function main() {
       const line = frontmatterLine(text, "tools");
       if (!line.includes(REPORT_TYPED)) bad.push(`${name} tools 行缺 report 全名（双前缀实名）`);
     }
-    if (!skill8.includes("保留不删")) bad.push("SKILL.md §8 缺「保留不删」");
+    if (!skill8.includes("Keep, do not delete")) bad.push("SKILL.md §8 missing Keep, do not delete (RP-7)"); // v1.6.2 W5 重订=英文 RP-7
     ck.ok("A-COMPAT-1 @ agents/*.md tools 行 + SKILL §8 保留不删", bad.length === 0,
       bad.length ? `A-COMPAT-1 不变量受损: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-15` : "");
   }
@@ -364,7 +383,8 @@ function main() {
   {
     // A1-06：SKILL RP-5/RP-6 翻面字面在位（防回退钉；design §2.1 A1-06 行）——零触（宿主 typed 直派面语义保持）
     subGroup(ck, "A-V0140-A1-06", "SKILL.md §8 RP-5/RP-6", skill8, {
-      need: ["typed 派发已恢复（v1.3.0 ba92054，主形态）", "恢复条件（已满足，2026-11-01 归因翻面）"],
+      // v1.6.2 W5 重订=英文现态句（RP-5/RP-6）；ba92054/日期字面随 W3 沿革清理由退役（喂账③裁定）
+      need: ["typed dispatch is restored and is the primary form", "fixed in-repo"],
       ban: ["typed 派发当前无法启动", "宿主修复快照数据源"],
     }, "v1.4 design §1.1");
     // A1-07：typed 退役注记（v1.6 W3b 换血改锚：DP-3 半=typed 参数退役注记在位（W-p 落装）；
@@ -375,9 +395,9 @@ function main() {
       const ts19a = skill.split("\n").find((l) => l.startsWith("TS-19a ")) || "";
       const bad = [];
       if (dp3.includes("typed 角色发射须在 dispatch 调用显式传 typed:true")) bad.push("DP-3 typed:true 旧句残留（v1.6 W-p 已退役应零残留）");
-      if (!dp3.includes("typed 参数退役")) bad.push("DP-3 缺 v1.6 W-p typed 退役注记");
+      if (!dp3.includes("The typed dispatch params are retired")) bad.push("DP-3 missing the W-p typed-params-retired note (W5 re-pin English)");
       if (ts19a.includes("typed:true")) bad.push("TS-19a typed:true 调度面字面残留（v1.6 W3a 行区重写后应零残留）");
-      if (!ts19a.includes("旧「prompt 即完整首条消息」式护栏句随组装退役废止")) bad.push("TS-19a 缺 v1.6 W3a 护栏废止句");
+      if (!ts19a.includes("the assembly chain is retired")) bad.push("TS-19a missing the W3a assembly-retired sentence (W5 re-pin English)");
       ck.ok("A-V0140-A1-07 @ SKILL.md DP-3 typed 退役注记+TS-19a 护栏废止句（v1.6 W3b 换血形态）", bad.length === 0,
         bad.length ? `A-V0140-A1-07 缺失: ${bad.join("; ")} —— 回写指针: v1.4 design §1.1 G1-3 沿革+v1.6.0.md §W3b` : "");
     }
@@ -385,7 +405,7 @@ function main() {
     //   bg-gate CONTRACT 头 presence 检测+三禁句；旧组装链描述面护栏改列 ban）
     {
       const dp3 = skill.split("\n").find((l) => l.startsWith("DP-3 ")) || "";
-      const miss = firstMissing(dp3, ["【护栏】模板为唯一首条消息形制", "bg-gate 对宿主 Agent 调用做 CONTRACT 头 presence 检测", "禁扩写、禁读旧任务包手工复刻、禁改写三行契约"]);
+      const miss = firstMissing(dp3, ["[Guardrail] the template is the only first-message form", "bg-gate runs a CONTRACT-header presence check on host Agent calls", "no expansion, no reading old task packs to hand-replicate, no rewriting the three-line contract"]);
       const stale = dp3.includes("【护栏】本条为组装链描述（描述面）") ? "DP-3 残留旧组装链护栏句" : "";
       ck.ok("A-V0140-B3-01 @ SKILL.md DP-3 护栏块（v1.6 W3a 新句逐字）", !miss && !stale,
         miss ? `A-V0140-B3-01 缺失子串: ${JSON.stringify(miss)} —— 回写指针: v1.6 W3a DP-3 重写（SKILL :73）+v1.6.0.md §W3b`
@@ -395,7 +415,7 @@ function main() {
   //   式护栏/typed:true 字面改列 ban——N5 反向钉（po-static）同口径）
     {
       const ts19a = skill.split("\n").find((l) => l.startsWith("TS-19a ")) || "";
-      const miss = firstMissing(ts19a, ["nested 编号出口", "首条消息=DP-3 固定指针模板机械填充", "§2 DP-3/§3 派发头模板双位同文"]);
+      const miss = firstMissing(ts19a, ["nested numbered exit", "the first message = the DP-3 fixed pointer template mechanically filled", "same text at the section 2 DP-3 / section 3 dispatch-header sites"]);
       const stale = firstPresent(ts19a, ["回执 prompt 即完整首条消息", "禁止按链描述手工复刻", "typed:true"]);
       ck.ok("A-V0140-B3-02 @ SKILL.md TS-19a 编号出口护栏（v1.6 W3a 新句逐字）", !miss && !stale,
         miss ? `A-V0140-B3-02 缺失子串: ${JSON.stringify(miss)} —— 回写指针: v1.6 W3a TS-19a 重写（SKILL :439）+v1.6.0.md §W3b`
@@ -406,7 +426,7 @@ function main() {
     //   ——旧「sessionId:」剥离句随协议行 server 铸退役改列 ban）；其余三锚保持。
     {
       const pl10 = skill.split("\n").find((l) => l.startsWith("PL-10 ")) || "";
-      const miss = firstMissing(pl10, ["多根 workspace 共写 coord-tail-log 时一律全形申报", "短形基线=文件内最新全形块（server 侧合并，跨会话继承）", "`ts:`/`seq:` 协议行", "<!-- orch-tail v3"]);
+      const miss = firstMissing(pl10, ["When a multi-root workspace shares coord-tail-log, always declare in full form", "the short-form baseline = the file's newest full block (server-side merge, inherited across sessions)", "the `ts:`/`seq:` protocol lines", "<!-- orch-tail v3"]);
       const stale = firstPresent(pl10, ["orch-tail v2", "`sessionId:`"]);
       ck.ok("A-V0140-C2-03 @ SKILL.md PL-10 补注+剥离句+标记对 v3（v1.6 W15/W3a 换装字面）", !miss && !stale,
         miss ? `A-V0140-C2-03 缺失子串: ${JSON.stringify(miss)} —— 回写指针: v1.4 design §1.7 C2-b 沿革+W15 换装字面（SKILL PL-10）`
@@ -418,7 +438,7 @@ function main() {
   //      零残留」钉面；宿主 typed 直派（subagent_type 面）合法保留（RP-1/PT-8 面零触），本钉只锁
   //      dispatch 工具 typed 参数域旧字面：typed:true 调用句/typedRequested/typedPointer 组装残段）----
   subGroup(ck, "A-V0160-W9-01", "SKILL.md 调度面 typed 零残留", skill, {
-    need: ["typed 参数退役"],
+    need: ["The typed dispatch params are retired"], // v1.6.2 W5 重订=英文 DP-3 退役注记
     ban: ["typed 角色发射", "typed:true", "typedRequested", "typedPointer"],
   }, "v1.6.0.md §W3b W9");
 

@@ -62,9 +62,9 @@ function assertMergeTreeSupport(cwd) {
     version = String(gitRun(cwd, ["--version"]));
   } catch (err) {
     if (err && err.code === "ENOENT") {
-      throw new ToolError("git 不可用：沙箱派发需要本机 git");
+      throw new ToolError("git unavailable: sandbox dispatch requires a local git");
     }
-    throw new ToolError("git --version 探测失败：" + (err && err.message ? err.message : err));
+    throw new ToolError("git --version probe failed: " + (err && err.message ? err.message : err));
   }
   const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(version);
   gitMergeTreeSupported = Boolean(
@@ -77,8 +77,8 @@ function assertMergeTreeSupport(cwd) {
 
 function throwMergeTreeUnsupported(version = "") {
   throw new ToolError(
-    `git 版本过低${version ? "（" + version + "）" : ""}：merge-tree 冲突预检需要 git ≥ 2.38，` +
-      "请升级本机 git 后再使用沙箱派发（其余特性不受影响）",
+    `git too old${version ? " (" + version + ")" : ""}: merge-tree conflict pre-check needs git >= 2.38, ` +
+      "upgrade local git before using sandbox dispatch (other features unaffected)",
   );
 }
 
@@ -244,7 +244,7 @@ function scopePairConflict(a, b) {
   return {
     with_mission_id: b.id,
     overlap,
-    hint: `scope 与 ${b.id} 相交：${overlapText}。三选一：给本 mission 加 blockedBy=[${b.id}] 转串行；改沙箱分叉各自 apply；重切把相交文件归一边独占。`,
+    hint: `scope intersects ${b.id}: ${overlapText}. Pick one: add blockedBy=[${b.id}] to this mission (go serial); fork separate sandboxes and apply each; or re-cut so the intersecting files belong to one side.`,
   };
 }
 
@@ -290,7 +290,7 @@ function checkScopeConflicts(board, patch) {
       const hit = scopePairConflict(patchView, m);
       if (hit) {
         throw new ToolError(
-          `strict_scope 拒绝登记：scope 与 ${hit.with_mission_id} 相交：${hit.overlap.join("、")}（board 未改动）`,
+          `strict_scope rejected the registration: scope intersects ${hit.with_mission_id}: ${hit.overlap.join(", ")} (board unchanged)`,
         );
       }
     } else {
@@ -391,16 +391,16 @@ function checkDuplicateMissions(board, patch) {
     const reason = titleHit && scopeHit ? "title+scope" : titleHit ? "title" : "scope";
     const what = titleHit
       ? scopeHit
-        ? `title 归一化后相等且 scope 相交：${scopeHit.overlap.join("、")}`
-        : "title 归一化后相等（trim+小写）"
-      : `scope 相交：${scopeHit.overlap.join("、")}`;
+        ? `normalized titles equal and scopes intersect: ${scopeHit.overlap.join(", ")}`
+        : "normalized titles equal (trim + lowercase)"
+      : `scopes intersect: ${scopeHit.overlap.join(", ")}`;
     const archiveHint = isDrafted(m.status)
-      ? `建议归档旧 mission ${m.id}（drafted → skipped → closed）`
-      : `建议确认本 mission 是否为在飞 ${m.id} 的重复尸体；是则归档本 mission（drafted → skipped → closed）`;
+      ? `suggest archiving the old mission ${m.id} (drafted -> skipped -> closed)`
+      : `suggest checking whether this mission is a duplicate corpse of in-flight ${m.id}; if so, archive this mission (drafted -> skipped -> closed)`;
     const entry = {
       with_mission_id: m.id,
       reason,
-      hint: `疑似重复 mission：与 ${m.id} ${what}。${archiveHint}；确需并存请改 title/scope。`,
+      hint: `suspected duplicate mission: with ${m.id}, ${what}. ${archiveHint}; if coexistence is truly needed, change title/scope.`,
     };
     if (scopeHit) entry.overlap = scopeHit.overlap;
     warnings.push(entry);
@@ -439,18 +439,18 @@ function materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionD
     inside = String(gitRun(projectDir, ["rev-parse", "--is-inside-work-tree"])).trim();
   } catch (err) {
     if (err && err.code === "ENOENT") {
-      throw new ToolError("git 不可用：沙箱派发需要本机 git");
+      throw new ToolError("git unavailable: sandbox dispatch requires a local git");
     }
-    throw new ToolError('非 git 项目：写型隔离需要 git，请先 git init 并完成首次提交，或改用 isolation="none"');
+    throw new ToolError('not a git repo: write isolation requires git - run git init and make the first commit, or use isolation="none"');
   }
   if (inside !== "true") {
-    throw new ToolError('非 git 项目：写型隔离需要 git，请先 git init 并完成首次提交，或改用 isolation="none"');
+    throw new ToolError('not a git repo: write isolation requires git - run git init and make the first commit, or use isolation="none"');
   }
   let baseCommit;
   try {
     baseCommit = String(gitRun(projectDir, ["rev-parse", "HEAD"])).trim();
   } catch {
-    throw new ToolError("空仓库（无提交）：先 commit 再用沙箱派发");
+    throw new ToolError("empty repo (no commits): commit first, then use sandbox dispatch");
   }
   try {
     gitRun(projectDir, ["worktree", "prune"]); // self-heal stale metadata before dispatch
@@ -506,7 +506,7 @@ function materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionD
     id: missionId,
     pack: { sandbox },
     timeline: [
-      { at, event: "sandbox:create", summary: `worktree ${displayPath(wtDir)}（分支 ${branch}，基于 ${baseCommit.slice(0, 10)}）` },
+      { at, event: "sandbox:create", summary: `worktree ${displayPath(wtDir)} (branch ${branch}, based on ${baseCommit.slice(0, 10)})` },
     ],
   });
   return sandbox;
@@ -515,12 +515,12 @@ function materializeSandbox({ missionId, oobAllowlist, junctionShared: junctionD
 /** SANDBOX section lines for buildPackMarkdown (design §1.3 step 9, verbatim). */
 function buildSandboxLines({ sandboxRoot, branch, baseCommit, junctionShared }) {
   return [
-    "## SANDBOX（沙箱环境——你的可写工作区）",
-    `- 工作区：${sandboxRoot}（git worktree，分支 ${branch}，基于 ${baseCommit}）`,
-    "- 本包 READ FIRST / CONTEXT / TASK 中出现的项目路径已改写为本工作区路径；若仍有未改写的原仓路径，到工作区内相同相对路径读取",
-    `- 红线：绝不写原项目路径（${projectDir}）——写穿主仓会被主仓 status 巡检与 reviewer 越界审查检出，整单丢弃（sandbox_discard）`,
-    `- node_modules：${junctionShared ? "junction 共享——只读使用，禁止 install/upgrade/delete（会写穿主仓）；需装依赖先删除该链接独立安装并在报告注明" : "未提供（本工作区无 node_modules）"}`,
-    `- done 上报必附：git diff --stat ${baseCommit} 与 git diff --name-only ${baseCommit} 的输出各存一个文件，路径进 artifacts`,
+    "## SANDBOX (sandbox environment - your writable workspace)",
+    `- Workspace: ${sandboxRoot} (git worktree, branch ${branch}, based on ${baseCommit})`,
+    "- Project paths appearing in this pack's READ FIRST / CONTEXT / TASK have been rewritten to this workspace; for any path still unrewritten, read it at the same relative path inside the workspace",
+    `- Red line: never write the original project path (${projectDir}) - writing through to the main repo is caught by main-repo status patrols and reviewer out-of-scope audits; the whole mission gets discarded (sandbox_discard)`,
+    `- node_modules: ${junctionShared ? "junction-shared - read-only use; never install/upgrade/delete (writes through to the main repo); to add dependencies, delete the link, install standalone, and note it in the report" : "not provided (no node_modules in this workspace)"}`,
+    `- done must attach: git diff --stat ${baseCommit} and git diff --name-only ${baseCommit}, each saved to a file, paths in artifacts`,
   ];
 }
 

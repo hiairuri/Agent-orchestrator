@@ -278,19 +278,19 @@ export async function scenGlean02_04() {
     const packRaw = fs.readFileSync(pack8, "utf8");
     const briefRaw = fs.readFileSync(brief8, "utf8");
     const G13_PINS = [
-      "固定模板直投", // 固定物化定性（v1.4 W2 改6 改锚：主控零组装→固定模板直投——server-memory :612 B1 中性化）
+      "fixed template direct handoff", // 固定物化定性（v1.4 W2 改6 改锚：主控零组装→固定模板直投——server-memory :612 B1 中性化）
       "agents/orch-gleaner.md", // persona 路径（READ FIRST）
-      "三行契约以派发 prompt 尾块为准", // CONTRACT：server 预物化、token 不入包（v1.1 W4 Q5a）
-      "glean-brief 逐字内嵌", // CONTEXT 节定性
-      "权威指针勿手写", // 锁纪律：lock 位置=brief.lock_path（模板事故① 根治口径）
-      "四态口径", // 候选处置：晋升/合并/退役/保留
-      "promote/promote_batch 合并语义走 server", // v1.1 W1 B2：GL-30 括注同步（批入口在案）
-      "视图层边界", // ORCH.md/标记区/全端 AGENTS.md 写面
-      "日志纪律", // 报告=reports/<ts>-glean.md
+      "the three-line contract is governed by the dispatch prompt tail block", // CONTRACT：server 预物化、token 不入包（v1.1 W4 Q5a）
+      "glean-brief embedded verbatim", // CONTEXT 节定性
+      "authoritative pointer - never hand-write it", // 锁纪律：lock 位置=brief.lock_path（模板事故① 根治口径）
+      "Four-state rule", // 候选处置：晋升/合并/退役/保留
+      "promote/promote_batch merge semantics via the server", // v1.1 W1 B2：GL-30 括注同步（批入口在案）
+      "View-layer boundary", // ORCH.md/标记区/全端 AGENTS.md 写面
+      "Report discipline", // 报告=reports/<ts>-glean.md
       "-glean.md", // 报告命名形
-      "≤3 行指针纪律", // Return 面定性
-      "KIND=done + 报告路径", // Return 行 1
-      "report(kind=blocked, question=需要主会话决策的事项)。", // 阻塞处置（WK-8 形；v1.4 W2 改7 改锚——server-memory :633 B1 中性化）
+      "<= 3-line pointer discipline", // Return 面定性
+      "KIND=done + the report path", // Return 行 1
+      "report(kind=blocked, question=what the main session must decide).", // 阻塞处置（WK-8 形；v1.4 W2 改7 改锚——server-memory :633 B1 中性化）
     ];
     const g13Misses = G13_PINS.filter((n) => !packRaw.includes(n));
     ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 13 钉）", g13Misses.length === 0, g13Misses);

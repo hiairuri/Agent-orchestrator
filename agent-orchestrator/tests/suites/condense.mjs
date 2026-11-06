@@ -115,7 +115,7 @@ try {
 
   // ---------- CR-V16① ----------
   const g1 = await cur.call(H, { session_id: "sess_ghost", tail: 0 });
-  ck.ok("V16a 缺失 → isError 含未找到转录", g1.isError === true && String(g1.json?.error || g1.text || "").includes("未找到转录"), g1.json || g1.text.slice(0, 120));
+  ck.ok("V16a 缺失 → isError 含未找到转录", g1.isError === true && String(g1.json?.error || g1.text || "").includes("not found"), g1.json || g1.text.slice(0, 120));
   const alive = await HJ({ session_id: "sess_probe", tail: 0 });
   ck.ok("V16a not-found 后 server 存活", alive.usage.input_tokens === 123456);
   ck.ok("V16a harvest 不动 board", fs.readFileSync(path.join(T1, "board.json")).equals(board1Before));
@@ -130,7 +130,7 @@ try {
     }
     const ge = await old.call(H, { session_id: "sess_ghost", tail: 0 });
     const gc = await cur.call(H, { session_id: "sess_ghost", tail: 0 });
-    ck.ok("V16b 缺失文件错误文案逐字节一致", gc.isError === ge.isError && gc.text === ge.text, gc.text.slice(0, 120));
+    ck.ok("V16b 缺失文件错误文案形状一致（v1.6.2 W5 重订：W2 错误文案英化=登记增量，字节等值改形状等值：isError 同态∧同为 not found 转录错误）", gc.isError === true && ge.isError === true && gc.text.includes("not found") && typeof ge.text === "string" && ge.text.length > 0, gc.text.slice(0, 120));
   }
 
   // ---------- 不变量 ----------

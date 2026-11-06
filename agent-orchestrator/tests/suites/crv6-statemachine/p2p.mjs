@@ -169,7 +169,7 @@ export async function run(ctx) {
     });
     ck.ok(
       "P2P-v02a 非 to 侧（asker 本人）answer → ToolError（仅限记录 to 侧）",
-      e3.isError === true && e3.text.includes("to 侧"),
+      e3.isError === true && e3.text.includes("to side"),
       e3.text.slice(0, 120),
     );
     const e4 = await s.call("board", {
@@ -258,7 +258,7 @@ export async function run(ctx) {
     });
     ck.ok(
       "P2P-v05 running 态 ask → ToolError（前置态不满足；主通道 report(question) 恒可用）",
-      e5.isError === true && e5.text.includes("前置态不满足"),
+      e5.isError === true && e5.text.includes("precondition not met"),
       e5.text.slice(0, 120),
     );
 
@@ -293,17 +293,17 @@ export async function run(ctx) {
     });
     ck.ok(
       "P2P-v04a target 不存在 → 即刻报错（不建档）",
-      e6.isError === true && e6.text.includes("不存在"),
+      e6.isError === true && e6.text.includes("does not exist"),
       e6.text.slice(0, 100),
     );
     ck.ok(
       "P2P-v04b target 终态（done）→ 即刻报错（不建档）",
-      e7.isError === true && e7.text.includes("终态"),
+      e7.isError === true && e7.text.includes("terminal"),
       e7.text.slice(0, 100),
     );
     ck.ok(
       "P2P-v04c to_worker 非目标当前持有者 → 拒（否则无人能合法应答）",
-      e8.isError === true && e8.text.includes("持有者"),
+      e8.isError === true && e8.text.includes("current holder"),
       e8.text.slice(0, 100),
     );
     ck.ok(

@@ -103,7 +103,7 @@ function p2pTokenGate(mission, missionId, worker, token) {
     if (token == null || token === "") {
       throw new ToolError(
         `p2p missing token for mission ${missionId}: refusing ` +
-          `(该 mission 已带派发 token，调用必须携带；check the [token] line in the pack CONTRACT section)`,
+          `(this mission already carries a dispatch token; the call must carry it; check the [token] line in the pack CONTRACT section)`,
       );
     }
     if (token !== expectedToken) {
@@ -114,7 +114,7 @@ function p2pTokenGate(mission, missionId, worker, token) {
     }
   } else if (strictTokens) {
     throw new ToolError(
-      `p2p rejected for mission ${missionId}: --strict-tokens 模式下不接受无派发 token 的调用`,
+      `p2p rejected for mission ${missionId}: calls without a dispatch token are not accepted in --strict-tokens mode`,
     );
   }
   const claimHolder =
@@ -123,7 +123,7 @@ function p2pTokenGate(mission, missionId, worker, token) {
       : null;
   if (claimHolder !== null && claimHolder !== worker) {
     throw new ToolError(
-      `p2p 成对鉴权不过：mission ${missionId} 租约属于 ${claimHolder}，调用方 worker=${worker} 拒绝`,
+      `p2p pairwise auth failed: mission ${missionId} lease belongs to ${claimHolder}; caller worker=${worker} rejected`,
     );
   }
   return expectedToken;
@@ -167,7 +167,7 @@ function gcP2pFiles() {
           board,
           rec.from && rec.from.mission_id,
           "p2p:expired",
-          `P2P ask<${rec.id}> TTL 到期未答（→${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}）：${head}`,
+          `P2P ask<${rec.id}> TTL expired unanswered (-> ${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}): ${head}`,
           at,
         ) || touched;
       touched =
@@ -175,7 +175,7 @@ function gcP2pFiles() {
           board,
           rec.to && rec.to.mission_id,
           "p2p:expired",
-          `P2P ask<${rec.id}> TTL 到期未答（←${rec.from && rec.from.mission_id}/${rec.from && rec.from.worker}）：${head}`,
+          `P2P ask<${rec.id}> TTL expired unanswered (<- ${rec.from && rec.from.mission_id}/${rec.from && rec.from.worker}): ${head}`,
           at,
         ) || touched;
       saveP2pRecord(rec);

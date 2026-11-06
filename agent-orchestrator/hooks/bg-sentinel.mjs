@@ -333,7 +333,7 @@ function main() {
         // 唯一首告者，含证据快照）+ 既有通道一条聚合告警 + 转 quarantined 低频值守
         // （心跳照旧；不杀进程不写 board 不删文件）。家族级抑制：新鲜标记期内其余
         // 实例与新条件由 firedEligible 首检 false 静默挡下（三实例并发恰一条告警）。
-        const qReason = `board.json 连续 ${BOARD_BAD_TICKS_LIMIT} 次轮询不可读（缺失/损坏）`;
+        const qReason = `board.json unreadable for ${BOARD_BAD_TICKS_LIMIT} consecutive polls (missing/corrupted)`;
         const qEvidence = { ticks: boardFailTicks, since: new Date(boardFailSince).toISOString() };
         const qFirst = claimQuarantine(root, slot, qReason, qEvidence, cfg.capWindowMs);
         quarantined = true;
@@ -409,7 +409,7 @@ function main() {
         appendEcho(
           root,
           [{ key: "__catchup__", category: "catchup", final: false }],
-          `补告警：哨兵缺位期间到期升级 ${missed.length} 件（${heads}${missed.length > 5 ? " 等" : ""}）——复活首扫集中补发一次`,
+          `catch-up alerts: ${missed.length} escalations fell due while the sentinel was absent (${heads}${missed.length > 5 ? " etc." : ""}) - sent in one batch on the first scan after revival`,
           {},
         );
       }

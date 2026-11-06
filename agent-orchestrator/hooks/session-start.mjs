@@ -116,7 +116,7 @@ function topLessonsBrief(rootDir) {
   const body = list
     .map(({ l }) => `[${l.type}] ${truncateStr(String(l.trigger ?? ""), 40)}→${truncateStr(String(l.fix ?? ""), 60)}`)
     .join("；");
-  const line = `相关教训：${body}。`;
+  const line = `Relevant lessons: ${body}.`;
   return line.length <= BRIEF_MAX_CHARS ? line : "";
 }
 
@@ -162,9 +162,9 @@ function wakeFailureInfo(m) {
 
 function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  return `${Math.floor(min / 60)}h ${min % 60}m ago`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -500,7 +500,7 @@ function main() {
   });
   if (!resumable.length) return;
 
-  const lines = ["[agent-orchestrator] 检测到可恢复任务："];
+  const lines = ["[agent-orchestrator] resumable missions detected:"];
   // v1.6 T-B（主控补发件 tb-script-supplement.md §三1）：brief 增课题行（头行后第一行）——
   //   当前课题指针（课题卡路径+标题），数据源=轨迹文件末块 project 字段（ORT v3 读面已存在零触，
   //   仅读既有格式）；无课题/无日志=「无课题——候 OV-10 确认」。1500 帽投影同款 fail-soft：
@@ -519,18 +519,18 @@ function main() {
       .trim()
       .slice(0, 60);
     let line =
-      `- [${m.id}] ${m.title || "(未命名)"}｜${m.status}｜${m.agent_type || "-"}` +
-      `｜原任务：${seed ? seed + "…" : "（未记录）"}${unread ? `｜未读 ${unread} 条` : ""}`;
+      `- [${m.id}] ${m.title || "(untitled)"} | ${m.status} | ${m.agent_type || "-"}` +
+      ` | task: ${seed ? seed + "..." : "(not recorded)"}${unread ? ` | unread ${unread}` : ""}`;
     if (isWakeFailure(m)) {
       const w = wakeFailureInfo(m);
       const age = fmtAge(w.minutes);
       line =
-        `- 【疑似唤醒失败】${line.slice(2)}` +
-        (age ? `｜${m.status} 于 ${age}，未签收` : `｜${m.status} 未签收`);
+        `- [SUSPECTED WAKE FAILURE] ${line.slice(2)}` +
+        (age ? ` | ${m.status} for ${age}, unclaimed` : ` | ${m.status} unclaimed`);
     }
     lines.push(line);
   }
-  if (totalUnread > 0) lines.push(`未读邮箱事件 ${totalUnread} 条。`);
+  if (totalUnread > 0) lines.push(`unread mailbox events: ${totalUnread}.`);
   // v0.3: one-line lessons digest; dropped entirely when over its own budget or
   // when it would push the briefing past the output cap.
   const lessonsLine = topLessonsBrief(rootDir);
@@ -539,9 +539,9 @@ function main() {
     if (projected <= MAX_OUTPUT_CHARS) lines.push(lessonsLine);
   }
   lines.push(
-    `本会话 session_id=${sessionId || "(未知)"}（派发时请记入 board）；` +
-      "接力计划：/orch-resume 或 mcp__plugin_agent-orchestrator_orch__resume；" +
-      "终态未签收的结果先 mailbox(read) 接手再处置。",
+    `This session's session_id=${sessionId || "(unknown)"} (record it into the board when dispatching); ` +
+      "handover: /orch-resume or mcp__plugin_agent-orchestrator_orch__resume; " +
+      "for unsigned-off final results, take them over via mailbox(read) first, then dispose.",
   );
 
   let text = lines.join("\n");
@@ -572,7 +572,7 @@ function questBriefLine(rootDir) {
   } catch {
     /* 无日志/读失败 → 无课题 */
   }
-  return `当前课题：${project || "无课题——候 OV-10 确认"}`;
+  return `[quest] current quest: ${project || "none on record - ask the user for the current quest before starting"}`;
 }
 
 try {

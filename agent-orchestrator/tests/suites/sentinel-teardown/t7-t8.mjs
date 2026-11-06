@@ -120,7 +120,7 @@ export async function run(ctx) {
     );
     ck.ok(
       "WS-5b 聚合告警恰一条 + 标记含证据快照（wx 仲裁唯一首告者，家族级抑制）",
-      Boolean(qdoc) && String(qdoc.reason || "").includes("不可读") && Boolean(qdoc.evidence) && Number(qdoc.evidence && qdoc.evidence.ticks) >= 3 && echoQCount() === 1 && countLines(ECHO) === echoBeforeT8 + 1 && firedCount() === firedBeforeT8,
+      Boolean(qdoc) && String(qdoc.reason || "").includes("unreadable") && Boolean(qdoc.evidence) && Number(qdoc.evidence && qdoc.evidence.ticks) >= 3 && echoQCount() === 1 && countLines(ECHO) === echoBeforeT8 + 1 && firedCount() === firedBeforeT8,
       { reason: qdoc && qdoc.reason, evidence: qdoc && qdoc.evidence, qEcho: echoQCount(), echoDelta: countLines(ECHO) - echoBeforeT8, firedDelta: firedCount() - firedBeforeT8 },
     );
 
@@ -141,7 +141,7 @@ export async function run(ctx) {
     );
 
     // WS-5d 告警面恢复：解除后注入未签收终态（updated_at -10min，逃逸口开，T2b 同款）
-    // → 照旧开枪：恰 1 实例 exit 1 唤醒失败告警，其余实例 refire_gap 内不再开枪。
+    // → 照旧开枪：恰 1 实例 exit 1 wake failure alert，其余实例 refire_gap 内不再开枪。
     writeBoard([
       {
         id: "m-ws5d",
@@ -154,12 +154,12 @@ export async function run(ctx) {
     ]);
     const exits8d = [];
     fam8.forEach((f) => f.done.then((r) => exits8d.push({ pid: f.proc.pid, code: r.code, out: r.stdout })));
-    const woke8d = await waitFor(() => exits8d.some((e) => e.code === 1 && e.out.includes("唤醒失败告警")), 10000);
+    const woke8d = await waitFor(() => exits8d.some((e) => e.code === 1 && e.out.includes("wake failure alert")), 10000);
     await sleep(2500); // refire_gap（默认 5min）内其余实例不得再开枪
     ck.ok(
       "WS-5d 告警面恢复：隔离解除后未签收条件照旧开枪（恰 1 实例 exit 1）",
-      Boolean(woke8d) && exits8d.length === 1 && exits8d[0].code === 1 && exits8d[0].out.includes("唤醒失败告警"),
-      { woke8d, exits: exits8d.map((e) => ({ code: e.code, wake: e.out.includes("唤醒失败告警") })) },
+      Boolean(woke8d) && exits8d.length === 1 && exits8d[0].code === 1 && exits8d[0].out.includes("wake failure alert"),
+      { woke8d, exits: exits8d.map((e) => ({ code: e.code, wake: e.out.includes("wake failure alert") })) },
     );
     fam8.forEach((f) => f.kill());
     await Promise.allSettled(fam8.map((f) => f.done));
@@ -211,7 +211,7 @@ export async function run(ctx) {
     const r9 = await Promise.race([bg9.done, sleep(10000).then(() => null)]);
     ck.ok(
       "WS-6b 超 cap_window 恢复：抑制解除照旧开枪 exit 1 + fired 落盘 + 陈旧标记被清",
-      Boolean(r9) && r9.code === 1 && r9.stdout.includes("唤醒失败告警") && firedWs6().length >= 1 && !fs.existsSync(QMARK),
+      Boolean(r9) && r9.code === 1 && r9.stdout.includes("wake failure alert") && firedWs6().length >= 1 && !fs.existsSync(QMARK),
       r9 && { code: r9.code, fired: firedWs6(), markerGone: !fs.existsSync(QMARK) },
     );
     try {

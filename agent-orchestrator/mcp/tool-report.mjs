@@ -142,7 +142,7 @@ function toolReport(args) {
       if (token == null || token === "") {
         throw new ToolError(
           `report missing token for mission ${missionId}: refusing to record ` +
-            `(该 mission 已带派发 token，上报必须携带；check the [token] line in the pack CONTRACT section)`,
+            `(this mission already carries a dispatch token; the report must carry it; check the [token] line in the pack CONTRACT section)`,
         );
       }
       if (token !== expectedToken) {
@@ -154,8 +154,8 @@ function toolReport(args) {
     } else if (strictTokens) {
       // v0.6 (V6-19A, AUTH-07): strict mode closes the no-token face as well.
       throw new ToolError(
-        `report rejected for mission ${missionId}: --strict-tokens 模式下不接受无派发 token 的上报 ` +
-          `(先 context_pack 铸发 token 再派发)`,
+        `report rejected for mission ${missionId}: reports without a dispatch token are not accepted in --strict-tokens mode ` +
+          `(mint the token via context_pack first, then dispatch)`,
       );
     }
 
@@ -188,9 +188,9 @@ function toolReport(args) {
         eventId,
         spoolPath,
         status: mission.status,
-        note: "mission 已 closed：事件已入邮箱存档，任务板未改动（closed 拒收改板类 report）",
+        note: "mission already closed: the event went to the mailbox archive, board untouched (closed rejects board-changing reports)",
         lessonsRecorded: 0,
-        lessonsNote: "mission 已 closed，随附 lessons 未记录",
+        lessonsNote: "mission already closed; attached lessons not recorded",
         expectedToken,
         token,
       };
@@ -214,10 +214,10 @@ function toolReport(args) {
         spoolPath,
         status: mission.status,
         claimHolder,
-        claimWarn: `该 mission 租约属于 ${claimHolder}，请确认自己领的是这一项`,
-        note: `该 mission 租约属于 ${claimHolder}：事件已入邮箱存档，任务板未改动（成对鉴权不过：不续租、不改板）`,
+        claimWarn: `this mission lease belongs to ${claimHolder}; confirm you claimed this one`,
+        note: `this mission lease belongs to ${claimHolder}: the event went to the mailbox archive, board untouched (pairwise auth failed: no lease renewal, no board change)`,
         lessonsRecorded: 0,
-        lessonsNote: "成对鉴权不过，随附 lessons 未记录",
+        lessonsNote: "pairwise auth failed; attached lessons not recorded",
         expectedToken,
         token,
       };
@@ -253,7 +253,7 @@ function toolReport(args) {
       patch.timeline.push({
         at,
         event: "scope_violation",
-        summary: `scope 越界：${scopeViolations.join("、")}`,
+        summary: `out-of-scope: ${scopeViolations.join("; ")}`,
       });
     } else if (
       Array.isArray(mission.scope_violations) &&
@@ -311,7 +311,7 @@ function toolReport(args) {
         leaseUntil: new Date(Date.parse(at) + claimLeaseMinDefault * 60000).toISOString(),
       };
     } else if (mission.claim && typeof mission.claim === "object") {
-      claimWarn = `该 mission 租约属于 ${mission.claim.worker}，请确认自己领的是这一项`;
+      claimWarn = `this mission lease belongs to ${mission.claim.worker}; confirm you claimed this one`;
     }
     const updated = upsertMission(
       patch,
@@ -364,14 +364,14 @@ function toolReport(args) {
     // enough to flag.
     const draftedWarn =
       mission.status === "drafted" && kind === "done"
-        ? "drafted 状态直接收到 done（此前未见 dispatch 记录），请主控核对派发链路"
+        ? "done received while still drafted (no dispatch record seen before) - the coordinator should verify the dispatch chain"
         : null;
 
     // lessons candidates: kind=done only; cap 3; entries missing trigger/fix skipped.
     let lessonsRecorded = 0;
     let lessonsNote = null;
     if (kind === "done" && Array.isArray(args.lessons) && args.lessons.length) {
-      if (args.lessons.length > 3) lessonsNote = "lessons 超过 3 条，仅记录前 3 条";
+      if (args.lessons.length > 3) lessonsNote = "more than 3 lessons; only the first 3 recorded";
       const list = loadLessons();
       for (const raw of args.lessons.slice(0, 3)) {
         if (!raw || typeof raw !== "object") continue;
@@ -380,7 +380,7 @@ function toolReport(args) {
         const trigger = truncateStr(escapeDataLine(raw.trigger), 120).trim();
         const fix = truncateStr(escapeDataLine(raw.fix), 200).trim();
         if (!trigger || !fix) {
-          lessonsNote = lessonsNote ?? "存在缺少 trigger/fix 的 lesson，已跳过";
+          lessonsNote = lessonsNote ?? "a lesson missing trigger/fix was skipped";
           continue;
         }
         list.push({
@@ -441,7 +441,7 @@ function toolReport(args) {
         seenRefs.add(id);
         const entry = list.find((l) => l && l.id === id);
         if (!entry) {
-          lessonsRefsNote = lessonsRefsNote ?? `lesson_refs 含未知 id，已跳过: ${id}`;
+          lessonsRefsNote = lessonsRefsNote ?? `lesson_refs contains an unknown id, skipped: ${id}`;
           continue;
         }
         entry.confidence = Math.max(RETIRE_SCORE, (Number(entry.confidence) || 0) - 0.1);
@@ -486,7 +486,7 @@ function toolReport(args) {
     outcome.readyToClaim > 0
       ? {
           ready_to_claim: outcome.readyToClaim,
-          hint_claim: `任务板有 ${outcome.readyToClaim} 项 ready 可领取：board(action="claim", mission_id=…, worker="<你的名字>")`,
+          hint_claim: `the board has ${outcome.readyToClaim} ready mission(s) to claim: board(action="claim", mission_id=..., worker="<your name>")`,
         }
       : {};
   // v0.4.1 QA fix (distinct warn keys): the three warns used to share one `warn`
@@ -501,11 +501,11 @@ function toolReport(args) {
     // keys so no warn can overwrite another — the 0.4.1 QA fix precedent)
     // and additionally join the combined warn line.
     outcome.scopeViolations && outcome.scopeViolations.length
-      ? `scope 越界：${outcome.scopeViolations.join("、")}`
+      ? `out-of-scope: ${outcome.scopeViolations.join("; ")}`
       : null,
     // v0.6 (V6-18): details truncation keeps its own warn key (same precedent).
     outcome.detailsTruncated
-      ? `details 超过 DETAILS_MAX_CHARS（${DETAILS_MAX_CHARS} 字）已截断落箱；长文请写文件走 artifacts`
+      ? `details exceeded DETAILS_MAX_CHARS (${DETAILS_MAX_CHARS} chars), truncated into the box; put long content in files via artifacts`
       : null,
   ].filter(Boolean);
   return {
@@ -520,8 +520,8 @@ function toolReport(args) {
     closed: Boolean(outcome.closed),
     ...(outcome.closed && outcome.note ? { closed_note: outcome.note } : {}),
     hint:
-      "主控会轮询邮箱消费本事件；只有紧急四情形（验收标准要变/继续无意义/需不可逆操作/阻塞超10分钟）" +
-      "且 RespondToCoordinator 工具可用时才直达主控。",
+      "The coordinator polls the mailbox to consume this event; only the four emergencies (acceptance criteria about to change / continuing is pointless / an irreversible operation is needed / blocked over 10 minutes)" +
+      " with the RespondToCoordinator tool available go straight to the coordinator.",
     lessons_recorded: outcome.lessonsRecorded,
     ...(truncatedNote ? { note: truncatedNote } : {}),
     ...(outcome.lessonsNote ? { lessons_note: outcome.lessonsNote } : {}),
@@ -550,7 +550,7 @@ function toolReport(args) {
     // v0.6 (V6-18): details storage-cap truncation warn (distinct key, INJ-04).
     ...(outcome.detailsTruncated
       ? {
-          warn_details: `details 超过 DETAILS_MAX_CHARS（${DETAILS_MAX_CHARS} 字）已截断落箱；长文请写文件走 artifacts`,
+          warn_details: `details exceeded DETAILS_MAX_CHARS (${DETAILS_MAX_CHARS} chars), truncated into the box; put long content in files via artifacts`,
         }
       : {}),
     // v0.5 T2: manifest close-out response keys — conditional, omitted when

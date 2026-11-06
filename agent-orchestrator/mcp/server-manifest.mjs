@@ -37,7 +37,7 @@ function parseScopePathsArg(value) {
   const list = normalizePathList(value);
   if (list.length > SCOPE_PATHS_MAX) {
     throw new ToolError(
-      `scope_paths 超限：${list.length} 项（帽 ${SCOPE_PATHS_MAX} 项，报错拒绝而非静默截断）`,
+      `scope_paths over cap: ${list.length} entries (cap ${SCOPE_PATHS_MAX}; rejected with an error, never silently truncated)`,
     );
   }
   return list;
@@ -49,7 +49,7 @@ function parseBudgetArg(value) {
   const tier = String(value).trim();
   if (tier !== "S" && tier !== "M" && tier !== "L") {
     throw new ToolError(
-      'context_pack budget 必须是 "S"、"M" 或 "L"（S≈20/M≈60/L≈120 步），非法值报错拒绝',
+      'context_pack budget must be "S", "M", or "L" (S≈20/M≈60/L≈120 steps); invalid values are rejected with an error',
     );
   }
   return tier;
@@ -59,12 +59,12 @@ function parseBudgetArg(value) {
 function parseInputsArg(value) {
   if (value == null) return [];
   if (!Array.isArray(value)) {
-    throw new ToolError("context_pack inputs 必须是 mission id 字符串数组");
+    throw new ToolError("context_pack inputs must be an array of mission id strings");
   }
   const ids = value.map((x) => String(x).trim()).filter((s) => s.length > 0);
   if (ids.length > INPUTS_MAX) {
     throw new ToolError(
-      `inputs 超限：${ids.length} 个 mission id（帽 ${INPUTS_MAX} 个，报错拒绝而非静默截断）`,
+      `inputs over cap: ${ids.length} mission ids (cap ${INPUTS_MAX}; rejected with an error, never silently truncated)`,
     );
   }
   return ids;
@@ -77,11 +77,11 @@ function parseInputsArg(value) {
 function buildOwnershipLines(scopePaths) {
   if (!scopePaths || !scopePaths.length) return null;
   return [
-    "## OWNERSHIP（文件所有权）",
-    "允许写（scope_paths，越界 = 验收 fail 信号）：",
+    "## OWNERSHIP (file ownership)",
+    "Writable (scope_paths; a write outside it = review-fail signal):",
     ...scopePaths.map((p) => `- ${p}`),
     // W4 (PO 案 A): "会" filler dropped — wording aligned with the SKILL §3 sample.
-    "清单外路径一律只读。done 的 files_touched 按此清单比对。",
+    "Paths outside the list are read-only. done's files_touched is audited against this list.",
   ];
 }
 
@@ -97,15 +97,15 @@ function buildBudgetLines(tier) {
   // W4 (PO 案 A, RL-1): one rule per line; "请/主动" attitude fillers dropped;
   // "(派发前就拆)" coordinator-facing meta dropped (worker-side rule kept).
   const lines = [
-    "## BUDGET（预算档位）",
-    `档位：${tier}（≈${BUDGET_TIER_STEPS[tier]} 步上限）。`,
-    "milestone report 附进度与剩余步数估计。",
-    "逼近上限收尾：完成当前阶段、report(done) 附遗留清单。",
+    "## BUDGET (budget tier)",
+    `Tier: ${tier} (≈${BUDGET_TIER_STEPS[tier]} step cap).`,
+    "Attach progress and a remaining-steps estimate to each milestone report.",
+    "Near the cap, wrap up: finish the current stage and report(done) with a leftover list.",
   ];
   if (tier === "L") {
-    lines.push("L 档附加：任务应已预拆阶段或转 workflow——你只负责当前阶段，逼近上限即按上行收尾交接。");
+    lines.push("L-tier extra: the task should already be pre-split into stages or moved to a workflow - you own only the current stage; near the cap, wrap up per the line above and hand over.");
   }
-  lines.push("上下文档位：WARN 120K 提醒 / ACT 150K 决策 / HARD 180K 强制收尾 / ABS 230K 红线（由主控对账判定，worker 无需自测）");
+  lines.push("Context thresholds: WARN 120K heads-up / ACT 150K decision / HARD 180K forced wrap-up / ABS 230K red line (audited by the coordinator; workers do not self-measure)");
   return lines;
 }
 
@@ -159,7 +159,7 @@ function closeOutManifest(mission, rawEntries, at) {
     ? rawEntries
     : rawEntries == null
       ? null
-      : (notes.push("manifest_entries 非数组，整字段已忽略"), null);
+      : (notes.push("manifest_entries not an array; the whole field ignored"), null);
 
   // 2) shape validation: drop-and-count, reasons recorded for the note.
   const valid = [];
@@ -170,17 +170,17 @@ function closeOutManifest(mission, rawEntries, at) {
       const e = declared[i];
       const why =
         !e || typeof e !== "object" || Array.isArray(e)
-          ? `第${i + 1}条非对象`
+          ? `entry #${i + 1} not an object`
           : (() => {
               const layer = String(e.layer ?? "").trim();
               const type = String(e.type ?? "").trim();
               const title = String(e.title ?? "").trim();
               const ref = e.ref && typeof e.ref === "object" && !Array.isArray(e.ref) ? e.ref : null;
               const refPath = ref ? String(ref.path ?? "").trim() : "";
-              if (!MANIFEST_LAYERS.includes(layer)) return `第${i + 1}条 layer 非法（${truncateStr(layer || "空", 16)}）`;
-              if (!MANIFEST_TYPES.includes(type)) return `第${i + 1}条 type 非法（${truncateStr(type || "空", 16)}）`;
-              if (!title) return `第${i + 1}条缺 title`;
-              if (!refPath) return `第${i + 1}条缺 ref.path`;
+              if (!MANIFEST_LAYERS.includes(layer)) return `entry #${i + 1} invalid layer (${truncateStr(layer || "empty", 16)})`;
+              if (!MANIFEST_TYPES.includes(type)) return `entry #${i + 1} invalid type (${truncateStr(type || "empty", 16)})`;
+              if (!title) return `entry #${i + 1} missing title`;
+              if (!refPath) return `entry #${i + 1} missing ref.path`;
               return null;
             })();
       if (why) {
@@ -200,7 +200,7 @@ function closeOutManifest(mission, rawEntries, at) {
       });
     }
     if (dropped) {
-      notes.push(`manifest 条目形状违规丢弃 ${dropped} 条：${reasons.join("、")}`);
+      notes.push(`manifest entries dropped for shape violations: ${dropped} (${reasons.join("; ")})`);
     }
   }
 
@@ -208,7 +208,7 @@ function closeOutManifest(mission, rawEntries, at) {
   let entries = valid.slice();
   if (entries.length > MANIFEST_MAX_ENTRIES) {
     notes.push(
-      `manifest 条目超帽（≤${MANIFEST_MAX_ENTRIES} 条），丢弃尾部 ${entries.length - MANIFEST_MAX_ENTRIES} 条`,
+      `manifest entries over cap (<=${MANIFEST_MAX_ENTRIES}); dropped the tail ${entries.length - MANIFEST_MAX_ENTRIES}`,
     );
     entries = entries.slice(0, MANIFEST_MAX_ENTRIES);
   }
@@ -222,17 +222,17 @@ function closeOutManifest(mission, rawEntries, at) {
     t0Kept.push(e);
   }
   if (entries.length - t0Kept.length > 0) {
-    notes.push(`T0 条目超帽（≤${MANIFEST_T0_MAX} 条），丢弃尾部 ${entries.length - t0Kept.length} 条`);
+    notes.push(`T0 entries over cap (<=${MANIFEST_T0_MAX}); dropped the tail ${entries.length - t0Kept.length}`);
   }
   entries = t0Kept;
   for (const e of entries) {
     if (e.title.length > MANIFEST_TITLE_CHARS) e.title = e.title.slice(0, MANIFEST_TITLE_CHARS);
     if (e.layer === "T0" && Buffer.byteLength(e.text ?? "", "utf8") > MANIFEST_T0_ENTRY_BYTES) {
       const head = truncateUtf8Bytes(e.text, MANIFEST_T0_ENTRY_BYTES);
-      e.text = `${head}…[截断于${Buffer.byteLength(head, "utf8")}字节]`;
+      e.text = `${head}...[truncated at ${Buffer.byteLength(head, "utf8")} bytes]`;
     } else if (e.layer === "T1" && (e.text ?? "").length > MANIFEST_T1_ENTRY_CHARS) {
       const head = e.text.slice(0, MANIFEST_T1_ENTRY_CHARS);
-      e.text = `${head}…[截断于${head.length}字]`;
+      e.text = `${head}...[truncated at ${head.length} chars]`;
     }
   }
 
@@ -249,13 +249,13 @@ function closeOutManifest(mission, rawEntries, at) {
       entries = paths.map((p) => ({
         layer: "T2",
         type: "anchor",
-        title: "产物指针（server 桩）",
+        title: "artifact pointers (server stub)",
         text: undefined,
         ref: { path: p },
       }));
       if (entries.length > MANIFEST_MAX_ENTRIES) {
         notes.push(
-          `server 桩条目超帽（≤${MANIFEST_MAX_ENTRIES} 条），丢弃尾部 ${entries.length - MANIFEST_MAX_ENTRIES} 条`,
+          `server stub entries over cap (<=${MANIFEST_MAX_ENTRIES}); dropped the tail ${entries.length - MANIFEST_MAX_ENTRIES}`,
         );
         entries = entries.slice(0, MANIFEST_MAX_ENTRIES);
       }
@@ -280,7 +280,7 @@ function closeOutManifest(mission, rawEntries, at) {
 
   if (!entries.length) {
     // 5b) all-empty: no file, no pointer — the note explains why (CR-V21).
-    notes.push("manifest 未写入：零有效条目且零产物物料（不落 sidecar、不设指针）");
+    notes.push("manifest not written: zero valid entries and zero artifact material (no sidecar, no pointer)");
     return { pointer: null, note: notes.join("；"), warnings };
   }
 
@@ -297,9 +297,9 @@ function closeOutManifest(mission, rawEntries, at) {
     fileDropped += 1;
     payload = { v: 1, mission_id: mission.id, generated_at: at, source, entries: assemble(entries, source) };
   }
-  if (fileDropped) notes.push(`manifest 文件超 32KB 总帽，丢弃尾部 ${fileDropped} 条`);
+  if (fileDropped) notes.push(`manifest file over the 32KB total cap; dropped the tail ${fileDropped} entries`);
   if (!entries.length) {
-    notes.push("manifest 未写入：零有效条目且零产物物料（不落 sidecar、不设指针）");
+    notes.push("manifest not written: zero valid entries and zero artifact material (no sidecar, no pointer)");
     return { pointer: null, note: notes.join("；"), warnings };
   }
   const sidecarPath = path.join(root, "packs", mission.id, "manifest.json");
@@ -327,9 +327,9 @@ function closeOutManifest(mission, rawEntries, at) {
       fileText = null;
     }
     if (fileText == null) {
-      warnings.push(`assertion 未比对：断言文件不可读（${refPath}）`);
+      warnings.push(`assertion not compared: assertion file unreadable (${refPath})`);
     } else if (!fileText.includes(e.text ?? "")) {
-      warnings.push(`assertion 比对不一致：${refPath} 未包含条目 ${e.id} 的内联文本`);
+      warnings.push(`assertion mismatch: ${refPath} does not contain the inline text of entry ${e.id}`);
     }
   }
 

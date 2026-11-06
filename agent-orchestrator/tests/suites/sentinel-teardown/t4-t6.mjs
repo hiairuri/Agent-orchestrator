@@ -102,8 +102,8 @@ export async function run(ctx) {
     const rA5 = await Promise.race([bgA5.done, sleep(12000).then(() => null)]);
     ck.ok(
       "T5a 活板真崩溃绕门照旧：crash 告警直开（反证不成立不降级）",
-      Boolean(rA5) && rA5.code === 1 && rA5.stdout.includes("疑似崩溃告警") && firedNames5("m-b2a--crash--").length >= 1,
-      rA5 && { code: rA5.code, hasCrash: rA5.stdout.includes("疑似崩溃告警"), fired: firedNames5("m-b2a--") },
+      Boolean(rA5) && rA5.code === 1 && rA5.stdout.includes("suspected crash alert") && firedNames5("m-b2a--crash--").length >= 1,
+      rA5 && { code: rA5.code, hasCrash: rA5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2a--") },
     );
 
     // T5b 双陈旧降级：lastActivity 与 board mtime 同龄期陈旧 → C3 降级 C2 inflight_stall（受双空闲门），不出 crash
@@ -122,8 +122,8 @@ export async function run(ctx) {
     const rB5 = await Promise.race([bgB5.done, sleep(12000).then(() => null)]);
     ck.ok(
       "T5b 双陈旧反证成立：C3 降级 C2 stall 受双空闲门（无 crash 告警）",
-      Boolean(rB5) && rB5.code === 1 && rB5.stdout.includes("在飞任务龄期告警") && !rB5.stdout.includes("疑似崩溃告警") && firedNames5("m-b2b--inflight_stall--").length >= 1 && firedNames5("m-b2b--crash--").length === 0,
-      rB5 && { code: rB5.code, stall: rB5.stdout.includes("在飞任务龄期告警"), crash: rB5.stdout.includes("疑似崩溃告警"), fired: firedNames5("m-b2b--") },
+      Boolean(rB5) && rB5.code === 1 && rB5.stdout.includes("in-flight age alert") && !rB5.stdout.includes("suspected crash alert") && firedNames5("m-b2b--inflight_stall--").length >= 1 && firedNames5("m-b2b--crash--").length === 0,
+      rB5 && { code: rB5.code, stall: rB5.stdout.includes("in-flight age alert"), crash: rB5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2b--") },
     );
 
     try {

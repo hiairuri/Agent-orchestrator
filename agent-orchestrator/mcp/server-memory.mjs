@@ -44,7 +44,7 @@ function buildGlobalMemoryLines() {
     text = byteSliceUtf8(text, GLOBAL_MEM_MAX_BYTES);
     truncated = true;
   }
-  if (truncated) text += `\n…（截断，全文见 ${path.join(memoryRoot, "AGENTS.md")}）`;
+  if (truncated) text += `\n... (truncated; full text at ${path.join(memoryRoot, "AGENTS.md")})`;
   return text.split("\n");
 }
 
@@ -106,9 +106,9 @@ function digestGradedStaleReason(field, want, now) {
       ? Math.abs(nNow - nWant)
       : null;
   const minor = drift !== null && drift <= DIGEST_DRIFT_N;
-  const head = field === "lessons_lines" ? `${field} ${want} ≠ ${now}` : `${field} 不匹配`;
-  const tail = drift !== null ? `漂移 ${drift}${minor ? "≤" : ">"}${DIGEST_DRIFT_N}` : "漂移未知";
-  const grade = minor ? "轻微——态势面大概率仍有效" : "显著——建议触发归敛";
+  const head = field === "lessons_lines" ? `${field} ${want} != ${now}` : `${field} mismatch`;
+  const tail = drift !== null ? `drift ${drift}${minor ? "<=" : ">"}${DIGEST_DRIFT_N}` : "drift unknown";
+  const grade = minor ? "minor - the situation face is most likely still valid" : "significant - suggest triggering a gleaning round";
   return { text: `${head}（${tail}，${grade}）`, detail: { field, want, now, drift } };
 }
 
@@ -135,7 +135,7 @@ function readProjectDigest() {
     return missing;
   }
   const text = String(raw).replace(/\r\n?/g, "\n").replace(/\n+$/, "");
-  if (!text) return { ...missing, status: "stale", stale_reason: "digest 文件为空" };
+  if (!text) return { ...missing, status: "stale", stale_reason: "digest file is empty" };
   const all = text.split("\n");
   const head = /^generated_at:\s*(.+?)\s*$/.exec(all[0] || "");
   const generatedAt = head ? head[1] : null;
@@ -144,16 +144,16 @@ function readProjectDigest() {
   // first `generated_at` line must not consume the line/byte budget. Judging by
   // all.length made a spec-conforming 12-line body permanently STALE.
   const bodyBytes = Buffer.byteLength(body.join("\n"), "utf8");
-  let staleReason = head ? null : "digest 首行缺 generated_at";
+  let staleReason = head ? null : "digest first line missing generated_at";
   if (!staleReason && (body.length > DIGEST_MAX_LINES || bodyBytes > DIGEST_MAX_BYTES)) {
-    staleReason = `digest 超帽（正文 ${body.length} 行/${bodyBytes}B > ${DIGEST_MAX_LINES} 行/${DIGEST_MAX_BYTES}B）`;
+    staleReason = `digest over cap (body ${body.length} lines/${bodyBytes}B > ${DIGEST_MAX_LINES} lines/${DIGEST_MAX_BYTES}B)`;
   }
   // Clamp to the body caps (never render an unbounded section).
   let lines = body.length > DIGEST_MAX_LINES ? body.slice(0, DIGEST_MAX_LINES) : body;
   let joined = lines.join("\n");
   if (Buffer.byteLength(joined, "utf8") > DIGEST_MAX_BYTES) joined = byteSliceUtf8(joined, DIGEST_MAX_BYTES);
   lines = joined ? joined.split("\n") : [];
-  if (!staleReason && !lines.length) staleReason = "digest 正文为空";
+  if (!staleReason && !lines.length) staleReason = "digest body is empty";
   // Source fingerprint (generation-time vs current). Mismatch reasons are
   // graded in place (M8-1, O2=N5): stale_reason stays the render string, the
   // structured {field,want,now,drift} rides stale_detail (card §5 contract).
@@ -173,7 +173,7 @@ function readProjectDigest() {
       return missing;
     }
     const now = digestSourcesNow();
-    if (!want) staleReason = "digest 指纹侧车缺失/不可解析";
+    if (!want) staleReason = "digest fingerprint sidecar missing/unparsable";
     else if (Number(want.lessons_lines) !== now.lessons_lines) {
       const g = digestGradedStaleReason("lessons_lines", want.lessons_lines, now.lessons_lines);
       staleReason = g.text;
@@ -569,34 +569,34 @@ function materializeGleanPack(sharedCfg) {
     /* read-back failure → CONTEXT 留空；brief 物化刚在本调用点同步完成，此路径常态不可达 */
   }
   const pack = [
-    "# 任务包：记忆归敛（server 固定物化 glean-pack，固定模板直投——零组装，无常驻组装方）",
+    "# Task pack: memory gleaning (server-fixed materialized glean-pack, fixed template direct handoff - zero assembly, no standing assembler)",
     "",
-    "## CONTRACT（三行契约以派发 prompt 尾块为准）",
-    "[channel]/[worker]/[token] 三行与字段语义以派发 prompt 尾块为准（权威定义 = SKILL 第 3 章 PC-1；本包 server 预物化，token 不入包）。",
-    "kind ∈ {milestone, blocked, question, done}；summary ≤ 200 字；done 必带 artifacts=[归敛报告路径]。",
+    "## CONTRACT (the three-line contract is governed by the dispatch prompt tail block)",
+    "[channel]/[worker]/[token]: the dispatch prompt tail block is the sole authority for the three lines and field semantics (traceability: PC-1); this pack is server-prematerialized and the token never enters the pack.",
+    "kind ∈ {milestone, blocked, question, done}; summary <= 200 chars; done requires artifacts=[gleaning report path].",
     "",
-    "## CONTEXT（glean-brief 逐字内嵌，快照权威；与实况冲突以实况为准并在报告记录偏差）",
+    "## CONTEXT (glean-brief embedded verbatim; the snapshot is authoritative; where it conflicts with live state, live state wins and the deviation is noted in the report)",
     briefJson,
     "## READ FIRST",
-    "- agents/orch-gleaner.md（persona 原型；GL 系规则照原型执行）",
-    "- 锁文件位置一律取 CONTEXT brief 的 lock_path 字段（权威指针勿手写）",
+    "- agents/orch-gleaner.md (persona archetype; GL-series rules follow the archetype)",
+    "- always take the lock file location from the CONTEXT brief's lock_path field (authoritative pointer - never hand-write it)",
     "",
     "## TASK",
-    "记忆归敛一轮：抢锁 → 消费 ORCHTEMP（brief.orchtemp_pending）→ 候选巡检四态处置 → 视图层维护（ORCH.md ver+1 / 根 AGENTS.md 标记区 / 全端 AGENTS.md / 全端库 memory/ 目录）→ 写 digest（brief.digest.path + sidecar_path，帽 12 行/1200B + 源指纹）→ 锁置 done + watermarks → 写归敛报告。",
+    "One memory-gleaning round: grab the lock -> consume ORCHTEMP (brief.orchtemp_pending) -> inspect candidates with four-state dispositions -> maintain the view layer (ORCH.md ver+1 / root AGENTS.md marker zone / fleet-wide AGENTS.md / fleet-wide library memory/ directory) -> write the digest (brief.digest.path + sidecar_path, cap 12 lines/1200B + source fingerprint) -> set the lock to done + watermarks -> write the gleaning report.",
     "",
-    "## RULES（server 烘焙固定规则，与 persona GL 系等效）",
-    "- 锁纪律（§9.3）：先领锁（brief.lock_path，wx 原子写 active 态）再消费；锁占用（活 PID 且未过期）→ report(kind=done, summary=\"锁占用，跳过\") 立即收工；完成转 done + finished_at + watermarks（全端行数+各扫描项目行数基线）；失败退出保持 active 留现场",
-    "- 四态口径：每条候选恰一处置——晋升（promote/promote_batch 合并语义走 server，证据随报告）/ 合并（同 trigger+fix 归一，hits/confidence 合并）/ 退役（retire 置状态、内容原样保留；矛盾走 add(contradicts=旧id) 置旧条 superseded）/ 保留（证据不足留 candidate 并在报告写理由）",
-    `- 视图层边界：只写视图层（ORCH.md 重写 ver+1，帽 ${capLines} 行/${fmtCapBytes(capBytes)}；根 AGENTS.md 只动 orch-mem 标记对内、区外字节零触碰；全端 AGENTS.md 帽 50 行/2KB；全端 AGENTS.md 或全端库 memory/ 目录缺席=先创建（mkdir -p+有 content 首建才落笔，不落空壳；首建事件报告『视图变更』节单列））；lessons.jsonl 事件行永不直写（改动一律经 lessons 工具）；active 教训不硬删（退役只有建议权）；标记区缺失 = 该项目记忆功能关闭，跳过并报告，不重建`,
-    "- digest 职责（Q11 B+C；v1.4 C1 分键）：每轮整文件覆盖写 brief.digest.path（分键路径 digest/<rootId>/…，跨项目各读各键；首行 generated_at: <ISO8601>，正文 ≤12 行/≤1200B：态势面=项目现状一句话+在飞 mission 摘要，时间面=近期裁决/关键事件 3–5 条；禁任务相关检索内容）与 brief.digest.sidecar_path（{generated_at, rootId, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}，rootId=brief.root_id 逐字）；sources 记录产出时点实测值，组包侧据此判 freshness",
-    "- 日志纪律：归敛报告 = reports/<YYYYMMDD-HHmmss>-glean.md（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源）；报告即交付物，主会话只读报告与 Return 指针",
-    "- 受阻/目标矛盾/必败门禁 → 立即 report(kind=blocked, question=需要主会话决策的事项)。",
+    "## RULES (server-baked fixed rules, equivalent to the persona GL series)",
+    "- Lock discipline (§9.3): grab the lock first (brief.lock_path, wx atomic write in the active state) before consuming; lock occupied (live PID and unexpired) -> report(kind=done, summary=\"lock occupied, skipping\") and wrap up immediately; on completion set done + finished_at + watermarks (fleet-wide line counts + per-scanned-project line-count baselines); on failure exit leaving active in place for forensics",
+    "- Four-state rule: exactly one disposition per candidate - promote (promote/promote_batch merge semantics via the server, evidence in the report) / merge (same trigger+fix normalized; hits/confidence merged) / retire (retire sets the state, content kept verbatim; contradictions go through add(contradicts=<old id>) marking the old entry superseded) / retain (insufficient evidence stays candidate with the reason written in the report)",
+    `- View-layer boundary: write only the view layer (ORCH.md rewritten ver+1, cap ${capLines} lines/${fmtCapBytes(capBytes)}; the root AGENTS.md is touched only inside the orch-mem marker pair, zero byte touches outside it; fleet-wide AGENTS.md cap 50 lines/2KB; a missing fleet-wide AGENTS.md or fleet-wide memory/ directory = create first (mkdir -p, first write only with content, never an empty shell; first-creation events listed in a dedicated report section)); lessons.jsonl event lines are never written directly (all changes go through the lessons tool); active lessons are never hard-deleted (retire is advisory only); a missing marker zone = the memory feature is off for that project, skip and report, never rebuild`,
+    "- digest duty (keyed split per rootId): each round overwrites brief.digest.path in full (keyed path digest/<rootId>/..., each project reads its own key; first line generated_at: <ISO8601>, body <= 12 lines/<= 1200B: situation face = one sentence of project state + in-flight mission summary, time face = 3-5 recent rulings/key events; task-related search content forbidden) and brief.digest.sidecar_path ({generated_at, rootId, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}, rootId = brief.root_id verbatim); sources record measured values at production time; the pack side judges freshness from them",
+    "- Report discipline: gleaning report = reports/<YYYYMMDD-HHmmss>-glean.md (cap 150 lines; view changes/promotions/ORCHTEMP consumption each itemized with lessons-id provenance); the report is the deliverable, and the main session reads only the report and the Return pointers",
+    "- Blocked / goal conflict / unwinnable gate -> immediately report(kind=blocked, question=what the main session must decide).",
     "",
-    "## RETURN（≤3 行指针纪律）",
-    "- 最终回复恰 ≤3 行，只回指针，不复制报告内容（零汇报占用）：",
-    "- 行 1：KIND=done + 报告路径（reports/<ts>-glean.md）",
-    "- 行 2：视图变更计数（文件×动作）+ 四态计数（晋升/合并/退役/保留）",
-    "- 行 3：未处理/遗留（无则写「无」）",
+    "## RETURN (<= 3-line pointer discipline)",
+    "- The final reply is at most 3 lines, pointers only, never copying report content (zero-report overhead):",
+    "- Line 1: KIND=done + the report path (reports/<ts>-glean.md)",
+    "- Line 2: view-change counts (file x action) + four-state counts (promote/merge/retire/retain)",
+    "- Line 3: unhandled/leftover (write none if none)",
     "",
   ].join("\n");
   fs.mkdirSync(memoryRoot, { recursive: true });

@@ -37,12 +37,19 @@ const TOOLS = [
   {
     name: PREFIX + "board",
     description:
-      "Persistent mission board: create, query, and acknowledge missions; claim pool tasks; and P2P ask/answer between missions.\n\n" +
+      "Persistent mission board for orchestrating subagents: create and update missions, query state\n" +
+      "with derived health fields, acknowledge results, claim pool tasks, and run server-arbitrated\n" +
+      "peer Q&A between missions. Single source of task state across sessions; coordinator state\n" +
+      "changes go through upsert.\n" +
+      "\n" +
       "Usage:\n" +
-      "- The data source for cross-session resume; action semantics on the `action` parameter, behavior contract in SKILL section 14 (TS-1/2/11).\n" +
-      "- upsert shallow-merges `mission` fields (dispatch/blocked/pack one level deeper); list excludes closed missions by default.\n" +
-      "- upsert/ack return {ok,id,status}; get omits timeline/original_prompt - pass view:\"full\" for the verbatim record.\n" +
-      "- p2p_ask only from a blocked/question mission (server-arbitrated peer Q&A; TS-11).\n" +
+      "- upsert shallow-merges the given `mission` fields (dispatch/blocked/pack merge one level\n" +
+      "  deeper); list excludes closed missions by default.\n" +
+      "- upsert/ack return {ok,id,status}; get omits timeline/original_prompt unless view:\"full\".\n" +
+      "- claim is a CAS claim of a ready mission: it becomes running under a lease; report renews\n" +
+      "  the lease; on timeout the mission returns to ready.\n" +
+      "- p2p_ask/p2p_answer is server-arbitrated peer Q&A with a two-way echo; ask only from a\n" +
+      "  blocked/question mission.\n" +
       "- Do NOT pass the read-only fields owner/claim/ack in `mission` - they are ignored.",
     inputSchema: {
       type: "object",
@@ -50,7 +57,7 @@ const TOOLS = [
         action: {
           enum: ["upsert", "get", "list", "ack", "claim", "p2p_ask", "p2p_answer"],
           description:
-            "upsert=create/merge; get=fetch; list=list (closed excluded); ack=acknowledge; claim=pool CAS claim; p2p_ask/p2p_answer=peer Q&A (SKILL section 14)",
+            "upsert=create/merge; get=fetch; list=list (closed excluded); ack=acknowledge; claim=pool CAS claim; p2p_ask/p2p_answer=peer Q&A",
         },
         to_mission_id: {
           type: "string",
@@ -275,13 +282,16 @@ const TOOLS = [
   {
     name: PREFIX + "report",
     description:
-      "Report a mission event (milestone/blocked/question/done) to the coordinator mailbox and record it on the mission board.\n\n" +
+      "Report a mission event to the coordinator mailbox and record it on the mission board.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Call at each verifiable unit and once at the end; artifacts paths on done.\n" +
-      "- Event protocol = the dispatch pack's CONTRACT section (SKILL section 14 TS-12).\n" +
-      "- summary caps at 200 characters; long findings go in details.\n" +
-      "- question is required for kind=blocked/question.\n" +
-      "- lessons and manifest_entries are done-only.",
+      "- Call at each verifiable unit, and once at the end with artifact paths.\n" +
+      "- kind: milestone = progress on a running mission; blocked/question = stopped, `question`\n" +
+      "  is required; done = finished.\n" +
+      "- summary caps at 200 characters; put long findings in details.\n" +
+      "- done carries artifacts, up to 3 {trigger,fix} lesson candidates, and manifest_entries\n" +
+      "  (max 12; over-cap and malformed entries are soft-handled, never an error).\n" +
+      "- lesson_refs (blocked/question only) demotes pack lessons that proved wrong.",
     inputSchema: {
       type: "object",
       required: ["mission_id", "worker", "kind", "summary"],
@@ -358,7 +368,7 @@ const TOOLS = [
           items: { type: "string" },
           description:
             "Optional for kind=blocked/question: pack lesson ids ([type·id] prefixes in the pack LESSONS section) that proved wrong; " +
-            "the server demotes them and may auto-retire them at the floor (SKILL section 10)",
+            "the server demotes them and may auto-retire them at the floor",
         },
       },
     },
@@ -366,13 +376,15 @@ const TOOLS = [
   {
     name: PREFIX + "mailbox",
     description:
-      "Coordinator mailbox: peek surveys unread events without consuming, read consumes them atomically, " +
-      "answer logs a reply, gc archives old events (SKILL section 5).\n\n" +
+      "Coordinator mailbox over the mission event spool.\n" +
+      "\n" +
       "Usage:\n" +
-      "- read takes over subagent results (wake-up handover); peek surveys only.\n" +
+      "- peek surveys unread events without consuming them; read consumes them atomically and\n" +
+      "  takes over subagent results (the wake-up handover).\n" +
       "- kind and mission_id narrow the listing; limit caps results.\n" +
-      "- answer logs the coordinator reply and returns the recommended SendMessage call (never messages the worker directly).\n" +
-      "- gc removes events older than keep_days (default 14).",
+      "- answer logs the coordinator reply and returns the recommended SendMessage call (never\n" +
+      "  messages the worker directly).\n" +
+      "- gc archives events older than keep_days (default 14).",
     inputSchema: {
       type: "object",
       properties: {
@@ -388,12 +400,14 @@ const TOOLS = [
   {
     name: PREFIX + "spawn_agent",
     description:
-      "Create a custom subagent persona at <project>/.zcode/agents/<name>.md from an archetype template; it registers in new sessions (SKILL section 8).\n\n" +
+      "Create a custom subagent persona file at <project>/.zcode/agents/<name>.md from an archetype\n" +
+      "template; it registers in new sessions.\n" +
+      "\n" +
       "Usage:\n" +
-      "- To use it in-session, dispatch a general-purpose agent with the file body as the prompt.\n" +
+      "- To use it in the current session, dispatch a general-purpose agent with the file body as\n" +
+      "  the prompt.\n" +
       "- tools overrides the archetype toolset and MUST keep the report tool's full name.\n" +
-      "- system_prompt is appended after the archetype body.\n" +
-      "- model defaults to the session model.",
+      "- system_prompt is appended after the archetype body; model defaults to the session model.",
     inputSchema: {
       type: "object",
       required: ["name", "description"],
@@ -419,11 +433,17 @@ const TOOLS = [
   {
     name: PREFIX + "context_pack",
     description:
-      "Materialize a context pack (1-8 variants) and return the dispatch header and token; pack rules in SKILL section 14 (TS-3).\n\n" +
+      "Materialize a self-contained context pack (1-8 variants) and return the dispatch header and\n" +
+      "worker token.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Copy upstream context verbatim; the subagent was absent.\n" +
-      "- inputs freeze at pack time; later upstream updates do not propagate.\n" +
-      "- scope_paths = sandbox write allowlist; isolation=worktree creates the sandbox.",
+      "- Copy upstream context verbatim into upstream_context: the subagent was absent and has no\n" +
+      "  other access to it.\n" +
+      "- Pack inputs freeze at creation; later upstream updates do not propagate.\n" +
+      "- scope_paths is the write allowlist (max 32 repo-relative prefixes); isolation=worktree\n" +
+      "  creates a git-worktree sandbox.\n" +
+      "- budget sets the step-budget tier (S/M/L); inputs lists upstream mission ids (max 4)\n" +
+      "  pulled into SUMMARY/READ FIRST.",
     inputSchema: {
       type: "object",
       required: ["mission_id", "title", "task"],
@@ -456,20 +476,20 @@ const TOOLS = [
         scope_paths: {
           type: "array",
           items: { type: "string" },
-          description: "write allowlist, max 32 (SKILL section 14 TS-3)",
+          description: "write allowlist: repo-relative path prefixes, max 32 (empty = all paths)",
         },
         budget: {
           enum: ["S", "M", "L"],
-          description: "S/M/L step budget (TS-3)",
+          description: "step-budget tier: S/M/L (lands in the pack BUDGET section)",
         },
         inputs: {
           type: "array",
           items: { type: "string" },
-          description: "upstream mission ids, max 4 (TS-3)",
+          description: "upstream mission ids (max 4), pulled into the pack SUMMARY/READ FIRST",
         },
         share_node_modules: {
           type: "boolean",
-          description: "Auto-share node_modules via junction (SKILL section 12)",
+          description: "true = auto-share the project node_modules into the sandbox via junction",
         },
         extra: {
           type: "string",
@@ -494,9 +514,11 @@ const TOOLS = [
   {
     name: PREFIX + "resume",
     description:
-      "Resume briefing: per unclosed mission a recommended_action (same-session chat / workflow resume / cross-session re-dispatch; SKILL section 5 CL-9).\n\n" +
+      "Session-start briefing: for every unclosed mission return a recommended_action - same-session\n" +
+      "chat, workflow resume, or cross-session re-dispatch.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Call once at session start.",
+      "- Call once at session start; session_id separates same-session advice from cross-session.",
     inputSchema: {
       type: "object",
       properties: {
@@ -510,15 +532,20 @@ const TOOLS = [
   {
     name: PREFIX + "lessons",
     description:
-      "Orchestration lessons memory: list/add/promote/promote_batch/retire/stage (contract in SKILL section 10).\n\n" +
+      "Orchestration lessons memory: list/add/promote/promote_batch/retire/stage.\n" +
+      "\n" +
       "Usage:\n" +
-      "- promote: refine a candidate to active; same trigger+fix auto-merges hits/confidence. " +
-      "Global: target=\"global\" promotes fleet-wide (merge or create scope=global; refs=[source id, source project path, root_id] backlink; source entry untouched).\n" +
-      "- promote_batch: transactional batch promote, single promote semantics per item; invalid item rejects the batch (SKILL section 10 TS-7).\n" +
-      "- stage: Coordinator-side staging (ORCHTEMP): writes source=\"orchestrator\"/candidate/confidence=0; no merge no injection; consumed by the gleaner (retired+view-layer write-back). trigger/fix required.\n" +
-      "- add: coordinator-direct insert.\n" +
-      "- retire: manual retirement with a reason.\n" +
-      "- list with token: per-reader hash baseline (no-new -> short answer); ANY write carrying a token is rejected (worker read-only gate).",
+      "- promote refines a candidate to active; same trigger+fix auto-merges hits/confidence.\n" +
+      "  target=\"global\" promotes fleet-wide (merge or create scope=global;\n" +
+      "  refs=[source id, source project path, root_id] backlink; source entry untouched).\n" +
+      "- promote_batch: transactional batch promote, single promote semantics per item; one\n" +
+      "  invalid item rejects the whole batch.\n" +
+      "- stage: coordinator-side staging (write-only staging area; writes source=\"orchestrator\"/\n" +
+      "  candidate/confidence=0): no merge, no injection; consumed by the memory-gleaning agent\n" +
+      "  (gleaner). trigger/fix required.\n" +
+      "- add inserts directly; retire removes with a reason.\n" +
+      "- list with a token is a per-reader hash baseline (no-new -> short answer); any write\n" +
+      "  carrying a token is rejected (worker read-only gate).",
     inputSchema: {
       type: "object",
       properties: {
@@ -579,7 +606,7 @@ const TOOLS = [
         },
         target: {
           enum: ["project", "global"],
-          description: "promote target; default project, global=fleet-wide (standard in SKILL section 10)",
+          description: "promote target: project (default) or global (fleet-wide)",
         },
         note: {
           type: "string",
@@ -594,11 +621,15 @@ const TOOLS = [
   {
     name: PREFIX + "sandbox_apply",
     description:
-      "Sandbox finalize (gate tool): merge the sandbox branch back into the main repo and remove the worktree; gate = done + qa.verdict=pass (SKILL section 12).\n\n" +
+      "Sandbox finalize (gate tool): merge the sandbox branch back into the main repo and remove\n" +
+      "the worktree.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Flow: status survey, out-of-scope detection, merge-tree pre-check, clean merge+commit, worktree removal, board closed with auto-ack.\n" +
-      "- On conflict: isError with the conflict list; main repo untouched.\n" +
-      "- allow_dirty = escape hatch for uncommitted main-repo changes; the qa gate cannot be bypassed.",
+      "- Gate: the mission must be done with qa.verdict=pass - the gate cannot be bypassed.\n" +
+      "- Flow: status survey, out-of-scope detection, merge-tree pre-check, clean merge+commit,\n" +
+      "  worktree removal, board closed with auto-ack.\n" +
+      "- On conflict: returns the conflict list as an error; the main repo stays untouched.\n" +
+      "- allow_dirty proceeds despite uncommitted main-repo changes; the qa gate still applies.",
     inputSchema: {
       type: "object",
       required: ["mission_id"],
@@ -615,9 +646,11 @@ const TOOLS = [
   {
     name: PREFIX + "sandbox_discard",
     description:
-      "Discard a sandbox: delete the sandbox branch and worktree, zero main-repo changes; status untouched (SKILL section 12).\n\n" +
+      "Discard a sandbox: delete the sandbox branch and worktree with zero main-repo changes;\n" +
+      "mission status untouched.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Use for verdict=fail, worker scope violations, or voided tasks.\n" +
+      "- Use for a failed review, worker scope violations, or voided tasks.\n" +
       "- Idempotent: succeeds when the branch/worktree no longer exists.",
     inputSchema: {
       type: "object",
@@ -628,10 +661,12 @@ const TOOLS = [
   {
     name: PREFIX + "agent_harvest",
     description:
-      "Read-only harvest of a subagent rollout transcript tail, rendered as role-labeled text (SKILL section 14 TS-9).\n\n" +
+      "Read-only harvest of a subagent rollout transcript tail, rendered as role-labeled text.\n" +
+      "\n" +
       "Usage:\n" +
       "- Locate by any one of mission_id, agent_id, or session_id.\n" +
-      "- The tail = the conversation embedded in the last model-io record; works across sessions; terminal deliverables still follow report artifacts.\n" +
+      "- The tail is the conversation embedded in the last model-io record; works across sessions;\n" +
+      "  final deliverables still travel via report artifacts.\n" +
       "- tail=0 is probe mode: no transcript echo, only usage/file_bytes/messages_kind metadata.",
     inputSchema: {
       type: "object",
@@ -666,15 +701,19 @@ const TOOLS = [
     // deliberately NOT in MCP_DISALLOWED.
     name: PREFIX + "probe",
     description:
-      "Structured read-only probe: server-enforced caps from SKILL section 15.4 - max 50 rows and 10KB per response, pagination via page_token.\n\n" +
+      "Structured read-only probe with server-enforced caps: max 50 rows and 10KB per response;\n" +
+      "paginate with page_token.\n" +
+      "\n" +
       "Usage:\n" +
       "- Every ok response is a summary JSON envelope, never a raw dump.\n" +
-      "- db.query: restricted read-only SQL (single SELECT/WITH; bare SELECT * banned except COUNT(*); LIMIT <= 100).\n" +
-      "- file.head: first/last <= 50 lines (tail=true; log-tail semantics, terminal).\n" +
-      "- file.grep: grep -m semantics; max_count <= 50; ignore_case available.\n" +
+      "- db.query: restricted read-only SQL on a SQLite file (single SELECT/WITH; bare SELECT *\n" +
+      "  banned except COUNT(*); built-in LIMIT <= 100).\n" +
+      "- file.head: first <= 50 lines; tail=true reads the last <= 50 lines (log-tail semantics,\n" +
+      "  terminal, no pagination).\n" +
+      "- file.grep: server-side grep with a max_count <= 50 per page; ignore_case available.\n" +
       "- bin.inspect: type/size/sha256/first 256 bytes only.\n" +
-      "- Session read cache: identical repeats return a stub; no_cache=true forces a full re-read.\n" +
-      "- Paths may be any readable file - caps, not sandbox scope.",
+      "- A repeated identical read returns a cached stub; no_cache=true forces a full re-read.\n" +
+      "- Paths may be any readable file - caps are enforced, not sandbox scope.",
     inputSchema: {
       type: "object",
       required: ["action"],
@@ -728,15 +767,21 @@ const TOOLS = [
     // prefix and probe keeps its 11th position — zero drift for old readers).
     name: PREFIX + "dispatch",
     description:
-      "Dispatch launcher: mints the dispatch credential set (numbered receipt), single nested form; history in SKILL section 14 TS-19a.\n\n" +
+      "Dispatch launcher (coordinator-only): mints the dispatch credential set (numbered receipt)\n" +
+      "for one mission in the nested form - the only dispatch form.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Coordinator-only; surface = board upsert -> context_pack -> dispatch(mission_id).\n" +
-      "- Pack resolves mission.pack.path -> <root>/packs/<mission_id>/pack.md.\n" +
-      "- Fill the DP-3 pointer template (SKILL section 2-3) with the receipt fields verbatim - zero assembly, no expansion, no CONTRACT rewrites.\n" +
-      "- mode=nested: no spawn; agent_id stays null (sentinel does not watch nested missions).\n" +
-      "- Embedded checks: CONTRACT token = mission.dispatch.token + the yolo scope_paths gate (scout/reviewer exempt).\n" +
-      "- Busy gate: a second dispatch while the worker result pends is rejected; recovery = board upsert status:\"drafted\".\n" +
-      "- Returns {ok, mode, mission_id, worker, channel, token, pack_path, lock_hold_ms}; completion = host Agent return + worker report.",
+      "- Surface: board upsert -> context_pack -> dispatch(mission_id); the pack resolves to\n" +
+      "  <root>/packs/<mission_id>/pack.md.\n" +
+      "- Fill the fixed first-message template with the receipt fields verbatim - zero assembly,\n" +
+      "  no expansion, no CONTRACT rewrites; the worker reads the pack itself.\n" +
+      "- mode=nested: no spawn; agent_id stays null (the sentinel does not watch nested missions).\n" +
+      "- Embedded checks: the CONTRACT token must equal mission.dispatch.token; the scope_paths\n" +
+      "  gate applies (scout/reviewer exempt).\n" +
+      "- Busy gate: a second dispatch while the previous worker result pends is rejected;\n" +
+      "  recovery = board upsert status \"drafted\".\n" +
+      "- Returns {ok, mode, mission_id, worker, channel, token, pack_path, lock_hold_ms};\n" +
+      "  completion = host Agent return + worker report.",
     inputSchema: {
       type: "object",
       required: ["mission_id"],
@@ -768,13 +813,18 @@ const TOOLS = [
     // stop-check tail-block extraction (R7) as the writer of the coord-tail log.
     name: PREFIX + "trajectory",
     description:
-      "Trajectory writer (coordinator-only): appends one ORT v3 block to <storage-root>/context/coord-tail-log.md (SKILL section 16 PL-10).\n\n" +
+      "Trajectory writer (coordinator-only): appends one ORT v3 block (the fixed block format) to\n" +
+      "<storage-root>/context/coord-tail-log.md, the cross-session project memory log.\n" +
+      "\n" +
       "Usage:\n" +
-      "- Call once per dispatch turn at close (PL-10): full = change turn, short = steady turn.\n" +
-      "- full: project/stage/ruled/next required; flying absent = auto-filled from board.\n" +
-      "- short: next required; rest inherit from the newest full block (server merge); flying = +/-id deltas.\n" +
-      "- Server casts protocol lines (ts/seq); caps 10 lines/900B full, 6/400B short; hysteresis 20/10 (TS-20).\n" +
-      "- Read face unchanged; receipt {ok, seq, blocks, trimmed}; over-cap/missing baseline = isError.",
+      "- Call once per dispatch turn at close: full = change turn, short = steady turn.\n" +
+      "- full: project/stage/ruled/next required; flying absent = auto-filled from the board.\n" +
+      "- short: next required; the rest inherit from the newest full block (server merge);\n" +
+      "  flying = +/-id deltas.\n" +
+      "- The server casts the ts/seq protocol lines; caps 10 lines/900B full, 6/400B short;\n" +
+      "  hysteresis 20/10.\n" +
+      "- Read face unchanged; receipt {ok, seq, blocks, trimmed}; over-cap/missing baseline =\n" +
+      "  error.",
     inputSchema: {
       type: "object",
       required: ["kind", "next"],

@@ -70,17 +70,17 @@ export function classify(board, boardMtimeMs, cfg, rootDir, signals) {
         mid,
         foreign ? "scoping-foreign" : "scoping-skipped",
         foreign
-          ? `scoping-foreign：mission ${mid} 归属 ${attr} ≠ 本哨兵锚——零开枪静默留痕（他会话完成态照常落板+spool，回归由 session-start 简报补报）`
+          ? `scoping-foreign: mission ${mid} belongs to ${attr} != this sentinel anchor - no shots, silently recorded (other-session completion still lands on the board+spool as usual; the session-start brief catches up on return)`
           : !attr
-            ? `scoping-skipped：mission ${mid} 无归因（dispatch.session_id/spawned_by_session 均缺席）——补齐前不盯守（组包尾块缺席计数可见，补齐自动恢复）`
-            : `scoping-skipped：mission ${mid} 归因 ${attr} 无法比对（本哨兵锚缺失）——锚重发布前不盯守`,
+            ? `scoping-skipped: mission ${mid} has no attribution (both dispatch.session_id/spawned_by_session absent) - not watched until backfilled (visible in the pack tail-block absence count; recovers automatically once backfilled)`
+            : `scoping-skipped: mission ${mid} attribution ${attr} cannot be compared (this sentinel anchor is missing) - not watched until the anchor is re-published`,
       );
       continue;
     }
     scopingTraced.delete(mid); // 恢复盯守：清留痕去重键（此后再缺席/转他会话可重留痕）
     const agentId = (m.dispatch && m.dispatch.agent_id) || null;
     const inFlight = IN_FLIGHT_STATUSES.includes(m.status);
-    const title = String(m.title || "(未命名)").replace(/\s+/g, " ").slice(0, 30);
+    const title = String(m.title || "(untitled)").replace(/\s+/g, " ").slice(0, 30);
 
     // C3 崩溃实锤（仅 agent 模式在飞；绕过双空闲门）
     if (inFlight && agentId) {
@@ -185,15 +185,15 @@ export function buildSummary(claims, cfg) {
     claims
       .filter((c) => c.category === cat)
       .slice(0, 5)
-      .map((c) => `- [${c.key}] ${c.title}｜${c.status}${c.resultAt ? `｜结果于 ${fmtAge(c.resultAgeMin)}` : ""}｜未签收`);
+      .map((c) => `- [${c.key}] ${c.title} | ${c.status}${c.resultAt ? ` | result ${fmtAge(c.resultAgeMin)} ago` : ""} | unclaimed`);
 
   const terminalRows = [...rowsOf("unclaimed_terminal"), ...rowsOf("unclaimed_answer")];
   if (terminalRows.length) {
     summary +=
-      "[orch-sentinel] 唤醒失败告警：以下任务结果已落盘但主控未签收" +
-      "（分级宽限已超：done 5 分钟 / blocked-question 3 分钟）。" +
-      "请立即 mailbox(read) 接手并 answer/close（自动签收）；" +
-      "补员命令与盯守规则见 SKILL 第 11 章：\n" +
+      "[orch-sentinel] wake failure alert: the following mission results are on disk but unacked by the coordinator" +
+      " (graded grace exceeded: done 5 min / blocked-question 3 min)." +
+      " Take over via mailbox(read) immediately and answer/close (auto-acks);" +
+      " replenish commands and watch rules per the orchestration manual:\n" +
       terminalRows.join("\n");
   }
 
@@ -202,14 +202,14 @@ export function buildSummary(claims, cfg) {
     .slice(0, 5)
     .map(
       (c) =>
-        `- [${c.key}] ${c.title}｜${c.status}｜无事件已 ${fmtAge(c.stallAgeMin)}｜在飞`,
+        `- [${c.key}] ${c.title} | ${c.status} | no events for ${fmtAge(c.stallAgeMin)} | in flight`,
     );
   if (stallRows.length) {
     summary +=
       (summary ? "\n\n" : "") +
-      `[orch-sentinel] 在飞任务龄期告警：以下任务连续无任何事件` +
-      `（无事件已 ≥ stall_grace_min=${Math.round(cfg.stallGraceMs / 60000)} 分钟，worker 任何 report 即续期）。` +
-      "请 TaskOutput(task_id)/ListWorkflowRuns 核查；确认死亡则 board 改 failed 并重派：\n" +
+      `[orch-sentinel] in-flight age alert: the following missions have had no events at all` +
+      ` (no events for >= stall_grace_min=${Math.round(cfg.stallGraceMs / 60000)} min; any worker report renews it).` +
+      " Check via TaskOutput(task_id)/ListWorkflowRuns; if confirmed dead, set the board to failed and re-dispatch:\n" +
       stallRows.join("\n");
   }
 
@@ -218,14 +218,14 @@ export function buildSummary(claims, cfg) {
     .slice(0, 5)
     .map(
       (c) =>
-        `- [${c.key}] ${c.title}｜${c.status}｜心跳停更 ${fmtAge(Math.floor(c.ageMs / 60000))}｜在飞`,
+        `- [${c.key}] ${c.title} | ${c.status} | heartbeat stale ${fmtAge(Math.floor(c.ageMs / 60000))} | in flight`,
     );
   if (crashRows.length) {
     summary +=
       (summary ? "\n\n" : "") +
-      `[orch-sentinel] 疑似崩溃告警：以下在飞任务的 rollout 心跳已停更` +
-      `（model-io ≥ ${Math.round(cfg.crashGraceMs / 60000)} 分钟无 API 调用；tool_usage 佐证缺失时按 ×3 保守档），` +
-      "子代理进程疑似已死。请 TaskOutput(task_id)/ListWorkflowRuns 核查；确认死亡则 board 改 failed 并重派：\n" +
+      `[orch-sentinel] suspected crash alert: the following in-flight missions rollout heartbeats went stale` +
+      ` (no API calls for >= ${Math.round(cfg.crashGraceMs / 60000)} min on model-io; x3 conservative tier when tool_usage corroboration is missing),` +
+      " the subagent process is suspected dead. Check via TaskOutput(task_id)/ListWorkflowRuns; if confirmed dead, set the board to failed and re-dispatch:\n" +
       crashRows.join("\n");
   }
 
@@ -233,15 +233,15 @@ export function buildSummary(claims, cfg) {
   if (boardRows.length) {
     summary +=
       (summary ? "\n\n" : "") +
-      `[orch-sentinel] 任务板不可读告警：连续 ${BOARD_BAD_TICKS_LIMIT} 次轮询读取 board.json 失败` +
-      `（缺失/损坏）。请检查存储根下的 board.json；修复前哨兵无法盯守。`;
+      `[orch-sentinel] board unreadable alert: reading board.json failed for ${BOARD_BAD_TICKS_LIMIT} consecutive polls` +
+      ` (missing/corrupted). Check the board.json under the storage root; the sentinel cannot watch until it is fixed.`;
   }
 
   if (claims.some((c) => c.final)) {
     summary +=
       (summary ? "\n\n" : "") +
-      `[orch-sentinel] 放弃通告：以上条件已连续 ${cfg.cap} 枪仍未获处置，哨兵停止再叫（abandoned，见 board list 的 sentinel_health）。` +
-      "3 枪全丢大概率是平台完成通知异常——请检查通知链路，并按疑似唤醒失败接手所有未签收项。";
+      `[orch-sentinel] abandon notice: the conditions above have fired ${cfg.cap} shots without disposal; the sentinel stops re-alerting (abandoned; see board list sentinel_health).` +
+      " Losing all shots most likely means a platform completion-notice fault - check the notification chain and take over every unacked item as suspected wake failures.";
   }
   return summary;
 }

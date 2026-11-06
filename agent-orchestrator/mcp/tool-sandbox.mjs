@@ -96,7 +96,7 @@ function applyGateAndIntent(missionId, allowDirty) {
   if (!m) throw new ToolError(`mission not found: ${missionId}`);
   const sb = m.pack && m.pack.sandbox;
   if (!sb || sb.isolation !== "worktree") {
-    throw new ToolError("该 mission 非沙箱派发");
+    throw new ToolError("this mission was not a sandbox dispatch");
   }
   const branch = String(sb.branch);
   const baseCommit = String(sb.base_commit ?? "");
@@ -155,7 +155,7 @@ function applyGateAndIntent(missionId, allowDirty) {
           mission_id: missionId,
           branch,
           intent_at: sb.apply_intent_at,
-          note: "apply 在飞（apply_intent_at 在 10min 新鲜窗内且分支未合入）：勿重复合并；等待其收口，或 intent 过期后重跑 apply（将自动收口或重试）",
+          note: "an apply is in flight (apply_intent_at within the 10min freshness window and the branch not yet merged): do not merge again; wait for it to finalize, or rerun apply after the intent expires (it will auto-finalize or retry)",
         },
       };
     }
@@ -166,7 +166,7 @@ function applyGateAndIntent(missionId, allowDirty) {
   }
   // 1. gates (single loadBoard).
   if (m.status !== "done") {
-    throw new ToolError(`仅 done 状态可 apply，当前 ${m.status}`);
+    throw new ToolError(`only done missions can apply; current ${m.status}`);
   }
   // v0.6 (V6-42, AUTH-08): the bare `qa.verdict==="pass"` gate was paper —
   // anyone with board write could self-approve then apply. The gate is now a
@@ -179,28 +179,28 @@ function applyGateAndIntent(missionId, allowDirty) {
   // downgrade (0.6 is the debt-release; there is no legacy production board).
   if (!(m.qa && typeof m.qa === "object" && m.qa.verdict === "pass")) {
     throw new ToolError(
-      '缺少 pass 评审：先派 orch-reviewer 审 diff，再 board(upsert, mission={id, qa:{verdict:"pass", reviewed_by:<评审 mission_id>, reviewed_at}})',
+      'missing a pass review: dispatch an orch-reviewer on the diff first, then board(upsert, mission={id, qa:{verdict:"pass", reviewed_by:<review mission_id>, reviewed_at}})',
     );
   }
   const reviewedBy = typeof m.qa.reviewed_by === "string" ? m.qa.reviewed_by.trim() : "";
   if (!reviewedBy) {
     throw new ToolError(
-      "qa 缺少 reviewed_by：apply 需要 qa 结构体 {verdict:\"pass\", reviewed_by:<评审 mission_id>, reviewed_at}" +
-        "（先派评审 mission 复核，再回写本 mission 的 qa）",
+      "qa missing reviewed_by: apply requires the qa struct {verdict:\"pass\", reviewed_by:<review mission_id>, reviewed_at}" +
+        " (dispatch a review mission to check first, then write this mission's qa back)",
     );
   }
   const review = findMission(board, reviewedBy);
   if (!review || !(review.status === "done" || review.status === "closed")) {
     throw new ToolError(
-      `qa.reviewed_by 指向的评审 mission（${reviewedBy}）不存在或未完成` +
-        `（需 done/closed，当前 ${review ? review.status : "不存在"}）`,
+      `the review mission pointed to by qa.reviewed_by (${reviewedBy}) does not exist or is not finished` +
+        ` (needs done/closed; current ${review ? review.status : "missing"})`,
     );
   }
   const reviewType = typeof review.agent_type === "string" ? review.agent_type : "";
   if (!reviewType.includes("reviewer")) {
     throw new ToolError(
-      `qa.reviewed_by 指向的评审 mission（${reviewedBy}）agent_type（${reviewType || "空"}）不含 reviewer` +
-        "：评审须由 orch-reviewer 角色执行（自审自批被此查拦截）",
+      `the review mission pointed to by qa.reviewed_by (${reviewedBy}) has agent_type (${reviewType || "empty"}) without reviewer` +
+        ": reviews must be performed by the orch-reviewer role (self-review/self-approval is blocked by this check)",
     );
   }
   const reviewRefsThis =
@@ -211,8 +211,8 @@ function applyGateAndIntent(missionId, allowDirty) {
       ));
   if (!reviewRefsThis) {
     throw new ToolError(
-      `评审 mission（${reviewedBy}）未互指本 mission（${missionId}）：` +
-        `评审 mission 需 qa.mission_id=${missionId} 或 artifacts 引用本 mission`,
+      `the review mission (${reviewedBy}) does not point back at this mission (${missionId}): ` +
+        `the review mission needs qa.mission_id=${missionId} or artifacts referencing this mission`,
     );
   }
   assertMergeTreeSupport(projectDir);
@@ -225,17 +225,17 @@ function applyGateAndIntent(missionId, allowDirty) {
       const out = String(err.stdout || "");
       const conflictFiles = parseMergeTreeConflicts(out);
       throw new ToolError(
-        "合并存在冲突，未触主仓。派合并代理 mission 处理：context_pack(mission_id=<新id>, task=\"把 " +
+        "the merge has conflicts; the main repo is untouched. Dispatch a merge-agent mission: context_pack(mission_id=<new id>, task=\"merge " +
           branch +
-          " 合入主线并解决冲突\", isolation=\"worktree\", read_first=[四件套文件…])；" +
-          "四件套=merge-base(git merge-base HEAD <branch>) + 主线侧 diff(git diff <merge-base>..HEAD) + " +
-          "分支侧 diff(git diff <merge-base>..<branch>) + 冲突文件内容(git show <rev>:<path> 两侧)。" +
-          "解决后复审再 apply。\nconflict_files: " +
+          " into the mainline and resolve the conflicts\", isolation=\"worktree\", read_first=[the four-piece set...]); " +
+          "four-piece set = merge-base (git merge-base HEAD <branch>) + mainline-side diff (git diff <merge-base>..HEAD) + " +
+          "branch-side diff (git diff <merge-base>..<branch>) + conflict file contents (git show <rev>:<path> on both sides)." +
+          "re-review after resolving, then apply.\nconflict_files: " +
           JSON.stringify(conflictFiles),
       );
     }
     throw new ToolError(
-      "merge-tree 冲突预检失败：" + (err && err.message ? err.message : err),
+      "merge-tree conflict pre-check failed: " + (err && err.message ? err.message : err),
     );
   }
   // phase-1 commit point: the intent lands BEFORE any working-tree git work.
@@ -263,8 +263,8 @@ function applyGitPipeline(missionId, p1) {
   const porcelain = porcelainStatus(projectDir);
   if (porcelain.trim() && !p1.allowDirty) {
     throw new ToolError(
-      "主仓工作树不干净：可能是 worker 写穿污染（git checkout -- <paths> 可还原），" +
-        "也可能是你自己的未提交改动——确认后 stash/提交/还原，或确认为己方改动时传 allow_dirty=true 重试\n" +
+      "the main-repo worktree is dirty: possibly worker write-through pollution (git checkout -- <paths> restores it)," +
+        " possibly your own uncommitted changes - after confirming, stash/commit/restore, or pass allow_dirty=true to retry when confirmed yours\n" +
         porcelain.trim(),
     );
   }
@@ -287,9 +287,9 @@ function applyGitPipeline(missionId, p1) {
       .filter((l) => l.trim() && !l.startsWith("??"));
     if (trackedDirty.length) {
       throw new ToolError(
-        "沙箱工作树存在未提交 tracked 改动（worker 未 commit 交付物场景）：apply 只合并分支提交，" +
-          "不自动提交脏工作树（同哈希空转先例 l-20261103-58ff9d；修订轮 F-2a——tracked 脏=拒，untracked-only=放行）。\n" +
-          "恢复路径：入沙箱补提交后重 apply（禁 discard——毁交付）；未提交 tracked 改动清单：\n" +
+        "the sandbox worktree has uncommitted tracked changes (the worker never committed the deliverables): apply merges branch commits only," +
+          "it never auto-commits a dirty worktree (the same-hash no-op precedent l-20261103-58ff9d; tracked dirty = refuse, untracked-only = let through).\n" +
+          "recovery: enter the sandbox, commit, and apply again (never discard - it destroys the deliverables); uncommitted tracked changes:\n" +
           trackedDirty.join("\n"),
       );
     }
@@ -317,9 +317,9 @@ function applyGitPipeline(missionId, p1) {
   const violations = allow.length ? changed.filter((p) => !allow.some((pre) => coversPath(pre, p))) : [];
   if (violations.length) {
     throw new ToolError(
-      `越界改动 ${violations.length} 项（不在 allowlist：pack ${allowPack.length} 项 + board scope_paths 增补 ${allow.length - allowPack.length} 项）：\n` +
+      `out-of-scope changes: ${violations.length} item(s) (not in the allowlist: pack ${allowPack.length} items + board scope_paths additions ${allow.length - allowPack.length} items):\n` +
         violations.join("\n") +
-        "\n评审 verdict 应改为 fail（走 sandbox_discard 整单弃），或 board upsert 修订 mission.scope_paths 增补授权后重审再 apply",
+        "\nthe review verdict should flip to fail (sandbox_discard voids the whole mission), or board upsert to extend mission.scope_paths, then re-review and apply again",
     );
   }
   // clean merge (no-ff, fixed message) and capture the applied commit.
@@ -360,29 +360,29 @@ function applySettleBoard(missionId, p1, p2) {
   const m = findMission(board, missionId);
   if (!m) {
     throw new ToolError(
-      `apply 收口失败：mission ${missionId} 已不在板上，但 merge ${p2.appliedCommit.slice(0, 10)} 已落主线——请以 git log 为准人工核对`,
+      `apply finalize failed: mission ${missionId} is no longer on the board, but merge ${p2.appliedCommit.slice(0, 10)} already landed on the mainline - verify manually against git log`,
     );
   }
   const sb = m.pack && m.pack.sandbox;
   if (!sb || sb.isolation !== "worktree") {
-    throw new ToolError("该 mission 非沙箱派发（merge 已落主线，请人工核对）");
+    throw new ToolError("this mission was not a sandbox dispatch (the merge already landed on the mainline; verify manually)");
   }
   const at = nowIso();
   const warns = [];
   // Hard identity check: only branch/base_commit drift changes WHAT was
   // merged. Still not rolled back (git history is irreversible) — warned.
   if (String(sb.branch ?? "") !== p1.branch) {
-    warns.push(`branch 漂移（intent 时 ${p1.branch}，收口时 ${String(sb.branch ?? "")}）——applied 胜出，未回滚`);
+    warns.push(`branch drifted (${p1.branch} at intent time, ${String(sb.branch ?? "")} at finalize) - applied wins, no rollback`);
   }
   if (String(sb.base_commit ?? "") !== p1.baseCommit) {
-    warns.push("base_commit 漂移——applied 胜出，未回滚");
+    warns.push("base_commit drifted - applied wins, no rollback");
   }
   // status/qa drift during phase-2: never a rollback (R7 applied 胜出).
   if (m.status !== "done" && m.status !== "closed") {
-    warns.push(`phase-2 期间 status 漂移为 ${m.status}——applied 胜出，仍收口`);
+    warns.push(`status drifted to ${m.status} during phase-2 - applied wins, still finalized`);
   }
   if (m.qa && typeof m.qa === "object" && m.qa.verdict && m.qa.verdict !== "pass") {
-    warns.push(`phase-2 期间 qa 漂移为 ${m.qa.verdict}——applied 胜出，仍收口`);
+    warns.push(`qa drifted to ${m.qa.verdict} during phase-2 - applied wins, still finalized`);
   }
   // v1.6 W4 (P7): same-hash no-op explicit signal — the merge settled but
   // brought zero tree change. Applied markers still land (idempotent re-entry
@@ -390,15 +390,15 @@ function applySettleBoard(missionId, p1, p2) {
   // content landing through a NEW porting mission (幂等重试不补合, §5.3).
   if (p2.noopMerge) {
     warns.push(
-      "同哈希空转：merge 未带入任何变更（树哈希合并前后相同）——worker 完工未提交或分支零变更" +
-        "（l-20261103-58ff9d 口径）；已记 applied，内容补合走新移植 mission（幂等重试不补合）",
+      "same-hash no-op: the merge brought no changes (tree hash identical before and after) - the worker finished without committing or the branch has zero changes" +
+        " (same precedent as l-20261103-58ff9d); recorded as applied; content backfill goes through a new porting mission (idempotent retries do not backfill)",
     );
   }
   // 修订轮 F-2a：untracked-only 放行注记（tracked 脏=拒的另一态）。
   if (p2.untrackedLeft) {
     warns.push(
-      `沙箱仅余未提交 untracked 残留（${p2.untrackedLeft} 项）：放行（修订轮 F-2a 注记）——merge 只吃分支提交，` +
-        "untracked 不可能被合入；若本应提交的交付物在此，请入沙箱补提交后走移植 mission",
+      `the sandbox has only uncommitted untracked leftovers (${p2.untrackedLeft} item(s)): let through (revision F-2a note) - merge consumes branch commits only, ` +
+        "untracked content can never be merged in; if a deliverable that should have been committed is here, enter the sandbox, commit, and use a porting mission",
     );
   }
   // board transaction (direct object mutation, same lock, not mergeMission):
@@ -413,8 +413,8 @@ function applySettleBoard(missionId, p1, p2) {
     at,
     event: "sandbox:apply",
     summary: p2.recovered
-      ? `applied ${p2.appliedCommit.slice(0, 10)}（crash 恢复收口：${p1.branch} 已在主线，applied_commit 取收口时 HEAD）`
-      : `applied ${p2.appliedCommit.slice(0, 10)}（merge ${p1.branch} → 主线）`,
+      ? `applied ${p2.appliedCommit.slice(0, 10)} (crash-recovery finalize: ${p1.branch} already on the mainline; applied_commit taken from the HEAD at finalize time)`
+      : `applied ${p2.appliedCommit.slice(0, 10)} (merged ${p1.branch} -> mainline)`,
   });
   saveBoard(board);
   return {
@@ -431,7 +431,7 @@ function applySettleBoard(missionId, p1, p2) {
       // v1.6 W4 (P7): 同哈希空转显式信号（树哈希合并前后相同=分支零带入）。
       ...(p2.noopMerge ? { no_op_merge: true } : {}),
       ...(p2.recovered
-        ? { recovered: true, note: "intent 残留但分支已合入：crash-after-merge 恢复收口（merge-base --is-ancestor 判定）" }
+        ? { recovered: true, note: "intent leftover but the branch already merged: crash-after-merge recovery finalize (merge-base --is-ancestor check)" }
         : {}),
     },
     warns,
@@ -460,7 +460,7 @@ function applyTeardown(wtDir, missionId) {
     // --force here: unreviewed content must not be silently destroyed.
     removed = false;
     warns.push(
-      "沙箱内有未提交残留：内容不在任何 diff/commit 中，reviewer 未审，worktree 未移除（applied 已落板）；确认不要则 sandbox_discard 强弃，或先在沙箱内提交并重走评审",
+      "the sandbox has uncommitted leftovers: content in no diff/commit, unreviewed, worktree not removed (applied is on the board); sandbox_discard force-voids if unwanted, or commit inside the sandbox first and re-run the review",
     );
     try {
       withRootLock(() => {
@@ -471,7 +471,7 @@ function applyTeardown(wtDir, missionId) {
           m.timeline.push({
             at: nowIso(),
             event: "sandbox:worktree_left",
-            summary: `worktree 残留未移除：${displayPath(wtDir)}（applied 已落板，残留可 sandbox_discard 强弃）`,
+            summary: `worktree leftover not removed: ${displayPath(wtDir)} (applied is on the board; sandbox_discard force-voids the leftover)`,
           });
           saveBoard(board);
         }
@@ -537,12 +537,12 @@ function discardGate(missionId) {
   // gate: sandbox record present (non-sandbox missions are never touched).
   const sb = m.pack && m.pack.sandbox;
   if (!sb || sb.isolation !== "worktree") {
-    throw new ToolError("该 mission 无沙箱记录");
+    throw new ToolError("this mission has no sandbox record");
   }
   if (sb.apply_intent_at && !sb.applied_at && applyIntentFresh(sb.apply_intent_at)) {
     throw new ToolError(
-      "apply 在飞（apply_intent_at 在 10min 新鲜窗内且未 applied）：discard 与 apply 互斥；" +
-        "等 apply 收口后再 discard，或 intent 过期后重试强弃",
+      "an apply is in flight (apply_intent_at within the 10min freshness window and not yet applied): discard and apply are mutually exclusive;" +
+        "discard after the apply finalizes, or retry the force-void after the intent expires",
     );
   }
   // Whether the archive was ALREADY applied when the discard started: a
@@ -599,19 +599,19 @@ function discardSettleBoard(missionId, p1, p2) {
   if (!m) throw new ToolError(`mission not found: ${missionId}`);
   const sb = m.pack && m.pack.sandbox;
   if (!sb || sb.isolation !== "worktree") {
-    throw new ToolError("该 mission 无沙箱记录");
+    throw new ToolError("this mission has no sandbox record");
   }
   if (sb.applied_at && !p1.sawApplied) {
     throw new ToolError(
-      `discard 中止：mission 已被并发 apply 收口（applied_at=${sb.applied_at}）。` +
-        "worktree/branch 清理已执行、板面未标记 discarded——请以 applied 事实为准核对面板",
+      `discard aborted: the mission was concurrently finalized by apply (applied_at=${sb.applied_at}). ` +
+        "worktree/branch cleanup already ran and the board was not marked discarded - reconcile the panel against the applied fact",
     );
   }
   const at = nowIso();
   sb.discarded_at = at;
   m.updated_at = at;
   m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
-  m.timeline.push({ at, event: "sandbox:discard", summary: `弃 ${String(sb.branch)} 与 worktree（主仓零改动）` });
+  m.timeline.push({ at, event: "sandbox:discard", summary: `discarded ${String(sb.branch)} and the worktree (zero main-repo changes)` });
   saveBoard(board);
   // response (idempotent: second call succeeds with false flags).
   return {
@@ -619,7 +619,7 @@ function discardSettleBoard(missionId, p1, p2) {
     mission_id: missionId,
     branch_deleted: p2.branchDeleted,
     worktree_removed: p2.worktreeRemoved,
-    note: "主仓零改动；mission 状态未变，可重派或 close",
+    note: "zero main-repo changes; mission status untouched, re-dispatch or close as needed",
   };
 }
 
