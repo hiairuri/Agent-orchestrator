@@ -29,8 +29,7 @@ OV-1 读者：本文件只给**主控 agent** 读；子代理不加载本文件�
 ```
 主控（唯一轮询者与答题者）
  ├─ dispatch(mission_id, mode:"nested") → 组装出口（主形态）：不 spawn，返 {mission_id, token, prompt, pack_path}，
- │      主控把 prompt 交宿主 Agent 作首条消息嵌套发出（组包链复用，四段式同下）
- │      ↑ prompt = DP-3 固定指针模板（§3 同文；v1.6 W3a 组装退役换装——主控机械填充回执编号字段）：纪律段置顶 + 尾块轨迹（PL-10）+ STATE 节（context_pack 物化，节序 CONTEXT→EXTRA→STATE→READ FIRST，scoping 行=组包时点快照）+ persona 原型正文 + 指针句与 CONTRACT 三行；教训经包 §LESSONS 单通道+lessons 工具哈希面（v1.6 W4）
+ │      主控把 prompt 交宿主 Agent 作首条消息嵌套发出（首条消息=DP-3 固定指针模板，§3 同文：角色预设行+STATE 节+指针句与 CONTRACT 三行；教训经包 §LESSONS 单通道）
  │      ← 宿主 Agent 返回（主控在场直收）+ report 事件（尾块态，第 17 章）
  ├─ dispatch(mission_id)〔-p headless 启动器：v1.6 W-p 起 parked〕→ 启动器五件（runner/启动器模块/glean-launch/冒烟脚本/套件）归档 parked/agent-orchestrator/（fire-and-forget 原语；恢复另案=README 指引）；现役派发形态唯一=nested 主形态（板记录 mode:"headless" 仅历史 mission 保留面）
  │      ← report 事件/完成通知通道随 parked 迁出（git 历史可考）
@@ -46,8 +45,8 @@ OV-5 尾块契约：每派发轮收工，最后一条 assistant 消息尾部携 
 OV-6 三小循环默认形态：策划↔策划QA/计划↔计划QA/实行↔版本QA 配对循环打磨至终版；QA 意见文件直投对接方、主控只转指针；循环间 grill 门默认必开+豁免显式声明。
 OV-7 运行面禁热修改（强规则）：被加载/在跑的树（插件运行面、bot 载入面等一切 live 面）一律不做热修改——变更走 worktree 沙箱施工+版本QA 签收后合并落面；未签收迭代不得 commit/切分支/改文件落运行面。紧急修复也走沙箱快进，不做在位热补。
 OV-8 协议契约卡指针：跨进程写读面（sentinel 文件族/spool/root.txt/dispatch result-dir/board+p2p/probe 分区/记忆三视图等）的字段级契约卡以 `docs/protocols/` 契约卡为权威（四栏结构：写方/读方/字段/失效语义）；SKILL 只留本指针行，字段细节以卡为权威，卡本体随协议演进单独维护。
-OV-9 主控记忆消费两通道（v1.6 拆除后，pull-only）：server 不再推送 ORCH.md（v1.3 双 surfacing 已拆——任何工具成功响应不含顶层 `orch_memory.orch_md` 附件键 ∧ content 不含 `orch_md` 键，N9 负向钉防回潮）；装载=会话启动 /manual 双件阻塞并读（SKILL 全文+`<存储根>/ORCH.md` 全文帽内，commands/manual.md 第 2 步）；会话中按需 `probe file.head ORCH.md` 对账（工具面已验证可达）。due 边界：glean due 信号仍经顶层 `orch_memory.glean` 附着（尽力而为——宿主客户端转交工具结果时只透传 content[]，顶层元数据结构性丢弃），非 board/list 工具的 due 仍宿主不可达，系合理取舍（board/list=主控轮询面 M10 在场；〔v1.6 W-p：bg-sentinel 常忙自动拉起兜底句随 glean-launch 迁 parked 退役——due 消费面=board/list 轮询+主控手动拉起〕），勿误判「due 已全工具可达」。
-OV-10 课题确认：会话启动（含 /manual 与恢复）后第一动作=确认当前课题——板面/轨迹文件/用户来话三源对账；无课题在册→向用户询问课题后再开工；用户新要求=新课题候选，确认后立卡入循环。
+OV-9 主控记忆消费（v1.6 拆除后 pull-only）：server 不推送 ORCH.md（v1.3 双 surfacing 已拆，N9 负向钉防回潮）；装载=会话启动 /manual 双件阻塞并读（SKILL 全文+`<存储根>/ORCH.md` 帽内，commands/manual.md 第 2 步）；会话中按需 `probe file.head ORCH.md` 对账。due 边界：glean due 信号经顶层 `orch_memory.glean` 附着（尽力而为——宿主只透传 content[]，顶层元数据结构性丢弃）；非 board/list 工具的 due 宿主不可达=合理取舍（board/list=主控轮询面；due 消费面=board/list 轮询+主控手动拉起），勿误判「due 已全工具可达」。
+OV-10 课题确认：会话启动（含 /manual 与恢复）后第一动作=确认当前课题——板面/轨迹文件/用户来话三源对账；无课题在册→询问用户后再开工；新要求=课题候选，确认后立卡入循环。
 
 **术语（唯一形态，禁止口语变体）**
 
@@ -56,21 +55,21 @@ OV-10 课题确认：会话启动（含 /manual 与恢复）后第一动作=确�
 | 主控 | 你；唯一轮询 board/spool 并作答的 agent |
 | 子代理 | 被派发的执行体（worker/scout/reviewer/planner/plan/pool） |
 | 任务包（pack） | `context_pack` 物化的自包含任务文件，含 CONTRACT/TASK/RULES |
-| 三行契约 | `[channel]/[worker]/[token]` 三行，派发 prompt 尾块（启动器组装）与包 CONTRACT 同源 |
+| 三行契约 | `[channel]/[worker]/[token]` 三行，包 CONTRACT 为唯一权威（§3） |
 | mission | 任务板条目，状态机见 14 章 |
-| 派发（dispatch） | `dispatch(mission_id, mode?)` 组装首条消息并记 board dispatch 字段：`mode:"nested"`=组装出口（唯一形态，不 spawn、返 prompt 由主控经宿主 Agent 嵌套发出）；宿主 GP 形态为降级备选。〔v1.6 W-p：headless（缺省 -p fire-and-forget）通道已 parked（归档=parked/agent-orchestrator/，恢复另案），板记录 mode:"headless" 仅历史 mission 保留面〕 |
+| 派发（dispatch） | `dispatch(mission_id, mode?)` 组装首条消息并记 board dispatch 字段：`mode:"nested"`=组装出口（唯一形态，不 spawn、返 prompt 经宿主 Agent 嵌套发出）；宿主 GP 形态为降级备选；headless 通道已 parked（v1.6 W-p，归档=parked/agent-orchestrator/），板记录 mode:"headless" 仅历史保留面 |
 | 签收（ack） | 主控接手处置结果；answer/close 自动补签 |
 | 领取（claim） | 池工 CAS 领取 ready/drafted mission，领取即 running，同时产生租约 {worker, token, claimedAt, leaseUntil}；report 自动续租 |
 | 归敛（glean） | 主会话级代理把事件层整理进视图层 |
 | 哨兵家族 / watcher | bg-sentinel 实例组负责本地补枪唤醒；watcher 经云中继远程敲醒主控会话 |
-| 课题（quest） | 用户提出的要求即课题；一切迭代以课题为单位组织，一课题一循环。课题卡：课题的立档件（标题/目标/验收/来源=用户来话），落 designs/ 迭代 planning 域，与策划稿同域。 |
-| 轨迹（trajectory） | 项目记忆轨迹流水（第 13 号工具 trajectory，主控专属）：每派发轮收工由主控申报 {kind, project?, stage?, flying?, ruled?, next?} 经 trajectory 写面落盘 coord-tail-log.md（ORT v3 块，server 铸协议行 ts/seq；滞回 20 块裁回 10；超帽 isError 当场拒）；恢复态势=Read 该文件尾部（PL-10）。 |
+| 课题（quest） | 用户提出的要求即课题；一切迭代以课题为单位，一课题一循环。课题卡=立档件（标题/目标/验收/来源=用户来话），落 designs/ planning 域。 |
+| 轨迹（trajectory） | 项目记忆轨迹流水（第 13 号工具 trajectory，主控专属）：每派发轮收工主控申报 {kind, project?, stage?, flying?, ruled?, next?} 落盘 coord-tail-log.md（ORT v3 块，server 铸 ts/seq；滞回 20/10；超帽 isError 当场拒）；恢复态势=Read 该文件尾部（PL-10）。 |
 
 ## 2. 标准派发七步
 
 DP-1 建 mission：`board(action=upsert, mission={title, original_prompt, agent_type, status:"drafted"})`；original_prompt 必填（跨会话恢复种子）。
 DP-2 组包：`context_pack(mission_id, title, task, read_first, rules, upstream_context)` → `{pack_paths, token, channel}`（`prompt_template` 不再回显；三行契约唯一权威=包 CONTRACT，模板见第 3 章）。
-DP-3 派发：`board upsert → context_pack → dispatch(mission_id, mode:"nested")` 三调用。nested 回执=编号（`{mode, mission_id, worker, channel, token, pack_path, lock_hold_ms}`，无 prompt 全文）：首条消息=按下述固定模板机械填充回执字段，禁扩写、禁读旧任务包手工复刻、禁改写三行契约；worker 自取包（预设含开工协议：缺包/不可读→report(blocked)）。【护栏】模板为唯一首条消息形制；bg-gate 对宿主 Agent 调用做 CONTRACT 头 presence 检测。〔v1.6 W-p：-p 形态已 parked（归档=parked/agent-orchestrator/）；宿主 GP 形态为降级备选（模型事务失败/需中途 steer，RP-3）。〕〔v1.6 W-p：typed 参数退役（OPEN-2 终裁——schema 键删+handler 残段删）；宿主 typed 直派（subagent_type 面）与 GP 降备语义不受影响（RP-1/RP-3）。〕〔v1.6 W3a：组装链整体退役（回执编号化）——首条消息固定模板（§3 同文）：〕
+DP-3 派发：`board upsert → context_pack → dispatch(mission_id, mode:"nested")` 三调用。nested 回执=编号（`{mode, mission_id, worker, channel, token, pack_path, lock_hold_ms}`，无 prompt 全文）：首条消息=按下述固定模板机械填充回执字段，禁扩写、禁读旧任务包手工复刻、禁改写三行契约；worker 自取包。【护栏】模板为唯一首条消息形制；bg-gate 对宿主 Agent 调用做 CONTRACT 头 presence 检测。〔v1.6 W-p：typed 参数退役（宿主 typed 直派与 GP 降备语义不受影响，RP-1/RP-3）；v1.6 W3a 组装链退役——首条消息固定模板（§3 同文）：〕
 
 ```text
 先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。本 mission 角色={agent_type 裸名}——角色预设已随 subagent_type 加载（预设含全角色纪律，此刻生效）。
@@ -79,11 +78,11 @@ DP-3 派发：`board upsert → context_pack → dispatch(mission_id, mode:"nest
 [worker] {worker 名}
 [token] {token}
 ```
-DP-4 worker 名同源：Agent 后台任务名 = 包 CONTRACT 的 [worker] 行；`context_pack` 显式传 `worker_name="<实际任务名>"`（如 `orch-impl#9`），包 CONTRACT / result 两处取值一致；缺省 `orch-worker#N`。nested 同律：宿主 Agent 任务名取回执 `worker` 字段（包 CONTRACT 同源）。
-DP-5 记派发：`dispatch` 回执即记账（server 自动落 `dispatch={mode, spawned_by_session}` 并 drafted→dispatched，主控无需补 upsert 状态）——nested 记 `mode:"nested"`（agent_id 留空：主控在场直收、哨兵默认不盯；需哨兵兜底可后续 upsert 补 `agent_id`）。〔v1.6 W-p：-p 记 `mode:"headless"` 句随通道 parked 退役〕宿主 GP 通道备选记 `dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}`。worker 首个 report 经内部旁路演进 running（外部 upsert 不达 running，第 13 章 DL-5）。
-DP-6 拉哨兵：本回合首次宿主后台派发后，同一条消息后台连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`；阈值与待命语义见第 11 章。纯 nested 派发可免本 ritual（主控在场直收结果，且 server 组装出口已探活补员——M9-1 触发面②）。〔v1.6 W-p：-p 半句（混派时照发/-p 完成通知丢失防线）随通道 parked 退役〕
+DP-4 worker 名同源：Agent 后台任务名=包 CONTRACT 的 [worker] 行；`context_pack` 显式传 `worker_name="<实际任务名>"`（如 `orch-impl#9`），CONTRACT/result 两处一致；缺省 `orch-worker#N`。nested 同律：宿主 Agent 任务名取回执 `worker` 字段。
+DP-5 记派发：`dispatch` 回执即记账（server 自动落 `dispatch={mode, spawned_by_session}` 并 drafted→dispatched，主控无需补 upsert 状态）——nested 记 `mode:"nested"`（agent_id 留空：主控在场直收、哨兵默认不盯；需哨兵兜底可后续 upsert 补 `agent_id`）。宿主 GP 通道备选记 `dispatch={mode:"agent", agent_id, task_id, session_id, run_in_background:true}`。worker 首个 report 经内部旁路演进 running（外部 upsert 不达 running，第 13 章 DL-5）。
+DP-6 拉哨兵：本回合首次宿主后台派发后，同一条消息后台连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`；阈值与待命语义见第 11 章。纯 nested 派发可免本 ritual（主控在场直收结果，且 server 组装出口已探活补员——M9-1 触发面②）。
 DP-7 不等：继续其他工作；多条 `dispatch`/Agent 调用放同一条消息即并发（上限 8）。
-DP-8 收通知：nested=宿主 Agent 返回即在场直收（report 尾块态照走，第 17 章）；宿主后台=完成后读通知里的输出文件路径（兜底）。〔v1.6 W-p：-p 半句随通道 parked 退役〕done 消费=完成通知/t1_head 优先，mailbox read 保留 blocked/question/answer 与审计面、done 默认不读（spool 落盘照旧）。
+DP-8 收通知：nested=宿主 Agent 返回即在场直收（report 尾块态照走，第 17 章）；宿主后台=完成后读通知里的输出文件路径（兜底）。done 消费=完成通知/t1_head 优先，mailbox read 保留 blocked/question/answer 与审计面、done 默认不读（spool 落盘照旧）。
 DP-9 收口：聚合结果写文件、只把摘要带进上下文 → `board(upsert, mission={id, status:"closed", close_confirmed:true})`；close 自动补签收 ack；done 的候选 lessons 在签收时处理（第 10.1 节）；全部签收后哨兵自动转待命。
 DP-10 并行 tool_calls：相互独立的工具调用一律同一条消息并行发出——读/查/报/派发同理；上限各遵既定（派发 ≤8、probe 分页、mailbox 逐条）。
 
@@ -163,7 +162,7 @@ L 档附加（仅 L 档出现）：任务应已预拆阶段或转 workflow——
 - 做了什么/产物路径/遗留一句话——只报指针，正文落 artifacts（details 只传摘要）
 ````
 
-**派发头模板**（DP-3 固定指针模板，v1.6 W3a 起唯一首条消息形制；主控按 nested 回执编号字段 `{pack_path, mission_id, worker, token}` 机械填充，禁扩写、禁读旧任务包手工复刻、禁改写三行契约；三行契约唯一权威=包 CONTRACT，三行供 bg-gate presence 检测〔宿主 Agent 调用同检〕。与 §2 DP-3 双位同文）：
+**派发头模板**（DP-3 固定指针模板，唯一首条消息形制；主控按 nested 回执编号字段机械填充，禁扩写、禁读旧任务包手工复刻、禁改写三行契约；三行契约唯一权威=包 CONTRACT，三行供 bg-gate presence 检测〔宿主 Agent 调用同检〕。与 §2 DP-3 双位同文）：
 
 ```
 先 Read 任务包 {pack_path}，按包内 TASK/RULES 执行；用 mcp__plugin_agent-orchestrator_orch__report 汇报（三行契约唯一权威=包 CONTRACT 节）。本 mission 角色={agent_type 裸名}——角色预设已随 subagent_type 加载（预设含全角色纪律，此刻生效）。
@@ -207,18 +206,18 @@ SA-2 同一 mission 命中多行时优先级：疑似唤醒失败 > blocked/ques
 ## 5. 提问-作答-恢复闭环与收工
 
 CL-1 提问分流：worker/用户提问先自查环境可查证的事实（board 字段/源码/日志/镜像），查不到再问。
-CL-2 常规通道：`report(kind=blocked|question)` → 事件落邮箱、mission 置 blocked/question → `mailbox(peek)` 发现 → `mailbox(read)` 消费 → 需查证先派 orch-scout → `mailbox(action=answer, mission_id, answer)`（留痕并返回 recommended_call）→ 按建议发 `SendMessage(to=agent_id, summary≤200, message=答复+继续指令)`；运行中=steer，已终态=后台恢复续聊（可反复）。
+CL-2 常规通道：`report(kind=blocked|question)` → 事件落邮箱、mission 置 blocked/question → `mailbox(peek)` 发现 → `mailbox(read)` 消费 → 需查证先派 orch-scout → `mailbox(action=answer, mission_id, answer)`（留痕+返回 recommended_call）→ 按建议发 `SendMessage(to=agent_id, summary≤200, message=答复+继续指令)`；运行中=steer，已终态=后台恢复续聊。（子代理侧=question/blocked 发出后立即结束回合——终态交还主控，禁 sleep/轮询/长等待挂起，主控答复经 SendMessage 唤醒续聊。）
 CL-3 紧急四情形：验收标准要变 / 继续做已无意义 / 需不可逆操作 / 阻塞超 10 分钟 → 子代理用 `RespondToCoordinator` 直达主控（仅主控先发过消息、该工具在工具面时可用）。
 CL-4 workflow 提问：worker `escalate` → 通知含 `dwfq-…` id → `ResolveWorkflowQuestion(question_id, answer)`；pendingQuestions 用 `GetWorkflowRun` 兜底；脚本坏了 → 改 script + `AmendWorkflow(path)`；dwfq 无超时，不得积压。
 CL-5 签收语义：接手并处置结果即签收——`mailbox(answer)` 与 `board(upsert, status="closed")` 自动补 ack；暂缓处置 → `board(action="ack", mission_id, note="deferred by user")`。
 CL-6 疑似唤醒失败处置：终态（done/failed/blocked/question）+ dispatch 记录非空（agent_id 或 headless session_id）+ 未签收是提示不是故障；先 `mailbox(read)` 接手，再 answer/close；用户要求搁置 → 按 CL-5 补 ack，否则每次收工重复出现。
 CL-7 Stop 清单：Stop hook 注入"未竟"与"疑似唤醒失败"两类计数；逐项处置后收工；`stop_hook_active=true` 时平台放行，清单一次处置完。
 CL-8 同会话恢复：`SendMessage(to=agent_<uuid>, summary≤200, message)` 续聊终态子代理；workflow 按第 4 章 stopped/errored 行处置（`ResumeWorkflowRun` 仅 stopped 有效）。
-CL-9 跨会话恢复：SessionStart 注入可恢复简报；跑 `/orch-resume` 或调 `resume` 工具取 per-mission `recommended_action`；agentId 失效 → 用 `context_pack`（original_prompt/pack 在 board）重建上下文 + 同类型角色重派；连续性靠文件不靠 agentId；新会话派发把 session_id 记进 dispatch；近期现场由上下文镜像支撑（`resume` 的 prev_sessions.tail / 第 10.2 节），深挖用 `ReadSessionContext`。
+CL-9 跨会话恢复：SessionStart 注入可恢复简报；跑 `/orch-resume` 或调 `resume` 取 per-mission `recommended_action`；agentId 失效 → 用 `context_pack`（original_prompt/pack 在 board）重建上下文+同类型角色重派；连续性靠文件不靠 agentId；新会话派发把 session_id 记进 dispatch；近期现场由上下文镜像支撑（`resume` 的 prev_sessions.tail/第 10.2 节），深挖用 `ReadSessionContext`。
 
 ## 6. 并行、分叉与多轮流水线
 
-PR-1 后台硬纪律：Agent 调用一律 `run_in_background=true`；禁止前台派发长任务——前台子代理占住主控回合（无法并行/响应用户），且用户一条消息会取消整回合并连带取消子代理。
+PR-1 后台硬纪律：Agent 调用一律 `run_in_background=true`；禁前台派发长任务——前台子代理占住主控回合（无法并行/响应），用户一条消息会取消整回合并连带取消子代理。
 PR-2 闸门：userConfig `background_gate` 默认 remind，对疑似长任务前台派发放行并注入提醒；=ask 转人工确认；`background_gate_exempt_types`（默认 judge）豁免。
 PR-3 并发上限：单会话同时在飞 ≤8；迭代任务排队，签收一个放出下一个。
 PR-4 不轮询：靠完成通知；`TaskOutput(task_id, block=true, timeout≤600000)` 仅显式等待；"No task found" 兜底 = 完成通知输出路径 / `GetWorkflowRun` / `ListWorkflowRuns`。
@@ -227,13 +226,13 @@ PR-6 聚合：全文写文件、只带 ≤200 字摘要进上下文；禁止把�
 PR-7 分叉：2–8 个独立变体一轮出结果 → `context_pack(variants=N, variant_axes=[...])` → 同一条消息发 N 条 Agent（各用对应包 CONTRACT 三行+pack_path 指针句）；适合 A/B 方案、多库调研、多风格实现。
 PR-8 workflow fan-out：需要循环/门禁/结果互联 → `CreateWorkflow` 脚本；workflow 角色 = persona(system+model)，工具面全局同一。
 PR-9 结果比较：变体跑完派 orch-reviewer 汇总，再向用户给 verdict。
-PR-10 流水线输入冻结：第 N+1 轮调研/设计可在第 N 轮进入 QA/评审时启动，三条全满足才算冻结——输入已落盘；与上一轮交集仅为只读上游（评审打回不波及已开工部分，或仅波及读上游阶段）；本轮任务包已物化。
+PR-10 流水线输入冻结：第 N+1 轮调研/设计可在第 N 轮进入 QA/评审时启动，三条全满足才算冻结——输入已落盘；与上一轮交集仅只读上游（评审打回不波及已开工部分）；本轮任务包已物化。
 PR-11 串行合法：任一冻结条件不满足 → 串行一条链。
 PR-12 迭代 mission：每次迭代 = 独立 mission（独立 pack/token/artifacts）；禁止多轮共用一个 mission。
 PR-13 哨兵覆盖：全项目哨兵家族只一套，启动一次覆盖所有迭代的新派发（第 11 章）；实例开枪后其余实例继续值守。
 PR-14 轮次签收：`mailbox(read, mission_id=…)` 定向消费；done 先评审再 close（沙箱按第 12 章）；哨兵告警按 mission 处置，不阻塞其余迭代。
 PR-15 轮次命名：迭代编号写进 title（如「v2 迭代：搜索重构——实现」）。
-PR-16 子代理回合内禁挂内部后台命令：子代理（全角色）回合内禁止 `Bash(run_in_background=true)` 挂长命令、禁止 file-watch/事件监听类长挂源——内部后台命令的完成通知可能晚于主回合结束才唤醒该子代理，其「最后完成」可被吞为宿主不可见，mission 永滞=僵尸（T14 用户实证）。长任务改同步等待或拆 mission；主控面 `run_in_background` 派发不受本条约束（PR-1 口径）。
+PR-16 子代理回合内禁挂内部后台命令：子代理（全角色）回合内禁止 `Bash(run_in_background=true)` 挂长命令、禁止 file-watch/事件监听类长挂源——完成通知可能晚于主回合结束才唤醒，「最后完成」被吞=mission 僵尸（T14 实证）；长任务改同步等待或拆 mission；主控面 `run_in_background` 派发不受本条约束（PR-1 口径）。
 
 ## 7. 模型选择两轨
 
@@ -241,26 +240,26 @@ MD-1 普通 Agent 轨：Agent 工具无 model 参数；三级优先——用户�
 MD-2 workflow 轨粒度：per-agent `agent(name, { model })` > run 级 `subagent_model` > 会话模型。
 MD-3 模型值：编译期字符串字面量（`"modelId"` / `"providerId/modelId"`，可带 `$reasoningLevel` 后缀如 `"GLM-5.3$high"`）或 `model("…")` 返回的 ModelRef；模型声明表放脚本顶部，一处 amend 全局生效；创建时冻结，运行期只能在已声明 ModelRef 间选择。
 MD-4 run 级设置：`subagent_model` 经 `CreateWorkflow`/`AmendWorkflow` 设置，`ListModels` 查询；仅改设置 = 停旧开新。
-MD-5 运行中无"单子代理改模型" API：唯一路径 = 改脚本字面量/表 → `AmendWorkflow(path)`（supersede 旧 run，已完成工作零成本导入缓存；缓存命中的已完成 ask 仍返回旧模型，仅新 live ask 跑新模型）。
+MD-5 运行中无"单子代理改模型" API：唯一路径 = 改脚本字面量/表 → `AmendWorkflow(path)`（supersede 旧 run，已完成工作零成本导入缓存；缓存命中的 ask 仍返回旧模型，仅新 live ask 跑新模型）。
 MD-6 启动校验：脚本模型名对照 host 模型目录解析（modelBindings 记 journal）并经用户确认窗口批准；host 无模型目录拒绝启动。
 MD-7 诊断码：9010 = 编译期 model 值非法（非字面量/字面量联合/ModelRef、动态拼名）；9011 = 解析失败（not_found/ambiguous/disabled/reasoning_level_unknown，提示 `ListModels` 或改用全 providerId/modelId）。
 MD-8 使用纪律：仅用户要求或明显轻量层（judge/router）用 per-agent 模型；id 一律取自 `ListModels`。
 
 ## 8. 自定义角色与主派发形态
 
-RP-1 主派发形态 = nested 组装出口（v1.2 M5-1）：`dispatch(mission_id, mode:"nested")` 锁内组装首条消息返 `{mission_id, token, prompt, pack_path}`，主控经宿主 Agent 嵌套发出（组包链复用 context_pack 物化；内嵌 CONTRACT 三行/token 鉴权/scope yolo 闸——派发纪律靠工具面保证，§8.7：bg-gate 对宿主 Agent 调用系提示面非防线〔PT-5 fail-open〕且不知 mission scope，纪律必须是工具面强制而非文档倡议）；typed 派发为主形态（v1.3.0 ba92054 修复；v1.6 W-p 起 dispatch typed 参数退役，宿主 subagent_type 直派面不受影响——「主形态」语义=宿主 typed 直派）；GP+persona 注入为降级备选——降级前置=先核缓存版本含修复或开新会话，typed 发射失败方可回落（本章降级备选形态）。〔v1.6 W-p：-p 备选句（headless 启动器缺省 mode/fire-and-forget 专用）随 -p 通道 parked 退役——整面归档 parked/agent-orchestrator/（恢复另案=README 指引），mode 缺省=nested。〕
+RP-1 主派发形态 = nested 组装出口（v1.2 M5-1）：`dispatch(mission_id, mode:"nested")` 锁内组装首条消息返 `{mission_id, token, prompt, pack_path}`，主控经宿主 Agent 嵌套发出（组包链复用 context_pack 物化；内嵌 CONTRACT 三行/token 鉴权/scope yolo 闸——派发纪律靠工具面保证，§8.7：bg-gate 对宿主 Agent 调用系提示面非防线〔PT-5 fail-open〕且不知 mission scope，纪律必须是工具面强制而非文档倡议）；typed 派发为主形态（v1.3.0 ba92054 修复；v1.6 W-p 起 dispatch typed 参数退役，宿主 subagent_type 直派面不受影响——「主形态」语义=宿主 typed 直派）；GP+persona 注入为降级备选——降级前置=先核缓存版本含修复或开新会话，typed 发射失败方可回落（本章降级备选形态）。〔v1.6 W-p：-p 面归档 parked/agent-orchestrator/（恢复另案=README 指引），mode 缺省=nested。〕
 RP-2 成因：宿主 typed 校验读取会话 create 时点冻结的 MCP 启动快照；快照为空期间 `subagent_type` 派发插件角色在 spawn 前恒拒（"Required MCP tool is not available in the parent startup snapshot"），重试无新信息。
 RP-3 协议（宿主降级备选）：Read `plugins/agent-orchestrator/agents/<role>.md` 原型正文 → `Agent(description, prompt=<原型正文> + 一行指针句（含「主控态势见 `<root>/context/coord-tail-log.md` 尾部」）+ CONTRACT 三行, run_in_background=true)`——零组装、指针化恢复（GP 降级备选通道形态）。
 RP-4 双通道：主通道 `mcp__plugin_agent-orchestrator_orch__report`；降级通道 report 不在工具面（TOOL_ABSENT）→ 终态回复行首标注 `KIND=xxx`（仅终态、无 milestone 与哨兵联动，中途进度丢失属预期）。
-RP-5 形态保全：typed 派发已恢复（v1.3.0 ba92054，主形态）；宿主 GP 形态保全 milestone 事件、manifest/inputs 牵引与板面时间线；无法启动时先核插件缓存版本，再按排障表处置。nested 主形态经宿主 Agent 通道（GP 形态同面），报告/收口协议同构（第 8 章 RP-4、第 17 章尾块态）。〔v1.6 W-p：-p 备选句（不经宿主快照收敛路径/零新增通道/与 -p 完全同构）随 -p 通道 parked 退役——原语详 parked/agent-orchestrator/ 基线快照与 git 历史；dispatch typed 参数同批退役（「主形态」=宿主 subagent_type 直派面，不受影响）。〕
+RP-5 形态保全：typed 派发已恢复（v1.3.0 ba92054，主形态）；宿主 GP 形态保全 milestone 事件、manifest/inputs 牵引与板面时间线；无法启动时先核插件缓存版本，再按排障表处置。nested 经宿主 Agent 通道（GP 同面），报告/收口协议同构（RP-4、第 17 章尾块态）。〔v1.6 W-p：-p 备选句随通道 parked 退役——原语详 parked 基线快照与 git 历史；dispatch typed 参数同批退役（「主形态」=宿主 subagent_type 直派面，不受影响）。〕
 RP-6 恢复条件与复核：恢复条件（已满足，2026-11-01 归因翻面）：真因=frontmatter tools 白名单单前缀名失配，ba92054 修复随 v1.3.0 出街；本条留作归因记录。
 RP-7 保留不删：原生角色 `tools` 清单 report 全名（`mcp__plugin_agent-orchestrator_orch__report`）**保留不删**——删除会在修复后断运行时，当前被拒现状下零额外成本。
 RP-8 frontmatter 边界：角色文件 frontmatter 的 tools 清单在 GP 路径下不生效，正文即 persona。
-RP-9 spawn_agent：`spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` 写入 `<项目>/.zcode/agents/<name>.md`；生效时机 = 新会话注册；产物走同一装配链，tools 覆盖含 MCP 具体名的在 typed 形态同受快照收敛——注册 ≠ 当下可派发，仍按 RP-3 派发。
+RP-9 spawn_agent：`spawn_agent(name, description, archetype=worker|scout|reviewer, model?, max_turns?, tools?, system_prompt?, overwrite?)` 写入 `<项目>/.zcode/agents/<name>.md`；生效时机=新会话注册；tools 覆盖含 MCP 具体名的在 typed 形态同受快照收敛——注册≠当下可派发，仍按 RP-3 派发。
 RP-10 三个 archetype：worker（执行，cyan）/ scout（只读调研，blue）/ reviewer（评审，yellow）；tools 覆盖原型工具面时 report 全名强制保留。
 RP-11 转正：临时代理用得好 → `spawn_agent` 固化为项目角色，下次免注入。
 RP-12 派发权限红线（两形态同闸，工具面强制）：headless 子代理=`--mode yolo` 全放行、无交互闸；nested 子代理=宿主会话权限面，bg-gate 对宿主 Agent 调用只是提示面非防线（PT-5 fail-open 三层，且不知 mission scope）。两形态派发前必过同一 yolo 闸（工具面强制：只读/记忆域角色豁免；worker 类 mission 必须登记 `scope_paths`，越界可审计），高险写任务走沙箱（第 12 章）。
-RP-13 桌面可见性：headless 会话与主控会话同工作区同列可见（UI 呈现以用户目视为准，本手册不承诺 UI 面）。
+RP-13 桌面可见性：headless 会话与主控会话同工作区同列可见（UI 呈现以用户目视为准）。
 RP-14 契约卡语义同步检查行：行为变更波的任务包/详单须含「受影响契约卡语义同步」检查行。
 
 ## 9. 缺陷与坑位清单
@@ -287,10 +286,10 @@ RP-14 契约卡语义同步检查行：行为变更波的任务包/详单须含�
 
 ### 10.1 事件层：lessons
 
-MM-1 落位：项目库 = `<存储根>/memory/lessons.jsonl`；全端库 = `<~/.zcode>/orchestrator-memory/memory/lessons.jsonl`（server 参数 `--memory-root` 覆盖全端根；落位图权威 designs/agent-orchestrator-v0.8-DESIGN.md §2.2）；检索双库合并（同 normKey 条目全端优先去重）。
+MM-1 落位：项目库 = `<存储根>/memory/lessons.jsonl`；全端库 = `<~/.zcode>/orchestrator-memory/memory/lessons.jsonl`（`--memory-root` 可覆盖全端根；落位图权威 designs/agent-orchestrator-v0.8-DESIGN.md §2.2）；检索双库合并（同 normKey 全端优先去重）。
 MM-2 字段：`id`（l-日期-6hex）、`type`（error-fix/pitfall/preference/env-fact）、`trigger`（≤120 字）、`lesson`（≤200 字，可空）、`fix`（≤200 字）、`confidence`/`hits`/`status`、`scope`（project/global，由写入目标库隐含）、`source`（report/add/stage）、`refs`/`counter_refs`/`note`；一行一条，只增不重排，修改走全文件原子重写。
 MM-3 两级写入：候选 = `report(kind=done, lessons=[{trigger, fix}…])` ≤3 条，服务端只存不判、不注入；晋升 = 主控签收时 `lessons(action="promote", id, lesson?=提炼后单句, fix?/type?/trigger?=精修)`，合格判据 = 单句原子、不复述 board 状态机或 AGENTS.md 已固化内容；晋升初始 confidence=0.6、hits=1；同 trigger+fix 自动合并（hits+1、confidence+0.1 上限 0.95），候选置 retired。
-MM-4 检索注入：`lessons(action="list")` 默认 status=active 按 score 降序，score = confidence × (1+ln hits) × e^(-天/30)（30 为衰减时间常数）；`context_pack` 按标题/任务/read_first 关键词（ASCII 词 + CJK 2-gram）匹配 trigger+lesson+fix，取交集 ≥1；type 加权排序（error-fix 1.0 > pitfall 0.9 > env-fact 0.8 > preference 0.7，仅重排不滤除）；score 低于 `INJECT_MIN_SCORE=0.40` 的不健康条目不注入；入选前 6 条、总 ≤1200 字，注入行自带 id（`- [error-fix·l-…] 触发：…`）；无匹配不出现；SessionStart 简报附全局 top3。
+MM-4 检索注入：`lessons(action="list")` 默认 status=active 按 score 降序，score = confidence × (1+ln hits) × e^(-天/30)（30 为衰减时间常数）；`context_pack` 按标题/任务/read_first 关键词（ASCII 词+CJK 2-gram）匹配 trigger+lesson+fix 交集 ≥1；type 加权排序（error-fix 1.0 > pitfall 0.9 > env-fact 0.8 > preference 0.7，仅重排）；score 低于 `INJECT_MIN_SCORE=0.40` 不注入；入选前 6 条、总 ≤1200 字，注入行自带 id（`- [error-fix·l-…] 触发：…`）；无匹配不出现；SessionStart 简报附全局 top3。
 MM-5 随手记：`lessons(action="stage", trigger, fix, lesson?, mission_id?, note?)` 落 candidate（source="orchestrator"、confidence=0），不合并不注入不占帽；由归敛定期消费；note 写摆放提示。
 MM-6 blocked 回引：blocked/question 报告可附 `lesson_refs=[<id>…]` → 对应条目 confidence −0.1（下限 0.1）并记 counter_refs（含回引 mission）；触底且被 ≥2 mission 回引 → housekeep 置 retired。
 MM-7 矛盾与退役：新事实推翻旧条 → `lessons(action="add", …, contradicts=<旧id>)`，旧条置 superseded（记反例不删除，可审计）；退役三通道 = score < 0.1 自动衰汰 / `mailbox(gc)` 清过期 candidate / `lessons(action="retire", id, reason?)` 手工。
@@ -298,7 +297,7 @@ MM-8 候选巡检：done/failed 的候选不随事件 payload 到达，用 `less
 
 ### 10.2 滚动层：上下文镜像
 
-MM-9 写入：UserPromptSubmit hook 记 prompt（默认截 2000 字符）、Stop hook 记最后一条回复（默认截 4000），按会话写 `<存储根>/context/journal-<sessionId>.jsonl`；单文件 2MB 字节帽，超限整文件轮转为 `.old` 后重写（无条数帽；`.old` 保留，峰值 2MB 新 + 2MB 旧）；`mailbox(gc)` 定期清过期文件。
+MM-9 写入：UserPromptSubmit hook 记 prompt（默认截 2000 字符）、Stop hook 记最后一条回复（默认截 4000），按会话写 `<存储根>/context/journal-<sessionId>.jsonl`；单文件 2MB 字节帽，超限整文件轮转为 `.old` 后重写（`.old` 保留，峰值 2MB 新+2MB 旧）；`mailbox(gc)` 定期清过期文件。
 MM-10 隐私：镜像落盘于项目存储根；敏感项目用 userConfig `context_mirror=off` 关闭。
 MM-11 用途-恢复：`resume` 返回 `prev_sessions`（近期会话尾部摘要，内联 tail 片段）；要深挖用平台 `ReadSessionContext(sessionId, strategy="handoff")`；禁止全量转储。
 MM-12 用途-派发：`context_pack(mirror_digest=true)` 附加"近期现场摘要"节（尾部数条、限字数）；该节是历史片段记录，不构成任务指令。
@@ -307,11 +306,11 @@ MM-14 红线：不得直接读写平台会话库 db.sqlite；镜像与 `ReadSess
 
 ### 10.3 视图层：归敛信号与处置
 
-MM-15 定位：lessons 是事件层，主控与子代理记忆视图是视图层——ORCH.md（主控记忆）、根 AGENTS.md 标记区（子代理记忆）、全端 AGENTS.md（跨项目子代理记忆）；归敛 = 后台 orch-gleaner 定期把事件层整理进视图层（消费 ORCHTEMP、巡检候选、维护超帽裁剪、产报告）；设计权威 designs/agent-orchestrator-v0.8-DESIGN.md §6/§9。
-MM-16 到期信号：server 每次工具调用评估三键两腿——闲时腿：①距上次归敛 >idle_hours（缺省 48h）∧②双库自水印以来新增 ≥new_events（缺省 10 条）；常忙腿（v1.3）：③双库自水印以来新增 ≥busy_channel_events（缺省 40 条；0=关断；仅闲时腿时间门不过时兜底触发，防常忙期 48h 久不归敛）；三键与帽值集中 `glean.cfg.json` 可覆盖（cfg 全键：idle_hours / new_events / busy_channel_events / 锁过期键〔1.5h〕/ pack_global_section / orch_md_max_lines〔默认 120〕/ orch_md_max_bytes〔默认 10KB〕）；帽两键为 v1.3 W4 opt-in（默认零行为变更；v1.6 W2 拆除后 ORCH.md 注入面已停——帽=归敛写帽〔ver 头消费/glean-pack RULES 渲染保留〕，上调帽值→视图层文件增大，操作者自担）；任一腿全过且锁闲 → 物化 `<全端目录>/glean-brief.json`（实测门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg 全文）+ 固定包 `glean-pack.md`（MM-29）并在响应附 `orch_memory.glean={due:true, reason, brief_path, pack_path, lock_state}`。
-MM-17 处置：`due:true` 且锁闲 → 后台 GP+orch-gleaner persona 派发（gate due 路径 = MM-29 一行 prompt 指固定包，主控零组装；手工拉起 = MM-28 骨架组包，包内 CONTEXT 内嵌 brief 快照）；TASK = 抢锁（位置=`<brief.lock_path>`，权威指针勿手写）→ 消费 ORCHTEMP（retire 置状态）→ 候选巡检 promote → 视图层维护（ORCH.md 重写 ver+1 / 标记区外科编辑 / 全端 AGENTS.md 更新）→ 锁置 done + watermarks → 写报告；`lock_state:"busy"` 或不感兴趣 → 忽略（信号不消费无后果，下次按门槛重新评估）。落位：全局后台任务（glean 等）默认落触发项目；插件 userConfig 键 `globalTaskProjectDir`（string，缺省 ""）可指定固定落位项目根——设值为存在的目录绝对路径即生效；键缺席/空/路径不存在=回退触发项目（哨兵 stderr 单行告警，不静默）。键读取优先序：插件 userConfig 键＞根级 glean.cfg.json 同键（〔v1.6 W-p：原行为腿 tests/suites/glean-launch.mjs :1088-1090 B2-02 双键竞争随套件迁 parked——语义详 parked 基线快照与 git 历史〕）。落位跟随面=拉起路径（spawn cwd）+glean 消息行；盯守根不随落位迁移（OPEN-2=a 口径）。
-MM-18 组包校验：派发后 grep pack.md 验证 CONTEXT 物化（缺陷候选 #52 纪律）；路径类括注一律引权威指针（brief 字段/DESIGN 节号），不写绝对路径。
-MM-19 ORCH.md 消费（v1.6 拆除后，pull-only）：ver 同步推送已退役（v1.3 双 surfacing——content 顶层 `orch_md` 键+顶层 `orch_memory.orch_md` 附件——全停，N9 负向钉防回潮）；认知装载=会话启动 /manual 双件阻塞并读（commands/manual.md 第 2 步：SKILL 全文+ORCH.md 全文帽内）；会话中变更对账=按需 `probe file.head ORCH.md`（OV-9）；主控不写 ORCH.md，只消费。
+MM-15 定位：lessons=事件层，主控与子代理记忆视图=视图层——ORCH.md（主控）、根 AGENTS.md 标记区（子代理）、全端 AGENTS.md（跨项目子代理）；归敛=后台 orch-gleaner 定期把事件层整理进视图层（消费 ORCHTEMP、巡检候选、超帽裁剪、产报告）；设计权威 designs/agent-orchestrator-v0.8-DESIGN.md §6/§9。
+MM-16 到期信号：server 每次工具调用评估三键两腿——闲时腿：①距上次归敛 >idle_hours（缺省 48h）∧②双库自水印以来新增 ≥new_events（缺省 10 条）；常忙腿：③双库自水印以来新增 ≥busy_channel_events（缺省 40 条；0=关断；闲时腿时间门不过时兜底触发）；三键与帽值集中 `glean.cfg.json` 可覆盖（全键：idle_hours/new_events/busy_channel_events/锁过期 1.5h/pack_global_section/orch_md_max_lines〔120〕/orch_md_max_bytes〔10KB〕；帽=归敛写帽，上调→视图层文件增大，操作者自担）；任一腿全过且锁闲 → 物化 `<全端目录>/glean-brief.json`（门槛值/水印/ORCHTEMP 待消费 id/名册/ORCH.md ver/cfg）+ 固定包 `glean-pack.md`（MM-29）并在响应附 `orch_memory.glean={due:true, reason, brief_path, pack_path, lock_state}`。
+MM-17 处置：`due:true` 且锁闲 → 后台 GP+orch-gleaner persona 派发（gate due 路径 = MM-29 一行 prompt 指固定包，主控零组装；手工拉起 = MM-28 骨架组包，包内 CONTEXT 内嵌 brief 快照）；TASK = 抢锁（位置=`<brief.lock_path>`，权威指针勿手写）→ 消费 ORCHTEMP → 候选巡检 promote → 视图层维护（ORCH.md 重写 ver+1/标记区外科编辑/全端 AGENTS.md 更新）→ 锁置 done+watermarks → 写报告；`lock_state:"busy"` 或不感兴趣 → 忽略（下次按门槛重新评估）。落位：全局后台任务默认落触发项目；userConfig 键 `globalTaskProjectDir` 设为存在目录绝对路径即固定落位，键缺席/空/路径不存在=回退触发项目（哨兵 stderr 告警）；键读取优先序：userConfig＞根级 glean.cfg.json 同键（v1.6 W-p 起双键竞争行为腿随套件迁 parked，语义详 parked 基线快照）。落位跟随面=拉起路径+glean 消息行；盯守根不随落位迁移（OPEN-2=a）。
+MM-18 组包校验：派发后 grep pack.md 验证 CONTEXT 物化；路径类括注一律引权威指针（brief 字段/DESIGN 节号），不写绝对路径。
+MM-19 ORCH.md 消费（pull-only，OV-9 同律）：ver 推送已退役（N9 负向钉防回潮）；认知装载=会话启动 /manual 双件阻塞并读；变更对账=按需 `probe file.head ORCH.md`；主控不写 ORCH.md，只消费。
 MM-20 文件地图：
 
 | 文件 | 落位 | 说明 |
@@ -320,7 +319,7 @@ MM-20 文件地图：
 | 项目根 `AGENTS.md` 标记区 | 项目根 | 子代理记忆（硬帽 60 行/4KB；只动标记对内） |
 | `<全端目录>/AGENTS.md` | 全端目录 | 跨项目子代理记忆（帽 50 行/2KB；GLOBAL MEMORY 条件节注入，`glean.cfg.json` 的 pack_global_section 一键关） |
 | `<存储根>/memory/lessons.jsonl`（项目库）/ `<全端目录>/memory/lessons.jsonl`（全端库） | 项目存储根 / 全端目录 | 事件层；全端库跨项目，读端双库合并（10.1） |
-| `<全端目录>/glean-lock.json` / `glean.cfg.json` | 全端目录 | 归敛互斥锁（done 态保留：mtime=上次归敛时间、watermarks=事件基线）/ 门槛与帽值（缺省内建：48h/10 条/常忙 40 条〔0=关〕/锁过期 1.5h；ORCH.md 帽缺省 120 行/10KB，全键 cfg 可调） |
+| `<全端目录>/glean-lock.json` / `glean.cfg.json` | 全端目录 | 归敛互斥锁（done 态保留：mtime+watermarks）/ 门槛与帽值（缺省内建：48h/10 条/常忙 40〔0=关〕/锁过期 1.5h；ORCH.md 帽 120 行/10KB，全键 cfg 可调） |
 | `<全端目录>/glean-brief.json` / `glean-pack.md` / `projects.jsonl` / `reports/` | 全端目录 | server 物化的归敛简报 / 固定任务包（gate due 随 brief 再生，MM-29） / 注册项目名册 / 归敛报告 |
 
 （全端目录缺省 `<~/.zcode>/orchestrator-memory`，`--memory-root` 可覆盖。）
@@ -331,14 +330,14 @@ MM-21 开启：项目根 AGENTS.md 末尾（用户手写区之后）加入空标
 <!-- orch-mem:end -->
 ```
 
-MM-22 关闭：删标记对 = 功能关闭；归敛跳过该项目并在报告记录「标记区缺失，视为关闭」，不重建、不补写、不提示重建；重开 = 手工再加空标记对。
-MM-23 写法唯一：标记对写法唯一 = MM-21 逐字串（canonical = v0.8-DESIGN §7.1，typed-dispatch-docs DOC-02 已钉）；冒号变体视为不存在（`orch:memory:*` 等一律不认）——组包与文档一律引本节逐字串。
-MM-24 审阅面：归敛报告 `<全端目录>/reports/<YYYYMMDD-HHmmss>-glean.md`（帽 150 行；视图变更/晋升/ORCHTEMP 消费逐条带 lessons id 溯源）是主审计面；ORCH.md ver 回显与 git diff（根 AGENTS.md tracked）为辅；发现滥晋升/越界 → 手工纠偏（git 回滚标记区、`lessons(action="retire"/"add", contradicts=…)` 记反例）。
+MM-22 关闭：删标记对=功能关闭；归敛跳过该项目并在报告记录「标记区缺失，视为关闭」，不重建不补写；重开=手工再加空标记对。
+MM-23 写法唯一：=MM-21 逐字串（canonical=v0.8-DESIGN §7.1，DOC-02 已钉）；冒号变体视为不存在（`orch:memory:*` 等一律不认）——组包与文档一律引本节逐字串。
+MM-24 审阅面：归敛报告 `<全端目录>/reports/<YYYYMMDD-HHmmss>-glean.md`（帽 150 行，逐条带 lessons id 溯源）是主审计面；ORCH.md ver 回显与 git diff 为辅；滥晋升/越界 → 手工纠偏（git 回滚标记区、`lessons(action="retire"/"add", contradicts=…)` 记反例）。
 MM-25 权限：active 教训退役归敛无权限动手，只有建议权；采纳与否是主控手工动作。
 MM-26 快照语义：子代理读到父解析时点快照；会话中途归敛改 AGENTS.md 不影响在途子代理、影响新派发——不为此打断在飞任务。
 MM-27 Explore 形态：不注入 AGENTS.md → 标记区通道对它静默失效；全端级经 context_pack GLOBAL MEMORY 节覆盖。
 MM-28 手动拉起：任何时候按 MM-17 骨架组包派发 orch-gleaner（无专设命令面；锁在全端目录仲裁跨项目并发，抢不到锁的实例 report done skipped 让位）。
-MM-29 glean 特例（glean3 轻量化）：gate due → server 已物化固定 `<全端目录>/glean-pack.md`（随 brief 同调用点再生；固定模板 = persona 路径 agents/orch-gleaner.md + brief 逐字内嵌 + RL 规则烘焙〔锁纪律/四态口径/视图层边界/日志纪律〕+ Return ≤3 行指针纪律）→ 主控零组装：`dispatch(mission_id, pack_path=<全端目录>/glean-pack.md)` 固定包零组装保持（mission 须先在板）；gleaner 最终回复 ≤3 行只回指针（报告 = `reports/<ts>-glean.md` 即交付物，零汇报占用）；MM-18 组包校验对固定包不适用（server 物化面，crv8 G13 锚承载）。
+MM-29 glean 特例（glean3 轻量化）：gate due → server 已物化固定 `<全端目录>/glean-pack.md`（随 brief 同调用点再生；固定模板=brief 逐字内嵌+RL 规则烘焙〔锁纪律/四态口径/视图层边界/日志纪律〕+Return ≤3 行指针纪律）→ 主控零组装：`dispatch(mission_id, pack_path=<全端目录>/glean-pack.md)`（mission 须先在板）；gleaner 最终回复 ≤3 行只回指针（报告=`reports/<ts>-glean.md` 即交付物）；MM-18 组包校验对固定包不适用（server 物化面，crv8 G13 锚承载）。
 
 ## 11. 唤醒通道（哨兵家族与 watcher）
 
@@ -346,43 +345,37 @@ MM-29 glean 特例（glean3 轻量化）：gate due → server 已物化固定 `
 
 WU-1 平台事实：只有后台任务退出产生的完成通知能叫醒主控；运行中任务不产生通知，且完成通知实测会丢；一次进程退出 = 一次通知 = 一枪。
 WU-2 家族形态：哨兵 v2 = N 个独立直至型实例（默认 3），60s 判定、全清转待命（不退出）；每个实例开一枪（exit 1 通知）后继续值守（开枪不再终止盯守）。
-WU-3 启动 ritual：本回合首次 Agent 派发后，同一条消息连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`（同命令重复发，自动认领不同槽位）；`--once` 接受并忽略；bg-gate 派发提醒在家族缺员且过 10 分钟冷却时附带同命令；参数默认取 userConfig（sentinel_family=3 / sentinel_grace_min=5 / wake_poll_sec=60），可 CLI 覆盖（`--wake-grace-min`、`--family-size` 等，全量见第 14 章 TS-18）。
-WU-4 桥接注记（V7-05 起桥接可达；CONFLICT-1 存根状态终结）：wake_timeout_min/wake_retries 为桥接键——server 仅显式传参才写 cfg（numArgOpt 稀疏语义，未传则键省略），哨兵按 CLI > cfg 直读键 > 桥接键 > 内建默认解析（bg-sentinel `numArgBridge`）；两键在未传对应 CLI 旗标时分别生效为两枪最小间隔 / 单条件封顶枪数；全不传时用内建默认 5/3（CFG-05 默认值漂移锁在案）。
+WU-3 启动 ritual：本回合首次 Agent 派发后，同一条消息连发 3 次 `Bash(command="node <插件根>/hooks/bg-sentinel.mjs --once", run_in_background=true, description="哨兵：未签收任务分级叫醒")`（同命令重复发，自动认领不同槽位）；`--once` 接受并忽略；bg-gate 派发提醒在家族缺员且过 10 分钟冷却时附带同命令；参数默认取 userConfig（sentinel_family=3/sentinel_grace_min=5/wake_poll_sec=60），CLI 覆盖全量见第 14 章 TS-18。
+WU-4 桥接注记（V7-05 起桥接可达）：wake_timeout_min/wake_retries 为桥接键——server 仅显式传参才写 cfg（numArgOpt 稀疏语义），哨兵按 CLI > cfg 直读键 > 桥接键 > 内建默认解析；两键在未传对应 CLI 旗标时分别生效为两枪最小间隔/单条件封顶枪数；全不传时用内建默认 5/3（CFG-05 默认值漂移锁在案）。
 
-| 条件 | 宽限（首枪） | 说明 |
-|---|---|---|
-| done/failed 未签收 | 5 分钟 | 结果落盘主控未签收 |
-| blocked/question 未答 | 3 分钟 | worker 停车等答案 |
-| 在飞失联 | 30 分钟 | timeline 无事件（worker 任何 report 续期） |
-| 崩溃实锤 | 10 分钟 | rollout 心跳停更 + tool_usage 无 running 行佐证；绕过双空闲门 |
-| 板不可读 | 立即 | 连续 3 tick，cap=2 |
+分级阈值（done/failed 5 分钟 / blocked/question 3 / 在飞失联 30 / 崩溃 10 / 板不可读立即）与字段级细则以哨兵契约卡 `card-sentinel.md` 为读取面权威（写方/读方/字段/失效语义四栏，OV-8），本手册不双源复述。
 
-WU-5 全清待命：全部签收且无在飞（含仅剩 workflow 在飞——workflow 由宿主完成通知）→ 槽位写 `state=standby` 转低频待命（板面复核默认 `max(wake_poll_sec, 300s)`，CLI `--standby-poll-sec` / cfg `standby_poll_sec` 可调；心跳照常刷新，bg-gate 与 `sentinel_health` 视其在岗）；板面出现新在飞/未签收 → 自动复活 active；待命期板不可读静默续待命。
+WU-5 全清待命：全部签收且无在飞（含仅剩 workflow 在飞——由宿主完成通知）→ 槽位写 `state=standby` 转低频待命（复核默认 `max(wake_poll_sec, 300s)`，CLI/cfg 可调；心跳照常，bg-gate 与 `sentinel_health` 视其在岗）；新在飞/未签收 → 自动复活 active；待命期板不可读静默续待命。
 WU-6 寿命轮换：实例到期（默认 24h）做单赢家选举——赢家写 `sentinel/family-teardown.json` 后 exit 0（轮换完成通知，无需处置），输家见新鲜标记顺延；家族逐轮递减直至消亡。
 WU-7 补员：收到告警 → 按第 5 章 CL-6 接手 → 处置后补发 1 次同命令把家族补满；升级窗口新旧实例混跑不冲突。
-WU-8 仲裁与 abandoned：同条件两枪最小间隔 5 分钟（错峰）；单条件封顶 3 枪，第 3 枪带 abandoned 标记并追加邮箱回声 + OS toast 兜底；`board(list)` 顶层 `sentinel_health` 给家族在岗数、24h 开枪记录、abandoned 清单与回声摘要；resume 简报在缺员/有 abandoned 时给补员建议。
-WU-9 兜底与通知丢失：`sentinel_family=1` = 单实例、开一枪即死、无冗余，防丢失保持 ≥2（默认 3）；未启动哨兵时未签收任务仍出现在 Stop 清单与 resume 简报的"疑似唤醒失败"，实时唤醒只有哨兵这一条路；完成通知实测会丢，哨兵家族是冗余防线不是多余动作——每条哨兵告警按真实事件处置（同命令连发 3 次 = 3 条独立性命），派发提示、resume 建议与 `sentinel_health` 以"家族在岗数"为准，缺员即补。
+WU-8 仲裁与 abandoned：同条件两枪最小间隔 5 分钟（错峰）；单条件封顶 3 枪，第 3 枪带 abandoned 标记并追加邮箱回声+OS toast 兜底；`sentinel_health` 给家族在岗数、24h 开枪记录、abandoned 清单与回声摘要；resume 简报在缺员/有 abandoned 时给补员建议。
+WU-9 兜底与通知丢失：`sentinel_family=1`=单实例无冗余，防丢失保持 ≥2（默认 3）；未启动哨兵时未签收任务仍出现在 Stop 清单与 resume 简报的"疑似唤醒失败"；完成通知实测会丢，哨兵家族是冗余防线不是多余动作——每条告警按真实事件处置（连发 3 次=3 条独立性命），派发提示、resume 建议与 `sentinel_health` 以"家族在岗数"为准，缺员即补。
 
 ### 11.2 watcher（远程唤醒，v0.7.1）
 
 WU-10 分工：哨兵管本地后台完成通知丢失的分级补枪；watcher 管异地/移动场景把主控会话敲醒——经平台 remote 中继（ws2）注入固定模板壳（`[orch-watch] mission=<id> state=<…> summary=<≤200字模板摘要> 指引=请消费 spool/<event_id>.json`），只发 id+状态+指针、禁内联 worker 原文；board 签收/消费流程零改动。
 WU-11 启动：`Bash(command="node <插件根>/watcher/watcher.mjs --root <存储根>", run_in_background=true)`；常驻进程须用户显式授权（W-G §5 条件 C1；停用 = 进程退出 + token 自然过期，一键可断）。
-WU-12 参数：解析三层 CLI > `<存储根>/watcher.cfg.json` > 内建默认；零 npm 依赖，node ≥20；`--origin`（默认 https://zcode.z.ai）、`--poll-sec 30`、`--min-interval-sec 90`（两事务最小间隔=60s 防抖窗+50% 裕量）、`--wake-cap 3`、`--hold-max-sec 40`（≤60s TTL）、`--busy-silence-min 30`、`--trigger-statuses done,failed,blocked,question`、`--heartbeat-sec 60`、`--once`；定根 `--root` 优先、从不读 root.txt；每 60s 写 `<存储根>/sentinel/watcher-heartbeat`（mtime 即心跳）。
-WU-13 两道门：门 A 凭证合规（EXP-1 过）——terminal token 签发强制平台登录态（无 Bearer 即 401），`expires_in=60s` → 签发即用、用后即弃、不落盘不缓存；门 B 互踢级联（EXP-2 过 + 边界）——terminal 槽位短事务不触碰桌面 device 连接的 kick 计数；对手终端互踢不可观测，保守频控（≥90s 间隔/cap=3/busy 静默 30min）维持不放宽。
+WU-12 参数：解析三层 CLI > `<存储根>/watcher.cfg.json` > 内建默认；零 npm 依赖，node ≥20；`--origin`（默认 https://zcode.z.ai）、`--poll-sec 30`、`--min-interval-sec 90`（60s 防抖窗+50% 裕量）、`--wake-cap 3`、`--hold-max-sec 40`（≤60s TTL）、`--busy-silence-min 30`、`--trigger-statuses done,failed,blocked,question`、`--heartbeat-sec 60`、`--once`；定根 `--root` 优先、从不读 root.txt；每 60s 写 `<存储根>/sentinel/watcher-heartbeat`（mtime 即心跳）。
+WU-13 两道门：门 A 凭证合规——terminal token 签发强制平台登录态（无 Bearer 即 401），`expires_in=60s` 签发即用、用后即弃、不落盘；门 B 互踢级联——terminal 槽位短事务不触碰桌面 kick 计数；互踢不可观测，保守频控（≥90s 间隔/cap=3/busy 静默 30min）维持不放宽。
 WU-14 成功判定（三证合一）：① rpc-frame-ack（传输送达）；② session/send 受理无 -32010；③ 判定窗 60s 内 rollout 心跳复活/prompt_started；②=busy → no-op 成功不计失败；①②成③不成 → 记 accepted-not-revived，哨兵照常兜底。
-WU-15 降级树（degrade.mjs；终态不退出进程）：D1 凭证终态（签发 401/AUTH_FAILED/close 4004·4013、4011 重签再败）→ standby + 桌面重登指引，唤醒由哨兵全量接管；D2 临时弃发（ws 建连败/握手超时/心跳判死/桥接错误重试 1 次仍败/rpc-frame 无 ack）→ 本轮弃发写 signals，下轮 POLLER 自动恢复；D3 配置终态（workspace-list 空/close 4004·4012）→ 配置告警等人工；kicked（用户顶掉 watcher）= 正常生命周期，静默退出且绝不重连（60s 防抖窗内第二踢为全设计第一禁令）；事件流 `<存储根>/sentinel/watcher-signals.jsonl`。
-WU-16 安全：凭证文件在 orchestrator 存储根外独立路径；JWT 用后即弃不落盘；唯一允许落盘的凭证物 = role token（短时效）；五禁 = 禁入 git、禁入日志（token 形态 REDACTED 并可 grep 自检）、禁入 spool、禁入 echo.jsonl/mission timeline、禁入上下文包；probe 白名单排除凭证路径。
-WU-17 反向监控：设计分工 = watcher 接管唤醒、哨兵降为 watcher 存活监控 + 回退唤醒；watcher 进程死亡不自动拉起（不做守护守护进程的无限递归），交用户/主控处置；watcher 侧心跳/watcher-signals 写入面已落地，bg-sentinel 已消费 watcher-signals（v0.8 W6 闭环；信号新鲜窗默认 10 分钟，D2 在岗期间对未签收终态静默让位，D1/D3/kicked/缺失/过期走既有兜底）；人工巡检心跳 mtime 为兜底。
-WU-18 直连回环（v0.10 EXP-10）：verdict=delivered 蕴含三证传输面（workspace-list 应答/bridge-ready/rpc-frame-ack），不蕴含 CLI 受理；wake_sentinel 缺省 on——开直连实验窗前显式置 off，否则 SessionStart/派发钩子自动拉起哨兵家族；loopback 与云远控互斥——桌面实例加载两枚回环 env 后 device 改连 shim，云侧远控页不可用属实验态预期副作用。
+WU-15 降级树（degrade.mjs；终态不退出进程）：D1 凭证终态（401/AUTH_FAILED/close 4004·4013、4011 重签再败）→ standby+桌面重登指引，唤醒由哨兵全量接管；D2 临时弃发（建连败/握手超时/心跳判死/重试仍败/无 ack）→ 弃发写 signals，下轮自动恢复；D3 配置终态（workspace-list 空/close 4004·4012）→ 配置告警等人工；kicked=正常生命周期，静默退出绝不重连（60s 防抖窗内第二踢为第一禁令）；事件流 `<存储根>/sentinel/watcher-signals.jsonl`。
+WU-16 安全：凭证文件在存储根外独立路径；JWT 用后即弃不落盘；唯一允许落盘的凭证物=role token（短时效）；五禁=禁入 git、禁入日志（token 形态 REDACTED 可 grep 自检）、禁入 spool、禁入 echo.jsonl/timeline、禁入上下文包；probe 白名单排除凭证路径。
+WU-17 反向监控：watcher 接管唤醒、哨兵降为存活监控+回退唤醒；watcher 进程死亡不自动拉起（不做守护的无限递归），交用户/主控处置；bg-sentinel 已消费 watcher-signals（信号新鲜窗默认 10 分钟，D2 在岗期间对未签收终态静默让位，其余走既有兜底）；人工巡检心跳 mtime 兜底。
+WU-18 直连回环（v0.10 EXP-10）：verdict=delivered 蕴含三证传输面，不蕴含 CLI 受理；wake_sentinel 缺省 on——开直连实验窗前显式置 off，否则钩子自动拉起哨兵家族；loopback 与云远控互斥（桌面加载回环 env 后 device 改连 shim，云侧远控页不可用属实验态预期）。
 
 ## 12. 沙箱派发
 
 SB-1 适用判据（三条全满足）：改代码任务；改动可被 git diff 表达；项目是 git 仓库（有提交）；调研/文档类走普通派发，非 git 项目 context_pack 拒绝并引导 git init。
-SB-2 七步变体：① `context_pack(isolation:"worktree", oob_allowlist:["src/","tests/"])` —— materialize 建 worktree 沙箱（分支 `orch/<mission_id>`、`<存储根>/sandboxes/<mission_id>/`、包内路径改写 + SANDBOX 节红线）；`share_node_modules` 缺省自动（主仓有 node_modules 且任务不像安装类 → junction 只读共享；装依赖类自动禁共享）。② 正常派发（run_in_background=true + 三行契约），worker 在沙箱内干活、原仓路径只读。③ `report(kind=done, artifacts=[diff-stat 文件, diff-name-list 文件])`。④ 派 orch-reviewer 审 diff：`git diff --name-only <base_commit>` 逐路径比对 allowlist + `git -C <项目> status --porcelain` 巡检主仓污染。⑤ 评审 mission done → 主控把 verdict 抄录到目标 mission：`board(upsert, mission={id:"<目标>", qa:{verdict:"pass", reviewed_by, reviewed_at}})`（评审 mission 以 qa.mission_id 或 artifacts 互指目标）。⑥ pass → `sandbox_apply(mission_id)`：主仓巡检 → 越界机械检出 → `merge-tree` 冲突预检 → 干净 merge（--no-ff）→ worktree remove → board closed + 自动签收。⑦ fail（或越界/污染）→ `sandbox_discard(mission_id)`：弃分支 + 删 worktree，主仓零改动，按需重派。
+SB-2 七步变体：① `context_pack(isolation:"worktree", oob_allowlist:["src/","tests/"])` —— materialize 建 worktree 沙箱（分支 `orch/<mission_id>`、`<存储根>/sandboxes/<mission_id>/`、包内路径改写+SANDBOX 节红线）；`share_node_modules` 缺省自动（主仓有 node_modules 且非安装类 → junction 只读共享；装依赖类自动禁共享）。② 正常派发（run_in_background=true+三行契约），worker 在沙箱内干活、原仓路径只读。③ `report(kind=done, artifacts=[diff-stat 文件, diff-name-list 文件])`。④ 派 orch-reviewer 审 diff：`git diff --name-only <base_commit>` 逐路径比对 allowlist+`git -C <项目> status --porcelain` 巡检主仓污染。⑤ 评审 done → 主控把 verdict 抄录到目标 mission（`board(upsert, mission={id, qa:{verdict, reviewed_by, reviewed_at}})`，评审 mission 以 qa.mission_id 或 artifacts 互指目标）。⑥ pass → `sandbox_apply(mission_id)`：主仓巡检 → 越界机械检出 → `merge-tree` 冲突预检 → 干净 merge（--no-ff）→ worktree remove → board closed+自动签收。⑦ fail（或越界/污染）→ `sandbox_discard(mission_id)`：弃分支+删 worktree，主仓零改动，按需重派。
 SB-3 apply 四查（缺任一项明确报错、不静默降级）：verdict="pass"；reviewed_by 指向 done/closed 的评审 mission；其 agent_type 含 reviewer；评审 mission 互指目标 mission。
 SB-4 冲突分支：apply 报 `合并存在冲突` 时主仓未被触碰（board 不动、工作树不触）；按 isError 指引派合并代理：`context_pack(mission_id=<新id>, task="把 <branch> 合入主线并解决冲突", isolation="worktree", read_first=[四件套文件…])`——四件套 = merge-base（`git merge-base HEAD <branch>`）+ 主线侧 diff（`git diff <merge-base>..HEAD`）+ 分支侧 diff（`git diff <merge-base>..<branch>`）+ 冲突文件两侧内容（`git show <rev>:<path>`）；解决后复审再 apply；apply 死在 merge 之后 board 之前 → 重入幂等（applied_at 存在即补偿 close），主仓可 `git reset --hard ORIG_HEAD` 人工回退。
-SB-5 两阶段 apply（v0.6）：锁内 phase-1 写 `apply_intent_at` → 锁外 phase-2 git 管线 → 锁内 phase-3 重读收口（intent 新鲜窗 10min；在飞时 busy 返回 `apply_in_progress:true`，discard 撞新鲜 intent 被拒）；phase-2 期间板上 status/qa 漂移不回滚 merge（applied 胜出），漂移以响应 `warnings` 呈现（phase-3 只硬校验 id+branch+base_commit；merge 已落主线以 git log 为准人工核对）。
-SB-6 `--strict-tokens`（v0.6，默认 off）：注册落点 = `node <插件根>/mcp/server.mjs --strict-tokens`；off = 带 token 的 mission 严格校验、无 token 派发放行；on = 无派发 token 的 report 一律拒收（先 context_pack 铸 token），且 `agent_harvest` 仅接受 mission_id 定位。
+SB-5 两阶段 apply（v0.6）：锁内 phase-1 写 `apply_intent_at` → 锁外 phase-2 git 管线 → 锁内 phase-3 重读收口（intent 新鲜窗 10min；在飞时 busy 返回 `apply_in_progress:true`，discard 撞新鲜 intent 被拒）；phase-2 期间板上 status/qa 漂移不回滚 merge（applied 胜出），漂移以响应 `warnings` 呈现（phase-3 硬校验 id+branch+base_commit；merge 落主线以 git log 为准）。
+SB-6 `--strict-tokens`（默认 off）：注册落点=`node <插件根>/mcp/server.mjs --strict-tokens`；off=带 token 严格校验、无 token 派发放行；on=无 token 的 report 一律拒收（先 context_pack 铸 token），`agent_harvest` 仅接受 mission_id 定位。
 SB-7 三层检出：
 
 | 层 | 时机 | 手段 | 检出后果 |
@@ -399,14 +392,14 @@ DL-1 字段：`blockedBy`（上游 mission_id 数组，DAG 入边，可 upsert �
 DL-2 解锁：blockedBy 全部 done/skipped/closed → drafted 自动解锁为 ready；closed 算满足仅限绿归档（`qa.verdict="pass"` 或 `pack.sandbox.applied_at`），裸 closed 挂起不级联。
 DL-3 级联：任一上游 failed/skipped → drafted/ready 级联 skipped（skippedReason=upstream_failed；skipped 算失败信号不是满足，下游一并 skip 或修订 blockedBy 重规划）。
 DL-4 扫描：每次 board 写事务内 fixpoint 执行（done 事务同步解锁/级联），成环 blockedBy 变更直接拒绝，悬挂引用扫描时自动清理。
-DL-5 claim CAS：`board(action="claim", mission_id, worker, lease_minutes?)`——owner 为空、状态 drafted/ready、依赖全绿才可领；成功即 running 并写租约（token 缺失补发）；worker 每次 report 自动续租（缺省 userConfig `claim_lease_min`=30）；超时未续自动回 ready（下一写路径回收，无定时器）；两池工抢同一任务根锁内 CAS 恰一人成功，另一人 isError 附当前 owner。
+DL-5 claim CAS：`board(action="claim", mission_id, worker, lease_minutes?)`——owner 为空、状态 drafted/ready、依赖全绿才可领；成功即 running 写租约（token 缺失补发）；report 自动续租（缺省 `claim_lease_min`=30）；超时未续自动回 ready（下一写路径回收）；两池工抢同一任务根锁内 CAS 恰一人成功，另一人 isError 附当前 owner。
 DL-6 池工模式：同构任务池才需要——`spawn_agent(name="orch-pool-<tag>", archetype="worker", tools=["report", "mcp__plugin_agent-orchestrator_orch__board"], system_prompt="你是池工：循环 claim→干活→report→再 claim，直到 claim 全部失败（无 ready）后正常结束；不要 upsert/ack，那两件事归主控")`；GP 降级备选通道形态下池工一律经 `Agent(prompt=原型正文+system_prompt)` 注入派发（typed 挂不上 board/report 等 MCP 工具，第 8 章降级备选）。
 DL-7 池工执行：claim 成功后按 next_hint 先 Read 任务包，按 TASK/RULES 执行；每完成一步 report（自动续租）；完成 report(kind=done)。
 DL-8 口径：ready 且无人领取的任务不算未竟、不触发哨兵与收工清点——任务池空转不是事故；领取成功即 running，才进入在飞与唤醒体系。
 
 ## 14. 工具与参数速查
 
-**MCP 工具全名**（服务器名 orch，v1.6.0 起 13 个〔v1.1.1 起 12〕；report 仅子代理；probe 主控+子代理双面；dispatch/trajectory 仅主控；其余仅主控；子代理默认 disallowed 含 board/lessons/sandbox_*/agent_harvest/dispatch，池工经 spawn_agent tools 覆盖放行 board）：
+**MCP 工具全名**（服务器名 orch，13 个；report 仅子代理；probe 主控+子代理双面；dispatch/trajectory 仅主控；其余仅主控；子代理默认 disallowed 含 board/lessons/sandbox_*/agent_harvest/dispatch，池工经 spawn_agent tools 覆盖放行 board）：
 
 | 短名 | 完整全名 | 面向 |
 |---|---|---|
@@ -424,31 +417,31 @@ DL-8 口径：ready 且无人领取的任务不算未竟、不触发哨兵与收
 | probe | `mcp__plugin_agent-orchestrator_orch__probe` | 主控+子代理 |
 | trajectory | `mcp__plugin_agent-orchestrator_orch__trajectory` | 主控 |
 
-TS-1 board 行为：action ∈ upsert/get/list/ack/claim；`board(action="ack", mission_id, note?)` → `ack={at, by:"coordinator", note}`；answer/close 自动补签；list 顶层另附 `scope_conflicts`（在飞 mission 两两 scope 相交视图，与 upsert 的 `scope_warnings` 同构，≤10 条，无冲突省略键）。duplicate_warning（v0.10 P9）：来包与既有 mission 同 title（trim+小写归一化相等）或 scope_paths 相交且状态组合跨 {drafted}/{dispatched,running}、非同 id 时出现，数组项 `{with_mission_id, reason:title|scope|title+scope, hint, overlap?}`；无并存/空 title/同侧状态组合 → 键整体缺省（零字节差）。
-TS-2 claim：`board(action="claim", mission_id, worker, lease_minutes?)`——CAS 领取 ready/drafted（owner 置空、依赖全绿），成功即 running 并写租约；report 自动续租；超时回 ready；沙箱 apply/discard 门禁 = done + qa.verdict=pass，discard 幂等零损伤。
-TS-3 context_pack 参数：`inputs`（≤4 个上游 mission id，机械牵引 manifest 条目：T0→CONTEXT / T1→SUMMARY / T2→READ FIRST；全部零产出 isError）；`scope_paths`（≤32 项，超限报错不截断；物化 OWNERSHIP，沙箱派发时整体取代 oob_allowlist）；`budget`（enum S/M/L，物化 BUDGET 节含 token 档静态预告行）；缺省均不出现（与旧版同参包逐字节一致）。
-TS-4 呈现面：board mission 行附 `t1_head`（≤160 字，最近 report summary 截取，附 artifacts_n/output_files_n/has_question；无 report → null）；resume 对 done/failed 未签收行附 t1_head，blocked/question 行以 `question_head`（≤160 字）预览（全文经 mailbox read）。
+TS-1 board 行为：action ∈ upsert/get/list/ack/claim；`board(action="ack", mission_id, note?)` → `ack={at, by:"coordinator", note}`；answer/close 自动补签；list 顶层附 `scope_conflicts`（在飞 mission scope 相交视图，与 upsert `scope_warnings` 同构，≤10 条，无冲突省略）。duplicate_warning（v0.10 P9）：同 title（trim+小写归一相等）或 scope_paths 相交且状态组合跨 {drafted}/{dispatched,running}、非同 id → 数组项 `{with_mission_id, reason:title|scope|title+scope, hint, overlap?}`；无并存/空 title/同侧组合 → 键整体缺省。
+TS-2 claim：`board(action="claim", mission_id, worker, lease_minutes?)`——CAS 领取 ready/drafted（owner 置空、依赖全绿），成功即 running 并写租约；report 自动续租；超时回 ready；沙箱 apply/discard 门禁=done+qa.verdict=pass，discard 幂等零损伤。
+TS-3 context_pack 参数：`inputs`（≤4 个上游 mission id，机械牵引 manifest 条目：T0→CONTEXT/T1→SUMMARY/T2→READ FIRST；全部零产出 isError）；`scope_paths`（≤32 项，超限报错不截断；物化 OWNERSHIP，沙箱派发时整体取代 oob_allowlist）；`budget`（enum S/M/L，物化 BUDGET 节含 token 档预告行）；缺省均不出现（与旧版同参包逐字节一致）。
+TS-4 呈现面：board mission 行附 `t1_head`（≤160 字，最近 report summary 截取，附 artifacts_n/output_files_n/has_question；无 report → null）；resume 对 done/failed 未签收行附 t1_head，blocked/question 行以 `question_head`（≤160 字）预览，全文经 mailbox read。
 TS-5 mailbox：peek 不消费（仅 summary+age）；read 消费事件，details 超 2000 字截断并追加 `…[截断于N字]` 与提示句（长文写文件走 artifacts，邮箱只传摘要），spool 存证原文不动；answer 留痕并返回 recommended_call。
 TS-6 manifest/inputs 快照：inputs 牵引发生在组包瞬间、逐字物化进包；上游 manifest 之后更新不回灌旧包——要新鲜就重打包。
 TS-7 lessons 行为：action ∈ list/add/promote/retire；list 默认 status=active 按 score 降序；add 可带 contradicts=<旧id> 记反例；候选由 report(kind=done, lessons=[…]) 产生，用 `lessons(list, status="candidate")` 查看待提炼。
-TS-8 镜像与哨兵：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次 = 家族满编），退出码 0=寿命轮换（单赢家选举，每寿命周期至多 1 条）/让位，1=告警（含 abandoned 放弃通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances / shots_24h / abandoned / echo_tail）。sentinel.cfg.json 的 `signals` 节空串语义 = 哨兵侧内建默认（rollout_dir 默认 `<homedir>/.zcode/cli/rollout`、tool_usage_db 默认 `<homedir>/.zcode/cli/db/db.sqlite` 只读、mailbox_root 默认 `ZCODE_MAILBOX_ROOT ?? <homedir>/.zcode/mailbox`；server.mjs:504-508）。
-TS-9 agent_harvest：`agent_harvest(mission_id|agent_id|session_id, tail?, max_chars?)` 只读收割子代理 rollout 转录尾部（末条 model-io 记录内嵌全量对话），渲染带角色标签文本；跨会话可用，TaskOutput 失效时兜底；无转录取报错并引导以 report artifacts 为准。
-TS-10 probe（第 11 号工具，上下文经济第二支柱）：四 action——`db.query`（SQLite 只读受限 SQL：拒裸 `SELECT *`/别名星，COUNT(*) 放行；LIMIT ≤100 强制；SELECT/WITH 白名单 fail-closed；50 行/页）、`file.head`（首 ≤50 行；布尔参数 `tail=true` 日志尾读、不分页）、`file.grep`（服务端 grep -m 语义，max_count ≤50/页）、`bin.inspect`（type/size/sha256/首 256 字节，sha256 全文件帽 32MB、超出只哈希前片并在 hash_scope 注明）；单响应 ≤50 行且 ≤10KB，超限分页（`page_token` 原样回传；单行截 2000 字、文本扫描窗 1MB/页）；每个 ok 响应都是统一摘要 envelope（rows_truncated/bytes/hash/page_token），永不原文回显；只读、无 board/锁交互、双面可用；路径可指向任何可读文件（probe 管帽不管沙箱）。
+TS-8 镜像与哨兵：镜像文件 `<存储根>/context/journal-<sessionId>.jsonl`（context_mirror=off 可停写）；哨兵命令 `node <插件根>/hooks/bg-sentinel.mjs --once`（后台 Bash，同命令连发 3 次=家族满编），退出码 0=寿命轮换（单赢家选举）/让位，1=告警（含 abandoned 通告）；健康看 `board(list)` 顶层 `sentinel_health`（instances/shots_24h/abandoned/echo_tail）。sentinel.cfg.json 的 `signals` 节空串语义 = 哨兵侧内建默认（rollout_dir/tool_usage_db 只读/mailbox_root 默认路径详 server.mjs:504-508）。
+TS-9 agent_harvest：`agent_harvest(mission_id|agent_id|session_id, tail?, max_chars?)` 只读收割子代理 rollout 转录尾部（末条 model-io 内嵌全量对话），渲染带角色标签文本；跨会话可用，TaskOutput 失效时兜底；无转录取报错并引导以 report artifacts 为准。
+TS-10 probe（第 11 号工具，上下文经济第二支柱）：四 action——`db.query`（SQLite 只读受限 SQL：拒裸 `SELECT *`/别名星，COUNT(*) 放行；LIMIT ≤100 强制；SELECT/WITH 白名单 fail-closed；50 行/页）、`file.head`（首 ≤50 行；布尔参数 `tail=true` 日志尾读、不分页）、`file.grep`（服务端 grep -m 语义，max_count ≤50/页）、`bin.inspect`（type/size/sha256/首 256 字节，全文件帽 32MB、超出只哈希前片并在 hash_scope 注明）；单响应 ≤50 行且 ≤10KB，超限分页（`page_token` 原样回传；单行截 2000 字、文本扫描窗 1MB/页）；ok 响应均统一摘要 envelope（rows_truncated/bytes/hash/page_token），永不原文回显；只读、无 board/锁交互、双面可用；路径可指向任何可读文件（probe 管帽不管沙箱）。
 TS-11 board upsert 白名单（v0.4.1）：未知顶层字段不入库（如 timeline_note），响应以 `ignored_keys` 列出；v0.5 起可登记 `scope_paths`/`strict_scope`（均整体替换、不入 ONE_LEVEL）；`manifest` 为只读派生字段（upsert 输入侧剥离，沿 ack 先例）。
-TS-12 kind 枚举：milestone / blocked / question / done（summary ≤200 字；blocked/question 必带 question【硬校验，缺失即 ToolError】；done 必带 artifacts【软约束：server 不做缺失校验，缺省按空数组收，server.mjs:2409】）；milestone/done 可选 `files_touched`（≤50 项仅 schema 声明、服务端无截断/拒绝【与 manifest_entries 的机械强制不同强度，server.mjs:4907-4911】；参与越界审计）与 `manifest_entries`（≤12 条，done 收口写 manifest）。
+TS-12 kind 枚举：milestone/blocked/question/done（summary ≤200 字；blocked/question 必带 question【硬校验，缺失即 ToolError】；done 必带 artifacts【软约束：server 不做缺失校验，缺省按空数组收，server.mjs:2409】）；milestone/done 可选 `files_touched`（≤50 项仅 schema 声明、服务端无截断/拒绝【与 manifest_entries 的机械强制不同强度，server.mjs:4907-4911】；参与越界审计）与 `manifest_entries`（≤12 条，done 收口写 manifest）。
 TS-13 mission 状态机：`drafted →(解锁 blockedBy 全绿)→ ready →(claim)→ running → (blocked|question|done|failed|skipped)`；`drafted → dispatched → running`（普通派发，不经 ready）；`blocked/question →(answer) dispatched/resumed`；`done/failed → closed`；`skipped 为终态（skippedReason=upstream_failed），复核后 closed 归档`；workflow stopped 标 `resumed` 后继续用 running/done。
 TS-14 closed 双门（v0.6）：写入侧——外部直写 `status:"closed"` 必须携一次性瞬态键 `close_confirmed:true`（消费后不落板），drafted 禁直达 closed，closed 无离开路径（重开=新建 mission；仅 failed/skipped 可携 `reopen:true`+note 复活为 drafted）；采信侧——依赖解锁中 closed 仅绿归档才算满足（`qa.verdict="pass"` 或 `pack.sandbox.applied_at`），裸 closed 挂起等待、不级联 skip。
 TS-15 平台编排原语：`Agent {description, prompt, subagent_type, run_in_background}`（无 model 参数，同步返回 agentId；多条放同一消息=并发）；`SendMessage(to=agent_<uuid>, summary≤200, message≤20000)`（终态=后台恢复续聊，运行中=steer）；`TaskOutput(task_id, block, timeout≤600000)`；`TaskStop(task_id)`。
-TS-19 headless 原语：〔v1.6 W-p 起 -p 通道已 parked——整条原语压缩为 parked 注记：headless fire-and-forget（detached spawn `zcode -p` runner/秒级回执/结果侧车 dispatch-results/model 播种/busy index 闸）随 -p 剥离迁 `parked/agent-orchestrator/`（归档可回植，恢复另案=README 指引）；哨兵机制全保留——wake-queue+kick/watcher relay 直连/tool-report kick/探活补员零触，本条历史语义详 parked 基线快照与 git 历史（v1.5.0 基）。p2p 配对任务派发前主控校验目标 mission 非终态＋迭代闭环 milestone 保持 running 终版才 done 两纪律原句义仍有效（主形态 nested 同律）。〕
-TS-19a nested 编号出口（v1.2 M5-1 主形态；v1.6 W3a 回执编号化）：`dispatch(mission_id, mode:"nested", pack_path?)` → 同步回执 `{ok, mode:"nested", mission_id, worker, channel, token, pack_path, lock_hold_ms}`——不 spawn 进程、无 model_seed、无 result_dir（result-dir 三件套对 nested 整体缺席，契约卡④分形态）、无 prompt 全文（v1.6 W3a 组装链退役：回执=编号，worker 自取包，首条消息=DP-3 固定指针模板机械填充〔§2 DP-3/§3 派发头模板双位同文〕；旧「prompt 即完整首条消息」式护栏句随组装退役废止（模板填充禁扩写语义由 DP-3 护栏承载））；`token` 与包 CONTRACT 同源（report/p2p 闸凭据）。记账=server 自动（`dispatch={mode:"nested", spawned_by_session}`，drafted→dispatched；agent_id 留空→哨兵默认不盯，需兜底可补记）；busy 闸分叉=nested 在飞（board dispatched 无 worker 结果）拒二次派发（板语义，不消费 result-dir index），恢复=`board upsert status:"drafted"`（dispatched→drafted 合法腿）后重派；内嵌校验=包 CONTRACT 三行解析强制+包 CONTRACT token ≡ mission.dispatch.token（p2pTokenGate 同语义，strict-tokens 关无 token 面）+scope yolo 闸（RP-12）；完成=宿主 Agent 返回+worker report 双通道（无 wake-queue 依赖）；审计面=bg-gate 运行时 CONTRACT 头 presence 检测（audit prompt 落盘随组装退役）。
+TS-19 headless 原语：〔-p 通道已 parked（v1.6 W-p）：原语全文与恢复指引=parked/agent-orchestrator/README；哨兵机制全保留；p2p 配对任务派发前主控校验目标 mission 非终态＋迭代闭环 milestone 保持 running 终版才 done 两纪律原句义仍有效（主形态 nested 同律）。〕
+TS-19a nested 编号出口（v1.2 M5-1 主形态；v1.6 W3a 回执编号化）：`dispatch(mission_id, mode:"nested", pack_path?)` → 同步回执 `{ok, mode:"nested", mission_id, worker, channel, token, pack_path, lock_hold_ms}`——不 spawn 进程、无 model_seed、无 result_dir（契约卡④分形态）、无 prompt 全文（组装链退役：回执=编号，worker 自取包，首条消息=DP-3 固定指针模板机械填充〔§2 DP-3/§3 派发头模板双位同文〕；旧「prompt 即完整首条消息」式护栏句随组装退役废止，模板填充禁扩写语义由 DP-3 护栏承载）；`token` 与包 CONTRACT 同源（report/p2p 闸凭据）。记账=server 自动（`dispatch={mode:"nested", spawned_by_session}`，drafted→dispatched；agent_id 留空→哨兵默认不盯，需兜底可补记）；busy 闸=nested 在飞拒二次派发，恢复=`board upsert status:"drafted"`（dispatched→drafted 合法腿）后重派；内嵌校验=包 CONTRACT 三行解析强制+包 CONTRACT token ≡ mission.dispatch.token（p2pTokenGate 同语义）+scope yolo 闸（RP-12）；完成=宿主 Agent 返回+worker report 双通道；审计面=bg-gate 运行时 CONTRACT 头 presence 检测（audit prompt 落盘随组装退役）。
 TS-16 workflow 原语：`CreateWorkflow{script|saved|path, name, max_concurrency, subagent_model}`、`AmendWorkflow{run_id, path|script, subagent_model, max_concurrency}`（任何状态可改，旧完成工作导入为缓存）、`ResumeWorkflowRun{run_id}`（仅 stopped）、`GetWorkflowRun`（pendingQuestions）、`ListWorkflowRuns{statuses}`、`ResolveWorkflowQuestion{question_id(dwfq-…), answer}`、`EvalWorkflowSnippet`、`ListModels`、`SaveWorkflow`（需用户同意）；子代理 `escalate` 每 ask 限 3 次；模型粒度与诊断码见第 7 章。
-TS-17 hooks：仅 7 事件；插件注册 4 个——SessionStart（恢复简报）、Stop（镜像记录 + 收工清点，含疑似唤醒失败）、PreToolUse（Agent|Task 后台闸门 + 哨兵派发提醒）、UserPromptSubmit（镜像记录，恒静默）；Stop 用 hookSpecificOutput.hookEventName="Stop"+additionalContext；PreToolUse 用 permissionDecision allow/ask + additionalContext；退出码 0 放行。
-TS-18 userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、dispatch_contract（remind|ask|off，默认 remind；派发契约校验独立开关，background_gate=off 不连坐）、wake_sentinel（on|off，默认 on）、wake_timeout_min（默认 10；桥接键，未显式传 `--refire-gap-min` 时生效为哨兵两枪最小间隔，V7-05 起桥接可达，见第 11 章 WU-4）、wake_retries（默认 3；桥接键，未显式传 `--wake-cap` 时生效为单条件封顶枪数）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；N=1 无冗余）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none）、claim_lease_min（默认 30，最小 1）。〔v1.6 W-p 零触注记（C-10①）：wake_* 四键（wake_sentinel/wake_timeout_min/wake_retries/wake_poll_sec）消费面=保留哨兵（bg-sentinel/wake-kick 零网络面照旧），与 -p 剥离无涉——键面零退役零改写。〕
-TS-20 trajectory（第 13 号工具，主控专属，v1.6）：单 action `append`——把主控申报态写进项目记忆轨迹 `<存储根>/context/coord-tail-log.md`（ORT v3 块，标记对/字段行格式不变、读面零迁）；参数 {kind:"full"|"short", project?, stage?, flying?, ruled?, next?}：full=变化轮（project/stage/ruled/next 必带；flying 缺席=server 自动以 board running/dispatched 清单补全，≤3 条最近更新）、short=稳态轮（仅 next 必带；project/stage/ruled 自文件内最新全形块继承〔server 侧合并，跨会话取代旧「同会话链」界面〕；flying=+id/-id 增删，-不存在 id 忽略）；协议行 server 铸：ts=调用时点、seq=文件内最大 seq+1（跨会话单调）；帽校验 isError 化（全形超 10 行/900B、短形超 6 行/400B 当场拒）；滞回 20/10（第 21 块触发原子重写裁回最新 10）；回执 {ok, seq, blocks, trimmed}。写触发纪律=PL-10①。
+TS-17 hooks：仅 7 事件；插件注册 4 个——SessionStart（恢复简报）、Stop（镜像记录+收工清点，含疑似唤醒失败）、PreToolUse（后台闸门+哨兵派发提醒）、UserPromptSubmit（镜像记录，恒静默）；Stop 用 hookSpecificOutput.hookEventName+additionalContext；PreToolUse 用 permissionDecision allow/ask+additionalContext；退出码 0 放行。
+TS-18 userConfig：storage_dir（存储根）、background_gate（remind|ask|off，默认 remind）、background_gate_exempt_types（默认 judge）、dispatch_contract（remind|ask|off，默认 remind；独立开关，background_gate=off 不连坐）、wake_sentinel（on|off，默认 on）、wake_timeout_min（默认 10；桥接键，未显式传 `--refire-gap-min` 时生效为哨兵两枪最小间隔，V7-05 起桥接可达，见第 11 章 WU-4）、wake_retries（默认 3；桥接键，未显式传 `--wake-cap` 时生效为单条件封顶枪数）、wake_poll_sec（默认 60）、sentinel_family（1-5，默认 3；N=1 无冗余）、sentinel_grace_min（默认 5；done 未签收首枪宽限，blocked/question 3、在飞失联 30、崩溃 10 派生）、context_mirror（on|off，默认 on）、context_mirror_max_chars（默认 "2000,4000"）、sandbox_default（none|worktree，默认 none）、claim_lease_min（默认 30，最小 1）。〔v1.6 W-p 零触注记：wake_* 四键消费面=保留哨兵，与 -p 剥离无涉，键面零改写。〕
+TS-20 trajectory（第 13 号工具，主控专属，v1.6）：单 action `append`——把主控申报态写进项目记忆轨迹 `<存储根>/context/coord-tail-log.md`（ORT v3 块，标记对/字段行格式不变、读面零迁）；参数 {kind:"full"|"short", project?, stage?, flying?, ruled?, next?}：full=变化轮（project/stage/ruled/next 必带；flying 缺席=server 自动以 board running/dispatched 清单补全，≤3 条最近更新）、short=稳态轮（仅 next 必带；project/stage/ruled 自文件内最新全形块继承〔server 侧合并〕；flying=+id/-id 增删，-不存在 id 忽略）；协议行 server 铸：ts=调用时点、seq=文件内最大 seq+1（跨会话单调）；帽校验 isError 化（全形超 10 行/900B、短形超 6 行/400B 当场拒）；滞回 20/10（第 21 块触发原子重写裁回最新 10）；回执 {ok, seq, blocks, trimmed}。写触发纪律=PL-10①。
 
 ## 15. 成本纪律
 
-CS-1 依据：遥测实证——Read 输出占工具字节 56–78%、编辑仅 0–3%；单代理上下文 53K→352K 单调增长可把 50M token 烧在重放上（99.2% 为 cache 重放仍拦不住二次方曲线）；成本主战场是"读回"与"重放"。
+CS-1 依据：遥测实证——Read 输出占工具字节 56–78%、编辑仅 0–3%；单代理上下文 53K→352K 单调增长可把 50M token 烧在重放上；成本主战场是"读回"与"重放"。
 
 ### 15.1 文件所有权分区
 
@@ -473,11 +466,11 @@ CS-7 确须重派：任务包给最低但充分的四件——上一版断言原
 ### 15.3 上下文预算（强制点）
 
 CS-8 派发前定档：S ≤20 步 / M ≤60 步 / L ≤120 步，写进任务包 BUDGET 节；L 档必须预拆阶段或转 workflow。
-CS-9 token 档（CR-09 v0.5；主控对账用 `agent_harvest(tail=0)` 采样，零转录回显）：WARN ≥120K → 对账时提醒；ACT ≥150K → 按决策表处置（拆分是默认动作：steer 收尾 + 按 files_touched 续派；浓缩是受控例外——上下文大而产物少（artifacts ≤2）、连续性价值高时派 S 档浓缩代理产出七节交接包 + manifest 条目 + 状态重建清单，后继者全新冷启派发）；HARD ≥180K → 强制收尾（steer"完成当前阶段、report(done) 附遗留清单"，剩余拆新 mission，以 files_touched 为完成度基线）；ABS 230K = 文档红线（p95 实测 253K，防线前移到 ACT/HARD）。
+CS-9 token 档（主控对账用 `agent_harvest(tail=0)` 采样，零转录回显）：WARN ≥120K → 对账时提醒；ACT ≥150K → 按决策表处置（拆分是默认动作：steer 收尾+按 files_touched 续派；浓缩是受控例外——上下文大而产物少（artifacts ≤2）、连续性价值高时派 S 档浓缩代理产出七节交接包+manifest 条目+状态重建清单，后继者全新冷启派发）；HARD ≥180K → 强制收尾（steer"完成当前阶段、report(done) 附遗留清单"，剩余拆新 mission，以 files_touched 为完成度基线）；ABS 230K=文档红线（p95 实测 253K，防线前移到 ACT/HARD）。
 CS-10 浓缩边界四条：每 mission 最多 1 次；浓缩 ≠ 同会话续跑（平台无压缩 API，浓缩代理是新会话，签收后原 mission closed）；浓缩后再达 ACT → 强制拆分或放弃，禁二次浓缩；死亡/失联仍归 agent_harvest，浓缩不兜死亡。
 CS-11 对账点：每次 milestone report（worker 附进度与剩余步数估计）；milestone 同时是哨兵失联宽限的续期信号，对账搭同一班车、零新增轮询；哨兵不管预算。
 CS-12 files_touched：worker 的 `files_touched`（milestone/done 可选）落 timeline，既是越界审计基线，也是中断接力的每文件完成度清单。
-CS-21 派发选道（66K 基座账，v1.6 W-p 收缩）：-p headless 启动器通道已 parked（归档=parked/agent-orchestrator/）——S/M/L 全档一律 nested 组装出口经宿主 Agent 通道；L 档重读任务、需中途 steer 或模型事务失败 → 宿主 Agent 通道或 workflow（宿主快照供给基座更低，R1 探针）；多任务并发=同消息多条 Agent 调用（DP-10）。
+CS-21 派发选道：-p 通道已 parked（v1.6 W-p）——S/M/L 全档一律 nested 组装出口经宿主 Agent 通道；L 档重读/需中途 steer/模型事务失败 → 宿主 Agent 通道或 workflow；多任务并发=同消息多条 Agent 调用（DP-10）。
 
 ### 15.4 探针与读回纪律
 
@@ -506,7 +499,7 @@ CS-20 manifest/inputs 速查：done 可带 `manifest_entries`（≤12 条；条�
 
 ## 16. 编排流水线（v2.1）
 
-本章编码 v2.1 编排流水线（用户裁定权威版）；grill = 用户在场的单轮问答确认门（格式纪律 PL-7）；本章管一次任务从需求到发版的 stage 序与确认门，第 6 章管多轮迭代之间的并行与冻结，两者互补。
+本章编码 v2.1 编排流水线（用户裁定权威版）；grill=用户在场的单轮问答确认门（格式纪律 PL-7）；本章管一次任务从需求到发版的 stage 序与确认门，第 6 章管多轮迭代并行与冻结。
 
 PL-1 stage 序固定：需求 → 策划草案 → grill#1 需求确认 → 调研 → grill#2 可行性 → 设计/设计档 → grill#3 设计确认 → 波次施工 → 独立 QA → 发版；每 stage 按其门开启判据通过（用户确认 / 豁免声明生效 / 不满足开启条件）后方可进入下一 stage。PL-1 输入端=课题卡（OV-10 产出）；无卡不进入 Stage A。
 
@@ -514,27 +507,27 @@ PL-1 stage 序固定：需求 → 策划草案 → grill#1 需求确认 → 调�
 |---|---|---|
 | 策划草案 | 策划档（含 §grill 回填位） | 派代理产出；主控提炼仅限通道故障降级（PL-2） |
 | grill#1 需求确认 | 用户对范围/验收/取舍的确认 | 默认必开；豁免判据与声明见 PL-3 |
-| 调研 | 调研单 + 可行性结论行（PL-4） | 派 orch-scout（第 2 章角色表） |
+| 调研 | 调研单 + 可行性结论行（PL-4） | 派 orch-scout |
 | grill#2 可行性 | 重剪范围决议 | 仅调研「有阻断」才开（PL-5） |
 | 设计/设计档 | 设计档 | 设计落档，断言随波登记（第 15.5 节） |
 | grill#3 设计确认 | 设计定稿 | 默认必开；豁免判据与声明见 PL-6 |
 | 波次施工 | 各波产物 | 按第 2 章七步派发 |
 | 独立 QA | verdict | 派 orch-reviewer（只读 + 跑检查） |
-| 发版 | 版本登记 | 发版门对账（PL-9 的 OPEN 项逐条销账） |
+| 发版 | 版本登记 | 发版门对账（PL-9 OPEN 项逐条销账） |
 
 PL-2 策划草案由代理产出（非主控亲笔）；主控提炼仅限通道故障降级时使用，且须在 grill#1 首问披露「本草案系主控提炼」。
-PL-3 grill#1 需求确认默认必开；豁免判据 = 用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点；豁免须显式声明「grill#1 免开：<理由>」供用户否决，不得静默跳过。
+PL-3 grill#1 需求确认默认必开；豁免判据 = 用户需求句已含完整规格（范围+验收+取舍）∧ 零新增疑点；豁免须显式声明「grill#1 免开：<理由>」供用户否决。
 PL-4 调研 Return/结论必含一行可行性结论：「可行性结论：无阻断」或「可行性结论：有阻断（<明细>）」；缺该行视为调研未完成。
 PL-5 grill#2 可行性门仅在调研结论为「有阻断」时开，议题 = 重剪范围；「无阻断」不得开 grill#2。
-PL-6 grill#3 设计确认默认必开；豁免判据 = 改动面 ≤2 波 ∧ 零新权衡；豁免须显式声明「grill#3 免开：<理由>」供用户否决，不得静默跳过。
+PL-6 grill#3 设计确认默认必开；豁免判据 = 改动面 ≤2 波 ∧ 零新权衡；豁免须显式声明「grill#3 免开：<理由>」供用户否决。
 PL-7 grill 格式纪律：一轮问全部前沿；每问带推荐答案；用户答「是」即采纳该问措辞；首行标注「grill#N：<主题>」；结果回填策划档 §grill 节。
 PL-8 提问分流：事实类问题派代理查证（orch-scout）；决策类问题问用户（第 4 章「需用户拍板」行）。
-PL-9 主控组包 checklist（每波派发前逐项过）：context_pack 必传 worker_name（DP-4 同源）；波前断言锁 grep 预检（先 grep tests/ 钉既有行为断言面再动手）；OPEN 项发版门逐条对账；播报只报增量。追加四行：
+PL-9 主控组包 checklist（每波派发前逐项过）：context_pack 必传 worker_name（DP-4 同源）；波前断言锁 grep 预检；OPEN 项发版门逐条对账；播报只报增量。追加四行：
 - merge-base 伪影：并行沙箱 apply 越界误报→board scope_paths 增补救济，勿改机械门（P8）。
 - designs/ untracked：designs 写面走普通派发主仓直写轨；worktree 内缺席合法，参考读走主仓绝对路径只读（P9）。
 - 组包对拍双清单：OWNERSHIP scope 级+交付物级双清单逐项对拍，漏抽取=needs-changes 回路（P11）。
 - 恢复三路：ready 态直派（租约超时变体）／apply 同哈希空转→新移植 mission（幂等重试不补合）／dispatched→drafted→重派（TS-19a）。
-PL-10 轨迹写面（trajectory 调用契约，v1.6 换装）：①收工轮调用——每派发轮收工，主控调 `trajectory(action="append", …)`（TS-20）把申报态写进项目记忆轨迹：server 铸协议行（ts=调用时点、seq=文件内最大 seq+1 跨会话单调）落盘 `<存储根>/context/coord-tail-log.md`，日志唯一源——日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）、注入面去协议行裸块（Q6）——ORT v3 块格式读面零迁；`<!-- orch-tail v3` … `<!-- orch-tail-end -->` 标记对逐字固定，改格式必须升版本并同步写面 server-trajectory 与全部消费端，守 ORT-1..8）；kind:"full"=变化轮（project/stage/ruled/next 恒主控申报，flying 缺席由 server 按 board running/dispatched 补全）、kind:"short"=稳态轮（仅 next 必带，缺省字段=「不变」非「清空」，flying=`+id`/`-id` 增删〔- 不存在的 id 忽略不报错〕，project/stage 变更轮必须以全形重述）；帽=全形 ≤10 行/900B、短形 ≤6 行/400B，超帽=isError 当场拒（主控当场补全形）；滞回窗 20/10——累积至 20 块不滑动（最上不丢），第 21 块触发原子重写裁回最新 10，周期往复；append 无判旧，迟到陈旧块由滞回帽老化；无调用轮次不更新；全形触发=project/stage 变更、flying 需整表重述（批量变化>2 或语义歧义）、材料态过龄（now−ts>STALE_T=24h）。②注入=包面 STATE 节+指针模板（v1.6 W3a 组装退役换装）：`context_pack` 物化 STATE 节（节序 CONTEXT→EXTRA→STATE→READ FIRST；scoping 行=组包时点快照、节恒在；轨迹指针行=条件行、附最新块 ts；轨迹滞回语义见①——包内指针行以最后十段为准）；首条消息=DP-3 固定指针模板（§3 同文）主控机械填充回执编号字段，worker 自取包（STATE 节随包在读）；纪律=角色预设承载（system-prompt 级恒在，W3b 起）；教训经包 §LESSONS 单通道+lessons 工具哈希面；主控零组装、零转译，不触碰模板文本。③主控恢复态势=Read `<存储根>/context/coord-tail-log.md` 尾部（以最后十段为准；Read 直读为主，probe `file.head tail=true` 帽 50 行不足十块窗仅作快速辅助，TS-10）；日志即唯一源，旧单文件不再存在。④三行契约唯一权威=包 CONTRACT 节；模板三行由主控自包 CONTRACT 逐字誊写填充，主控不另铸。多根 workspace 共写 coord-tail-log 时一律全形申报；短形基线=文件内最新全形块（server 侧合并，跨会话继承）。
+PL-10 轨迹写面（trajectory 调用契约，v1.6 换装）：①收工轮调用——每派发轮收工，主控调 `trajectory(action="append", …)`（TS-20）把申报态写进项目记忆轨迹：server 铸协议行（ts=调用时点、seq=文件内最大 seq+1 跨会话单调）落盘 `<存储根>/context/coord-tail-log.md`，日志唯一源——日志存全量尾块逐字（含 `ts:`/`seq:` 协议行）、注入面去协议行裸块（Q6）——ORT v3 块格式读面零迁；`<!-- orch-tail v3` … `<!-- orch-tail-end -->` 标记对逐字固定，改格式必须升版本并同步写面 server-trajectory 与全部消费端，守 ORT-1..8）；kind:"full"=变化轮（project/stage/ruled/next 恒主控申报，flying 缺席由 server 按 board running/dispatched 补全）、kind:"short"=稳态轮（仅 next 必带，缺省字段=「不变」非「清空」，flying=`+id`/`-id` 增删〔- 不存在的 id 忽略不报错〕，project/stage 变更轮必须以全形重述）；帽=全形 ≤10 行/900B、短形 ≤6 行/400B，超帽=isError 当场拒（主控当场补全形）；滞回窗 20/10——累积至 20 块不滑动（最上不丢），第 21 块触发原子重写裁回最新 10，周期往复；append 无判旧，迟到陈旧块由滞回帽老化；无调用轮次不更新；全形触发=project/stage 变更、flying 需整表重述（批量变化>2 或语义歧义）、材料态过龄（now−ts>STALE_T=24h）。②注入=包面 STATE 节+指针模板（v1.6 W3a 组装退役换装）：`context_pack` 物化 STATE 节（节序 CONTEXT→EXTRA→STATE→READ FIRST；scoping 行=组包时点快照、节恒在；轨迹指针行=条件行、附最新块 ts；轨迹滞回语义见①——包内指针行以最后十段为准）；首条消息=DP-3 固定指针模板（§3 同文）主控机械填充回执编号字段，worker 自取包（STATE 节随包在读）；纪律=角色预设承载（system-prompt 级恒在，W3b 起）；教训经包 §LESSONS 单通道+lessons 工具哈希面；主控零组装、零转译，不触碰模板文本。③主控恢复态势=Read `<存储根>/context/coord-tail-log.md` 尾部（以最后十段为准；Read 直读为主，probe `file.head tail=true` 仅作快速辅助，TS-10）。④三行契约唯一权威=包 CONTRACT 节；模板三行由主控自包 CONTRACT 逐字誊写填充，主控不另铸。多根 workspace 共写 coord-tail-log 时一律全形申报；短形基线=文件内最新全形块（server 侧合并，跨会话继承）。
 
 server 落盘格式参照（trajectory 渲染产物，主控不手写）——全形（变化轮，≤10 行/900B）：
 
@@ -565,12 +558,12 @@ PL-11 课题驱动循环：每课题走完整 PL-1 流水线；课题卡为 Stag
 
 ## 17. 主控信息面（尾块契约）
 
-本章编码主控侧的信息呈现契约（尾块态）：子代理→主控的 report 只载尾块态，意见与产物正文走子代理间直投通道，主控不读正文。why：主控上下文是编排最稀缺资源，正文 payload 的消费者是对接子代理而非主控——尾块是主控侧的唯一呈现面。G3 边界声明：本章系主控手册的信息形态契约，非第 16 章的流水线纪律（stage 序与确认门），落新章不落 §16；§16 只编两条硬规则（grill 门默认必开＋豁免显式声明〔PL-3/PL-6〕、六职责 stage 指针〔PL-1〕），两不相扰。
+本章编码主控侧的信息呈现契约（尾块态）：子代理→主控的 report 只载尾块态，意见与产物正文走子代理间直投通道，主控不读正文。why：主控上下文是最稀缺资源，正文的消费者是对接子代理而非主控——尾块是主控侧唯一呈现面。G3 边界声明：本章系主控手册的信息形态契约，非第 16 章的流水线纪律（stage 序与确认门），落新章不落 §16；§16 只编两条硬规则（grill 门默认必开＋豁免显式声明〔PL-3/PL-6〕、六职责 stage 指针〔PL-1〕），两不相扰。
 
-IF-1 尾块三要素：report 只载三要素——①**结论**（任务终局的通用称谓：worker 的 done 即结论，QA/评审 mission 的结论即其 verdict 形态）；②**计数**（意见数/断言数/进度步数等量化态）；③**产物指针**（产物文件路径列表，done 必带 artifacts）。长正文不进 report details（长文写文件走 artifacts、details 只传摘要与指针，第 14 章 TS-5 同向）；done 缺产物指针=无效上报。
-IF-2 直投通道（两形态，按任务包 RULES/mission 授权择一）：意见与产物正文经子代理间直投通道传递，对接方按指针自取——①**文件直投**：正文落消费方可读路径（如 qa-roundN.md 型审查意见文件），report/steer 只转指针；②**邮箱**：经 spool 事件传递（mailbox 留痕，第 5 章 CL-2 通道族）。
-IF-3 主控不读正文：主控 steer/转发只转指针不转内容；主控消费面=t1_head（≤160 字）/question_head/artifacts 路径列表（第 14 章 TS-4；守闸门呈现面矩阵见第 15.6 节）；要正文细节派对接子代理按指针自取或 probe 定点读（第 15.4 节），禁止把子代理长文原样读回（第 6 章 PR-6 同向）。
-IF-4 与 p2p 的分工：p2p_ask/p2p_answer=子代理间仲裁中转面（server 仲裁、board p2p 记录双方 timeline echo，星型拓扑仲裁例外见第 1 章 OV-2）；文件直投=子代理间文件通道。二者均为「正文不过主控」的实现形态，按 mission 授权择一；主控经 p2p 只取结论态，正文仍不经主控上下文中转。
-IF-5 派发纪律第 11 条（尾块态上报；本章=面向人权威，纪律全表经五 persona 角色预设载入〔逐字互等，po-static N1 六源锁对拍——v1.6 W3b 起；执行面拷贝已随 v1.6 W3a 组装链退役〕）：**「尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报」**。与条 3 正交：条 3 管上报通道与字段契约（kind/summary/artifacts 语义，第 8 章 RP-4），条 11 管内容形态（只收尾块态）；纪律全表=五 persona 预设纪律块（system-prompt 级恒在；注入面注记=第 16 章 PL-10②）。
+IF-1 尾块三要素：report 只载三要素——①**结论**（worker 的 done 即结论，QA/评审的结论=verdict 形态）；②**计数**（意见数/断言数/进度步数等量化态）；③**产物指针**（产物文件路径列表，done 必带 artifacts）。长正文不进 report details（长文写文件走 artifacts、details 只传摘要，TS-5 同向）；done 缺产物指针=无效上报。
+IF-2 直投通道（两形态，按任务包 RULES/mission 授权择一）：意见与产物正文经子代理间直投通道传递，对接方按指针自取——①**文件直投**：正文落消费方可读路径，report/steer 只转指针；②**邮箱**：经 spool 事件传递（mailbox 留痕，第 5 章 CL-2 通道族）。
+IF-3 主控不读正文：主控 steer/转发只转指针不转内容；主控消费面=t1_head（≤160 字）/question_head/artifacts 路径列表（TS-4；守闸门矩阵见第 15.6 节）；要正文细节派对接子代理按指针自取或 probe 定点读，禁止把子代理长文原样读回（PR-6 同向）。
+IF-4 与 p2p 的分工：p2p_ask/p2p_answer=子代理间仲裁中转面（server 仲裁、board p2p 记录双方 timeline echo，星型拓扑仲裁例外见第 1 章 OV-2）；文件直投=子代理间文件通道。二者均为「正文不过主控」的实现形态，按 mission 授权择一；主控经 p2p 只取结论态。
+IF-5 派发纪律第 11 条（尾块态上报；本章=面向人权威，纪律全表经五 persona 角色预设载入〔逐字互等，po-static N1 六源锁对拍〕）：**「尾块态上报：子代理→主控的 report 只载尾块态（结论/计数/产物指针），意见与产物正文经文件直投（对接方按指针自取）或邮箱传递，不塞 details；主控 steer/转发只转指针；done 缺产物指针=无效上报」**。与条 3 正交：条 3 管上报通道与字段契约（kind/summary/artifacts 语义，RP-4），条 11 管内容形态（只收尾块态）；纪律全表=五 persona 预设纪律块（system-prompt 级恒在）。
 IF-6 终态回复=宿主 result 通道携带面：≤3 行指针态，与 report 尾块态同构——行形「KIND=<kind>｜artifacts: <路径列表>｜遗留: <一句话>」（RP-4 TOOL_ABSENT 降级回复同面）。
 IF-7 非必要不向运行中子代理 SendMessage（打断可致完成通知丢失——result 通道 swallow 面）；steer 限紧急四情形（CL-3 同款）。

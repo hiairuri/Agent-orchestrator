@@ -11,10 +11,12 @@
 
 | 项 | 内容 | 锚点 |
 |---|---|---|
-| 工具名 | `probe`（全名 `mcp__plugin_agent-orchestrator_orch__probe`，12 工具序列第 11 位——dispatch 追加末位以保持旧十工具前缀零漂移） | mcp/server-registry.mjs 工具名册；mcp/tool-probe.mjs probeDispatchAction 注释 |
+| 工具名 | `probe`（全名 `mcp__plugin_agent-orchestrator_orch__probe`，12 工具序列第 11 位——dispatch 追加末位，旧十工具前缀零漂移） | mcp/server-registry.mjs 工具名册；mcp/tool-probe.mjs probeDispatchAction 注释 |
 | 双端可用 | **不在 MCP_DISALLOWED**：主控与子代理同面（只读所以不设权限差） | mcp/server-registry.mjs MCP_DISALLOWED |
 | 读面边界 | 路径=任意可读文件（绝对或项目相对）——**probe 是 caps 不是沙箱**；零 board/lock 交互 | `probeResolvePath`（mcp/tool-probe.mjs） |
 | 二进制防线 | 文本动作头部采样（≤4096B）含 NUL 字节即拒并指 bin.inspect（probeLooksBinary/probeBinaryHint） | `probeLooksBinary`/`probeBinaryHint`（mcp/tool-probe.mjs） |
+
+memory 面互指：ORCH.md/digest/lessons.jsonl 等派生视图文件均为 probe 可读对象，但其 freshness/STALE/快照权威语义归 `card-memory-views.md`（三视图 pull-only 契约，互指不合并）——本卡只管「读到实态字节」的探针语义。
 
 ## 2. 四动作契约
 
@@ -24,26 +26,26 @@ SQL 门 `probeValidateSql`（mcp/tool-probe.mjs，**fail-closed 白名单非黑�
 
 | 门 | 规则 | 锚点 |
 |---|---|---|
-| 单语句 | 含 `;` 拒（禁多语句） | mcp/tool-probe.mjs 单语句门 |
-| 禁注释 | `--`/`/*` 拒（注释破坏服务端 wrapper 拼装） | mcp/tool-probe.mjs 禁注释门 |
-| 只读白名单 | 首关键字 ∈ {SELECT, WITH}，其余一律拒 | mcp/tool-probe.mjs 白名单门 |
-| 禁 INTO | `\bINTO\b` 拒（SELECT-INTO 形态） | mcp/tool-probe.mjs 禁 INTO 门 |
-| 禁裸 * | 字符串字面量剥除后仍见 `*` 拒；`COUNT(*)`/`( * )` 豁免 | mcp/tool-probe.mjs 禁裸 * 门 |
-| LIMIT 帽 | 每个 LIMIT 字面量 ≤100（PROBE_DB_MAX_LIMIT）；缺省由分页 wrapper 兜住 | mcp/tool-probe.mjs LIMIT 帽 |
-| 长度帽 | query ≤4000 字符（PROBE_QUERY_MAX_CHARS） | mcp/tool-probe.mjs 长度帽 |
+| 单语句 | 含 `;` 拒（禁多语句） | 单语句门 |
+| 禁注释 | `--`/`/*` 拒（注释破坏服务端 wrapper 拼装） | 禁注释门 |
+| 只读白名单 | 首关键字 ∈ {SELECT, WITH}，其余一律拒 | 白名单门 |
+| 禁 INTO | `\bINTO\b` 拒（SELECT-INTO 形态） | 禁 INTO 门 |
+| 禁裸 * | 字符串字面量剥除后仍见 `*` 拒；`COUNT(*)`/`( * )` 豁免 | 禁裸 * 门 |
+| LIMIT 帽 | 每个 LIMIT 字面量 ≤100（PROBE_DB_MAX_LIMIT）；缺省由分页 wrapper 兜住 | LIMIT 帽 |
+| 长度帽 | query ≤4000 字符（PROBE_QUERY_MAX_CHARS） | 长度帽 |
 
-执行面：wrapper=`SELECT * FROM (<sql>) LIMIT 50 OFFSET n`（页 50 行 a fortiori ≤100）——mcp/tool-probe.mjs 分页 wrapper；子进程 `node --input-type=module -e` readOnly 打开（校验漏网也写不了）+10s 超时+16MB maxBuffer（mcp/tool-probe.mjs 子进程面）；node 缺 node:sqlite（需 ≥22.13/23.4）显式 ToolError（mcp/tool-probe.mjs 版本指引）。字节帽逐行裁剪到 ≤10KB（exact serialized payload 计量），满页/裁剪出 page_token（offset 步进 shown.length）——mcp/tool-probe.mjs 字节帽分页。
+执行面（均在 mcp/tool-probe.mjs）：分页 wrapper=`SELECT * FROM (<sql>) LIMIT 50 OFFSET n`（页 50 行 a fortiori ≤100）；子进程 `node --input-type=module -e` readOnly 打开（校验漏网也写不了）+10s 超时+16MB maxBuffer；node 缺 node:sqlite（需 ≥22.13/23.4）显式 ToolError（版本指引）。字节帽逐行裁剪到 ≤10KB（exact serialized payload 计量），满页/裁剪出 page_token（offset 步进 shown.length）。
 
 ### 2.2 file.head（首/尾 ≤50 行）
 
-- 行数帽 50（PROBE_MAX_ROWS），lines 传参超帽收敛、非法拒（mcp/tool-probe.mjs 行数帽）。
-- **tail=true**：日志尾语义，**终态无 page_token**；1MB 扫描窗（PROBE_SCAN_WINDOW）内取末 N 行，字节帽从**尾部**绑（最新行优先拿预算）；窗口切进行内丢首残片（mcp/tool-probe.mjs tail 扫描窗）。
-- **head 模式**：page_token 续页（token 绑 offset/行号/**文件 size**——文件已变拒绝续页）；中窗切最后换行（行界续页）；单行吞窗→裁剪展示或跳过（skippedLong）；eof 权威（!eof ⟺ 有后续 ⟹ 分页）——mcp/tool-probe.mjs head 续页。
-- 行级防护：CRLF 剥除、BOM 剥除（物理行 1）、单行裁剪 2000 字符（PROBE_MAX_LINE_CHARS——防一行压缩 JSON 吃光 10KB 预算）——`probeDecodeLine`（mcp/tool-probe.mjs）。
+- 行数帽 50（PROBE_MAX_ROWS），lines 传参超帽收敛、非法拒。
+- **tail=true**：日志尾语义，**终态无 page_token**；1MB 扫描窗（PROBE_SCAN_WINDOW）内取末 N 行，字节帽从**尾部**绑（最新行优先拿预算）；窗口切进行内丢首残片。
+- **head 模式**：page_token 续页（token 绑 offset/行号/**文件 size**——文件已变拒绝续页）；中窗切最后换行（行界续页）；单行吞窗→裁剪展示或跳过（skippedLong）；eof 权威（!eof ⟺ 有后续 ⟹ 分页）。
+- 行级防护：CRLF 剥除、BOM 剥除（物理行 1）、单行裁剪 2000 字符（PROBE_MAX_LINE_CHARS——防单行吃光 10KB 预算）——`probeDecodeLine`（mcp/tool-probe.mjs）。
 
 ### 2.3 file.grep（server 端 grep -m）
 
-JS 正则（≤500 字符，ignore_case 旗标）；max_count 1-50/页（默认 50）；行界扫描+字节帽超限停在被拒行前（下一页从该行续——**不消费**）；满页/超限出 page_token；单行吞窗整行跳过不计匹配——mcp/tool-probe.mjs file.grep。
+JS 正则（≤500 字符，ignore_case 旗标）；max_count 1-50/页（默认 50）；行界扫描+字节帽超限停在被拒行前（下一页从该行续——**不消费**）；满页/超限出 page_token；单行吞窗整行跳过不计匹配。
 
 ### 2.4 bin.inspect（类型/大小/哈希/首 256 字节）
 

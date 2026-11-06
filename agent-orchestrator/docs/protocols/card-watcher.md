@@ -4,7 +4,7 @@
 >
 > - **归属模块**：M8 watcher（`watcher/` 目录：入口 `watcher.mjs`＋模块 `ws/relay/relay-shim/txn/bridge/inject/verdict/poller/credentials/degrade`）；协议客户端定位（M2 表：M7/M8=协议客户端）
 > - **脆度双轴评级**：面广度=中（单守护进程＋配置面）；后果重度=中——失效终态一律降级 standby 停事务面保心跳，**唤醒由哨兵家族接管**（职责互换），无 root.txt 型全局失明后果；但凭证面（token 解密/脱敏）与平台耦合面（桌面远控、互踢边界）是历史事故高发区
-> - **历史事故回链**：EXP10-findings R4（coord-workspace 缺失→盲取 workspaces[0]→错工作区注入＋b2 回读劫持锚，G5/G10 修复：锚钉+fail-loud）；EXP10-findings R6（sess_subagent 前缀劫持，G14 修复）；V7-05（cfg 桥接键被默认值遮蔽，numArgBridge twin 先例）；watcher 双缺陷（凭证解密/ws-scheme）已修复随版出货（AGENTS.md 遗留台账）
+> - **历史事故回链**：EXP10-findings R4（锚缺失盲取→错工作区注入+锚劫持，G5/G10 修复）；EXP10-findings R6（sess_subagent 前缀劫持，G14 修复）；V7-05（cfg 桥接键被默认值遮蔽，numArgBridge twin 先例）；watcher 双缺陷（凭证解密/ws-scheme）已修复随版出货
 > - **常驻授权红线**：watcher 常驻运行**须用户显式授权**（W-G §5 条件 C1）；停用=进程退出＋凭证自然过期。本卡是协议记录，不构成常驻运行的授权
 
 ---
@@ -15,7 +15,7 @@
 
 - watcher **注入通道**（bridge/inject/relay-shim 直通面）**不再作为唤醒增强对象**——v1.2 及以后的唤醒增强施工一律落 bg-sentinel 侧（哨兵可靠性强化：scoping 不为他会话开枪＋存活复活补员）；
 - **哨兵（bg-sentinel 家族）为唯一唤醒出口**；watcher 降级 standby 时唤醒接管关系见 §4；
-- 本卡只记**现状协议面**（模块/降级树/锚钉/心跳/signals 消费），零增强立项；watcher-shim 套件列入断言不变清单（不增强）；旧「唤醒分流三分类/锚模式标记/inject 前置校验」设计已作废销项——本文不再展开其设计细节，考古走 designs/ 设计链。
+- 本卡只记**现状协议面**（模块/降级树/锚钉/心跳/signals 消费），零增强立项；watcher-shim 套件列入断言不变清单（不增强）；旧「唤醒分流三分类/锚模式标记/inject 前置校验」设计已作废销项，考古走 designs/ 设计链。
 
 ## 1. 模块面（入口＋十模块组合根）
 
@@ -28,7 +28,7 @@
 | `relay.mjs` | 云中继 ws 客户端（transport=cloud） | relay |
 | `relay-shim.mjs` | 本机回环 shim（transport=loopback，直连模式）：桌面 env 两键指向 shim ws | relay-shim |
 | `bridge.mjs` | 桌面桥接：workspace 列表/会话桥 | `workspaceKeyHint`、`workspaceIdentity` |
-| `inject.mjs` | 注入面（U3 废弃口径下仅记现状）：唤醒注入一体链 | `wakeCoordSession`（openBridge＋b1/b2 自愈＋应答回读＋b2 工作区守卫＋coord-session 刷新一体） |
+| `inject.mjs` | 注入面（U3 废弃口径下仅记现状）：唤醒注入一体链 | `wakeCoordSession`（openBridge+b1/b2 自愈+应答回读一体——b2 闸语义=card-sentinel.md 补记 防线二） |
 | `verdict.mjs` | 事务结果判读 | verdict |
 | `degrade.mjs` | 降级树：分类/终态集/告警文案/signals 记录 | `CLASSES`、`TERMINAL_CLASSES`、`D1_GUIDANCE`、`LOOPBACK_ENV_RELAY_WS_URL`、`LOOPBACK_ENV_ENDPOINT_ORIGIN`、`record` |
 | `ws.mjs` | websocket 层（套件内全 mock） | ws |
@@ -51,7 +51,7 @@
 | **kicked** | 互踢 | 停事务面保心跳，等接管 |
 | 成功面 | noop/success/accepted-not-revived | 零降级 |
 
-**工作区锚钉（G10，EXP10 R4 根治）**：`sentinel/coord-workspace.txt` 与 coord-session.txt 同级，单行派生键=`workspaceIdentity.trim||workspacePath`。有锚→openBridge 携 workspaceKeyHint；**无锚/锚未命中=fail-loud**（workspace-anchor-missing / workspace-anchor-mismatch → D3），**绝不盲取 workspaces[0]**。watcher 只读锚不写锚；锚的写面=互信根三触发（server 启动补位 / toolResume / SessionStart）。b2 刷新仅当桥/应答工作区与锚一致，否则保持原锚并把 warning 落日志（防锚劫持重现）。
+**工作区锚钉（G10，EXP10 R4 根治）**：`sentinel/coord-workspace.txt` 与 coord-session.txt 同级，单行派生键=`workspaceIdentity.trim||workspacePath`。有锚→openBridge 携 workspaceKeyHint；**无锚/锚未命中=fail-loud**（workspace-anchor-missing / workspace-anchor-mismatch → D3），**绝不盲取 workspaces[0]**。watcher 只读锚不写锚；锚写面=互信根三触发、b2 刷新闸与防劫持语义=card-sentinel.md C2/C 组补记（互指不合并）。
 
 ## 4. 与哨兵的职责互换（消费面契约）
 
@@ -70,9 +70,7 @@
 
 ## 6. 实测门（历史定案，考古索引）
 
-- **EXP-1 凭证合规**：凭证获取/脱敏/日志闸实测全过。
-- **EXP-2 互踢＋边界条件**：级联未发生但对手终端面不可观测——保守频控 ≥90s 维持为常设缺省。
-- **EXP-3 长连定案**：token TTL 短只是握手门票非硬切，单连超长时零异常（现形态已改永短事务，本结论为历史定案存档）。
+- **EXP-1 凭证合规**：凭证获取/脱敏/日志闸实测全过；**EXP-2 互踢＋边界**：级联未发生但对手终端面不可观测——保守频控 ≥90s 维持为常设缺省；**EXP-3 长连定案**：单连超长时零异常（现形态已改永短事务，历史存档）。
 
 ## 7. 断言锚
 

@@ -59,6 +59,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Checker, PLUGIN_DIR } from "../harness/jsonrpc-client.mjs";
 import { familyFiles, familySource } from "../harness/source-family.mjs";
+// v1.6.1 P-W1（A-v0161-N1/N2）：工具面帽值动态计量走 import TOOLS（W0 复测门同法；运行时求值，
+// 非源码语义单文件读——LM-06-SCAN 面零涉）。ESM 静态 import 相对本模块解析，cwd 无关。
+import { TOOLS } from "../../mcp/server-registry.mjs";
 
 const ck = new Checker("po-static");
 const read = (rel) => fs.readFileSync(path.join(PLUGIN_DIR, rel), "utf8");
@@ -811,6 +814,224 @@ try {
       { absent, parkedAt: "v1.6 W-p (parked/agent-orchestrator/tests/)" },
     );
   }
+
+  // ---------- A-v0161-N1..N6：v1.6.1 P-W1/P-W2 工具面+persona 守卫组（23 腿；design/impl-plan §7.1；
+  //   台账=tests/assertions/v1.6.1.md §W1/§W2。ID 前缀 A-v0161- 系 impl-plan §7.5 消歧裁定——
+  //   与既有 v1.6 W3b「N1 六源锁/N6/N10/N7 DP-10 句钉」同名不同账，无干扰）。
+  //   计量口径=import TOOLS 动态计量（W0 复测门同法）：top=t.description.length；
+  //   totW=top+JSON.stringify(inputSchema).length（全 schema 宽口径，W0 复测门口径，
+  //   含内层 description/required）；totN=top+顶层 params description 和（design 附录 A1 窄口径）。
+  //   W2 收终值（impl-plan §3 步 4 暂填→W2 覆写）：top/totN=design §5.2 档位帽终值（A 总账≤350/
+  //   top≤400、B ≤1,200/≤900、C ≤2,500/≤1,100，grill#3 采认维持）；totW=宽口径诊断行填 W1 收敛
+  //   实测值（W1-3 交接注记：schema 结构性 boilerplate 不可压除，grade cap 载体=totN 窄口径）。
+  //   N6 desc/block 帽=W2 落装（impl-plan §7.1 四组常量同区相邻声明）。 ----------
+  const CAPS = {
+    // N1 逐工具双帽 [top, totW, totN]（top/totN=design §5.2 终值帽；totW=W1 收敛实测诊断值）
+    dispatch: { top: 1100, totW: 1329, totN: 2500 },
+    board: { top: 1100, totW: 6300, totN: 2500 },
+    lessons: { top: 1100, totW: 2897, totN: 2500 },
+    probe: { top: 1100, totW: 1832, totN: 2500 },
+    report: { top: 1100, totW: 3136, totN: 2500 },
+    trajectory: { top: 900, totW: 1193, totN: 1200 },
+    context_pack: { top: 900, totW: 2205, totN: 1200 },
+    agent_harvest: { top: 900, totW: 1083, totN: 1200 },
+    spawn_agent: { top: 900, totW: 1018, totN: 1200 },
+    mailbox: { top: 1100, totW: 836, totN: 2500 },
+    sandbox_apply: { top: 900, totW: 699, totN: 1200 },
+    sandbox_discard: { top: 400, totW: 348, totN: 350 },
+    resume: { top: 400, totW: 315, totN: 350 },
+    // N2 全局双帽（design §5.2 终值：top ≤7,500/总账(窄) ≤13,600；totW 诊断行=W1 收敛实测合计）
+    globalTop: 7500,
+    globalTotW: 23191,
+    globalTotN: 13600,
+    // N4 首段帽（SF-2；句号=句末句号语义：句点后随空白/串尾——"15.4"/"qa.verdict" 类内点不计）
+    firstParaMax: 160,
+    firstParaPeriods: 1,
+    // N6 persona 帽（W2 落装；impl-plan §7.1 四组常量同区相邻声明）
+    descMax: 110,
+    blockMax: 2050,
+  };
+  const bareName = (t) => t.name.split("__").pop();
+  const cjkCount = (s) => (String(s).match(/[\u4e00-\u9fff]/g) || []).length;
+  const collectDescs = (o, acc = []) => {
+    if (o && typeof o === "object") {
+      for (const [k, v] of Object.entries(o)) {
+        if (k === "description" && typeof v === "string") acc.push(v);
+        else if (v && typeof v === "object") collectDescs(v, acc);
+      }
+    }
+    return acc;
+  };
+  const measured = {};
+  let sumTop = 0, sumTotW = 0, sumTotN = 0, sumCjk = 0;
+  for (const t of TOOLS) {
+    const name = bareName(t);
+    const desc = t.description || "";
+    const schema = t.inputSchema ?? {};
+    const inner = collectDescs(schema);
+    const pN = Object.values(schema.properties ?? {}).reduce(
+      (a, p) => a + (typeof p?.description === "string" ? p.description.length : 0),
+      0,
+    );
+    const m = {
+      top: desc.length,
+      totW: desc.length + JSON.stringify(schema).length,
+      totN: desc.length + pN,
+      fp: desc.split(/\r?\n\r?\n/)[0] || "",
+      cjk: cjkCount(desc) + inner.reduce((a, s) => a + cjkCount(s), 0),
+      ptr: /SKILL (section |§)/.test(desc),
+    };
+    measured[name] = m;
+    sumTop += m.top;
+    sumTotW += m.totW;
+    sumTotN += m.totN;
+    sumCjk += m.cjk;
+  }
+  // N1 逐工具双帽 ×13（超帽报错列实测/帽值——impl-plan §7.1；标量帽键跳过）
+  for (const [name, cap] of Object.entries(CAPS)) {
+    if (typeof cap !== "object") continue;
+    const m = measured[name];
+    ck.ok(
+      `A-v0161-N1-${name} 逐工具双帽（终值帽）：top ${m.top}≤${cap.top} ∧ totWide ${m.totW}≤${cap.totW} ∧ totNarrow ${m.totN}≤${cap.totN}`,
+      m.top <= cap.top && m.totW <= cap.totW && m.totN <= cap.totN,
+      { top: [m.top, cap.top], totW: [m.totW, cap.totW], totN: [m.totN, cap.totN] },
+    );
+  }
+  // N2 全局双帽 ×2（防逐工具微涨累积）
+  ck.ok(
+    `A-v0161-N2-top 13 工具 top 合计 ${sumTop}≤${CAPS.globalTop} ∧ 总账(窄口径) ${sumTotN}≤${CAPS.globalTotN}`,
+    sumTop <= CAPS.globalTop && sumTotN <= CAPS.globalTotN,
+    { top: [sumTop, CAPS.globalTop], totN: [sumTotN, CAPS.globalTotN] },
+  );
+  ck.ok(
+    `A-v0161-N2-total 13 工具总账(宽口径=W0 口径)合计 ${sumTotW}≤${CAPS.globalTotW}`,
+    sumTotW <= CAPS.globalTotW,
+    { totW: [sumTotW, CAPS.globalTotW] },
+  );
+  // N3 CJK 守卫 ×2（白名单机制沿一期先例；R1 英文化改判后白名单趋空=空数组——登记制：
+  //   新 CJK 串须登记此处并同步 v1.6.1.md 台账，否则本腿红）
+  const CJK_WHITELIST = [];
+  const whitelistChars = CJK_WHITELIST.reduce((a, s) => a + cjkCount(s), 0);
+  ck.ok(
+    `A-v0161-N3-zero 13 工具 desc+params(全深度) CJK=0（白名单外零残留；实测 ${sumCjk}/白名单 ${whitelistChars}）`,
+    sumCjk <= whitelistChars,
+    { cjk: sumCjk, whitelist: whitelistChars },
+  );
+  // N3② 台账-断言防漂移（R1 改判三方互检）：server-registry 族面（familySource 拼接，LM-06-SCAN
+  //   合规）↔ crv8-memory 两腿 need 串 ↔ v0.11.x.md 改判行 三方逐字一致。转义形片段
+  //   （target=\"global\"）在 registry 源码与腿文件为同字符序列，单一常量两面通用。
+  const LEDGER011 = read(path.join("tests", "assertions", "v0.11.x.md"));
+  const STAGE_LEG = read(path.join("tests", "suites", "crv8-memory", "stage.mjs"));
+  const GPROMOTE_LEG = read(path.join("tests", "suites", "crv8-memory", "global-promote.mjs"));
+  const REG_FAMILY = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
+  const R1_STAGE_HEAD = "stage: Coordinator-side staging (ORCHTEMP): writes source=";
+  const R1_STAGE_TAIL = "no merge no injection; consumed by the gleaner (retired+view-layer write-back). trigger/fix required.";
+  // 转义形片段显式构造（防转义层歧义）：registry 源码/台账引文=单反斜杠转义（\"），
+  // crv8 腿文件字面=JS 字面量双反斜杠（\\"）——两形字符序列不同，分常量各钉其面。
+  const BS = String.fromCharCode(92);
+  const R1_PROMOTE_ESC = `target=${BS}"global${BS}" promotes fleet-wide`;
+  const R1_PROMOTE_ESC_FILE = `target=${BS}${BS}"global${BS}${BS}" promotes fleet-wide`;
+  const R1_PROMOTE_REFS = "refs=[source id, source project path, root_id] backlink; source entry untouched";
+  ck.ok(
+    "A-v0161-N3-ledger R1 改判三方互检：registry 族面含 stage/promote 英文新句四片段 ∧ crv8 两腿 need 串在案 ∧ v0.11.x.md 改判行引用同片段（台账-断言防漂移）",
+    REG_FAMILY.includes(R1_STAGE_HEAD) && REG_FAMILY.includes(R1_STAGE_TAIL) && REG_FAMILY.includes(R1_PROMOTE_ESC) && REG_FAMILY.includes(R1_PROMOTE_REFS) &&
+      STAGE_LEG.includes(R1_STAGE_HEAD) && STAGE_LEG.includes(R1_STAGE_TAIL) &&
+      GPROMOTE_LEG.includes(R1_PROMOTE_ESC_FILE) && GPROMOTE_LEG.includes(R1_PROMOTE_REFS) &&
+      LEDGER011.includes(R1_STAGE_HEAD) && LEDGER011.includes(R1_STAGE_TAIL) && LEDGER011.includes(R1_PROMOTE_ESC) && LEDGER011.includes(R1_PROMOTE_REFS),
+    {
+      registry: [R1_STAGE_HEAD, R1_STAGE_TAIL, R1_PROMOTE_ESC, R1_PROMOTE_REFS].map((s) => count(REG_FAMILY, s)),
+      stage: [R1_STAGE_HEAD, R1_STAGE_TAIL].map((s) => count(STAGE_LEG, s)),
+      gpromote: [R1_PROMOTE_ESC_FILE, R1_PROMOTE_REFS].map((s) => count(GPROMOTE_LEG, s)),
+      ledger: [R1_STAGE_HEAD, R1_STAGE_TAIL, R1_PROMOTE_ESC, R1_PROMOTE_REFS].map((s) => count(LEDGER011, s)),
+    },
+  );
+  // N4 SF-2 守卫 ×2（首段=首个空行前；句末句号语义）
+  const fpRows = TOOLS.map((t) => ({ name: bareName(t), fp: measured[bareName(t)].fp }));
+  const fpOver = fpRows.filter((r) => r.fp.length > CAPS.firstParaMax);
+  const fpBadPeriods = fpRows.filter((r) => (r.fp.match(/\.(?=\s|$)/g) || []).length !== CAPS.firstParaPeriods);
+  ck.ok(
+    `A-v0161-N4-len 13 工具首段 ≤${CAPS.firstParaMax}`,
+    fpOver.length === 0,
+    fpOver.map((r) => [r.name, r.fp.length]),
+  );
+  ck.ok(
+    `A-v0161-N4-period 13 工具首段句号数=${CAPS.firstParaPeriods}（句末句号：句点后随空白/串尾）`,
+    fpBadPeriods.length === 0,
+    fpBadPeriods.map((r) => [r.name, (r.fp.match(/\.(?=\s|$)/g) || []).length]),
+  );
+  // N5 指针存在性 ×2（防指针化退化为删语义不留指针）
+  const noPtr = TOOLS.filter((t) => !measured[bareName(t)].ptr).map(bareName);
+  ck.ok(
+    `A-v0161-N5-desc 每工具 desc 内 SKILL 指针 ≥1（${TOOLS.length - noPtr.length}/${TOOLS.length}）`,
+    noPtr.length === 0,
+    noPtr,
+  );
+  const tsMissing = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].filter(
+    (n) => countRe(SKILL_LF, new RegExp(`^TS-${n}${n === 19 ? "a?" : ""} `, "m")) < 1,
+  );
+  ck.ok(
+    `A-v0161-N5-ts SKILL §14 TS-1..TS-20 条目存在性（19a/19 计 1；缺席 ${tsMissing.length} 条）`,
+    tsMissing.length === 0,
+    tsMissing,
+  );
+  // N6 persona 守卫 ×2（v1.6.1 P-W2 落装；design §7.1 N6；台账 v1.6.1.md §W2）
+  const descLen = (t) => {
+    const m = /^description: "(.*)"/m.exec(t);
+    return m ? m[1].length : -1;
+  };
+  const descOver = Object.entries(PERSONA_MAP).filter(([, t]) => descLen(t) < 0 || descLen(t) > CAPS.descMax);
+  ck.ok(
+    `A-v0161-N6-desc 五 persona frontmatter desc ≤${CAPS.descMax}/件（实测 ${Object.entries(PERSONA_MAP).map(([n, t]) => `${n}=${descLen(t)}`).join(" ")}）`,
+    descOver.length === 0,
+    descOver.map(([n]) => n),
+  );
+  const blockOver = personaBlocks.filter(([, b]) => b === null || b.length > CAPS.blockMax);
+  ck.ok(
+    `A-v0161-N6-block 五 persona 纪律块 ≤${CAPS.blockMax}/件 ∧ 逐字互等（实测 ${personaBlocks.map(([n, b]) => `${n}=${b === null ? -1 : b.length}`).join(" ")}；N1① 互等腿并联强化）`,
+    blockOver.length === 0 && personaBlocks.every(([, b]) => b !== null && b === blockRef),
+    { over: blockOver.map(([n]) => n), equal: personaBlocks.every(([, b]) => b !== null && b === blockRef) },
+  );
+
+  // W2.5 提问协议微波 ×2（v1.6.1 P-W2.5 落装；台账 v1.6.1.md §W2.5；用户截图实证修复——
+  //   根因=提问协议全链零「立即结束回合」成文+零 sleep 禁令，question 后自挂 sleep 480 等裁决 1h41m）
+  // ① 正向锚：五 persona 协议区各恰一条回合纪律句（编号顺延 WK-8.1/SC-8.1/RV-11.1/PD-8.1/PM-9.1）
+  //   + SKILL CL-2 主控侧对应语义（恰 1）；② 反向钉（防回潮）：六面禁「sleep+等待裁决」组合字面。
+  const W25_IDS = {
+    "orch-worker.md": "WK-8.1",
+    "orch-scout.md": "SC-8.1",
+    "orch-reviewer.md": "RV-11.1",
+    "orch-planner.md": "PD-8.1",
+    "orch-plan.md": "PM-9.1",
+  };
+  // F2 移交补强（P-W2.5 评审 F2 low→P-W4 顺带；台账 v1.6.1.md §W4）：persona 侧「恰一条」count 判据——
+  //   既有实现只验首条命中行合法（同编号重复行不触发），补强=各件「<编号> 」行前缀计数恰 1。
+  const w25Count = (f, id) => normLf(PERSONA_MAP[f]).split("\n").filter((l) => l.startsWith(`${id} `)).length;
+  const w25CountBad = Object.entries(W25_IDS)
+    .filter(([f, id]) => w25Count(f, id) !== 1)
+    .map(([f, id]) => `${f}:${id}=${w25Count(f, id)}`);
+  const w25Missing = Object.entries(W25_IDS)
+    .filter(([f, id]) => {
+      const line = normLf(PERSONA_MAP[f]).split("\n").find((l) => l.startsWith(`${id} `));
+      return !line || !line.includes("question/blocked 发出后立即结束回合") || !line.includes("禁 sleep/轮询/长等待挂起") || !line.includes("SendMessage 唤醒续聊");
+    })
+    .map(([f]) => f);
+  ck.ok(
+    "A-v0161-W25-turn 五 persona 各恰一条提问回合纪律句（WK-8.1/SC-8.1/RV-11.1/PD-8.1/PM-9.1：question/blocked 发出后立即结束回合+禁 sleep/轮询/长等待挂起+SendMessage 唤醒续聊；各件回合句行计数恰 1=F2 补强）∧ SKILL CL-2 主控侧对应语义恰 1",
+    w25Missing.length === 0 && w25CountBad.length === 0 && count(SKILL, "发出后立即结束回合") === 1,
+    { missing: w25Missing, countBad: w25CountBad, skill: count(SKILL, "发出后立即结束回合") },
+  );
+  const w25SleepBad = Object.entries({ ...PERSONA_MAP, "SKILL.md": SKILL }).flatMap(([f, t]) =>
+    normLf(t)
+      .split("\n")
+      .map((l, i) => [i + 1, l])
+      .filter(([, l]) => /sleep\s*\d/.test(l) || (/sleep/i.test(l) && (/裁决/.test(l) || /等(待|候)?主控/.test(l))))
+      .map(([ln]) => `${f}:${ln}`),
+  );
+  ck.ok(
+    "A-v0161-W25-nosleep 六面（五 persona+SKILL）禁「sleep+等待裁决」组合字面：时长形 sleep<数字> 零残留 ∧ sleep 与裁决/等主控同线共现零残留（防回潮；回合纪律句内「sleep/轮询/长等待挂起」禁令形为合法形态）",
+    w25SleepBad.length === 0,
+    w25SleepBad,
+  );
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------
   const bytesOf = (rel) => Buffer.byteLength(read(rel), "utf8");

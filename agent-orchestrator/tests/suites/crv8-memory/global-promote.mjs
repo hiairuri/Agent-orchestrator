@@ -260,10 +260,15 @@ export async function scenGlean07_08() {
     // ---- G7-k：schema 面（target 枚举 + promote 描述行跨项目晋升句在案）
     // v1.3 切分重基（修复轮 C）：server 读取面走族 helper（薄入口+模块族拼接——lessons schema
     // 描述行已迁 mcp/server-registry.mjs），断言与期望值零改动。
+    // v1.6.1 P-W1 改判（R1-02，m-20261105-100000-v161w1）：promote 行 CJK 英文化（v1.6.1 design
+    // §5.1/OPEN-3 主案 a）——need 串同步改英文新句，与 server-registry 新字面逐字一致（转义形
+    // 需求串与 registry 源码转义形同字符序列）；改判登记 tests/assertions/v0.11.x.md
+    // A-v0110-PO-W3-03（§0 2026-11-05 条）+ tests/assertions/v1.6.1.md §W1；防漂移互检=
+    // A-v0161-N3②（po-static 三方互检）；target 枚举段零触。
     const srvSrc13 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
     ck.ok(
-      "G7-k schema：lessons target 枚举 [project, global] + promote 描述行含跨项目晋升与回链句",
-      srvSrc13.includes('enum: ["project", "global"]') && srvSrc13.includes('target=\\"global\\" 跨项目晋升全端库') && srvSrc13.includes("refs=[源条 id, 源项目路径, root_id]"),
+      "G7-k schema（v1.6.1 P-W1 英文化改判）：lessons target 枚举 [project, global] + promote 描述行含 fleet-wide 晋升与回链句",
+      srvSrc13.includes('enum: ["project", "global"]') && srvSrc13.includes('target=\\"global\\" promotes fleet-wide') && srvSrc13.includes("refs=[source id, source project path, root_id] backlink; source entry untouched"),
       null,
     );
 
