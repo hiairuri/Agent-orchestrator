@@ -2,7 +2,7 @@
 
 - **归属模块**：mcp/server-stores.mjs（spool 全部读写经 server；落箱在 report 工具内，消费在 mailbox/resume/gc 工具内）；事件信封生成与消费所读写的 board 字段见 `card-board.md` §4（两卡接缝，字段语义以彼卡为准）
 - **脆度评级**（面广度×后果重度双轴）：**中**——消费面广（mailbox peek/read/answer/gc、resume 计数、board list unread、close 告警、组包 wake 链），但失效后果限单 mission 的消息面（不同于 root.txt 的全局性）；裸 JSON 无 schema 校验 + rename 消费语义是主要风险面
-- **历史事故回链**：v0.3.1 A1/A3/B9（根锁/answers wx/ENOENT 已消费）、C4/C5（gc 归档/closed 拒改板）、V6-18 details 存储侧截断、V6-49 畸形事件文件致 close 假 unread 永挂（QQagent 实锤）、v1.1 W6 QA P2-b（畸形 id 炸 board list）、v1.1 W3 A5-E（read 呈现指针化）、v1.1.1 W-B（完成即唤队列骑落箱面）
+- **历史事故回链**：v0.3.1 A1/A3/B9（根锁/answers wx/ENOENT 已消费）、C4/C5（gc 归档/closed 拒改板）、V6-18 details 存储侧截断、V6-49 畸形事件假 unread 永挂、v1.1 W6 QA P2-b（畸形 id 炸 list）、v1.1 W3 A5-E（read 呈现指针化）、v1.1.1 W-B（完成即唤骑落箱面）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
 
 ---
@@ -15,9 +15,9 @@
 | 三目录族 | `unread/`（未消费，report 落箱）、`read/`（已消费，rename 目标）、`answers/`（主控答复，mailbox answer 写） | `unreadDirOf`/`readDirOf`（mcp/server-stores.mjs）；answers mkdir（mcp/tool-mailbox.mjs answer） |
 | 文件名协议 | `<15位零填充epochMs>-<8hex>.json`——eventId=`String(Date.now()).padStart(15,"0")+"-"+hex(4)`（hex(4)=4 字节→8 字符）；权威注释=文件头布局注释 | eventId（mcp/tool-report.mjs newEvent 段） |
 | answers 文件名 | `<4位零填充seq>-answer.json`，seq 从目录内既有最大值 +1 起算 | mcp/tool-mailbox.mjs answer（seq 起算+冲突递增） |
-| **「N 文件」口径** | DR1 survey 的「8 文件」口径在本目录族无文可核（grep 零命中，DP2a 证据缺口②）：实测口径=**3 目录族 × 单一文件名协议**（answers 为 4 位 seq 变体）——本卡即权威口径 | 本卡 §1 |
+| **「N 文件」口径** | DR1 survey 的「8 文件」口径在本目录族无文可核：实测口径=**3 目录族 × 单一文件名协议**（answers 为 4 位 seq 变体）——本卡即权威口径 | 本卡 §1 |
 
-**目录列举行为**（读方通用）：listSpoolMissions 只取目录条目（stat 非目录跳过，IO 错误返空——mcp/server-stores.mjs `listSpoolMissions`）；listUnreadFiles 只取 `.json` 结尾并按名排序（`.bad` 隔离件天然出列，mcp/server-stores.mjs `listUnreadFiles`）。
+**目录列举行为**（读方通用，均在 mcp/server-stores.mjs）：`listSpoolMissions` 只取目录条目（stat 非目录跳过，IO 错误返空）；`listUnreadFiles` 只取 `.json` 结尾并按名排序（`.bad` 隔离件天然出列）。
 
 ## 2. 写方（唯一写方=server 进程，落箱+改板同临界区）
 
@@ -56,7 +56,7 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 | 读方 | 时机 | 读不到/畸形时行为 |
 |---|---|---|
 | mailbox peek | 主控巡检 | 纯只读（无根锁）；事件缺失/畸形静默跳过（readEventFile 返 null） |
-| mailbox read | 主控消费 | rename 消费（unread→read）；目标重名依次试 `-1`、随机 hex 后缀；rename 成功但源仍可见=unresolved 不宣称送达（防跨进程元数据迟滞双投递）；**ENOENT=已被并发读者消费，当成功跳过**（B9）；unresolved 留待下次 read |
+| mailbox read | 主控消费 | rename 消费（unread→read）；目标重名依次试 `-1`、随机 hex 后缀；rename 成功但源仍可见=unresolved 不宣称送达；**ENOENT=已被并发读者消费，当成功跳过**（B9）；unresolved 留待下次 read |
 | mailbox answer | 主控答复 blocked/question | 读 board 非 spool；answer 文件名撞车 wx 递增 |
 | mailbox gc | 手动清舱 | read/ 陈旧 unlink；unread/ 陈旧归档；目录缺失按空处理 |
 | compactMissionRow | board list 每行 | unread 计数走 countUnreadSafe（QA P2-b：畸形 id/IO 异常计 0，best-effort，永不炸 list）——Flag 3 派生字段 |
@@ -79,7 +79,7 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 | answers 并发写 | flag:"wx" 独占 + seq 递增（A3）——永不覆盖 | 锁内仲裁 |
 | 时钟漂移 | eventAgeMs 负值钳 0（oldest_age_ms 不出负数） | 钳制（B7 同族） |
 | 畸形 mission_id（手编 board/legacy id） | safeSegment 消毒+countUnreadSafe 兜底计 0——不炸 board list（QA P2-b） | 静默降级（best-effort） |
-| gc 竞态（归档 vs 并发消费） | 归档走 consumeEventFile，ENOENT 当已消费跳过；read/ 先扫后归档的顺序保证本 pass 刚归档件不被误删 | 锁内仲裁（C4） |
+| gc 竞态（归档 vs 并发消费） | 归档走 consumeEventFile（ENOENT 当已消费跳过）；read/ 先扫后归档顺序保证本 pass 刚归档件不被误删 | 锁内仲裁（C4） |
 
 ## 6. 断言锚
 

@@ -1,11 +1,11 @@
 # 契约卡：sandbox 沙箱生命周期（M4）
 
-> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码逐行核对，worker v12-m71；server.mjs 约 10657 行量级）。行号**不作跨版引用**；跨版定位以函数名锚为准（l-20261022-6a14d6）。
+> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码逐行核对，worker v12-m71）。行号**不作跨版引用**；跨版定位以函数名锚为准（l-20261022-6a14d6）。
 >
 > - **归属模块**：M4 sandbox（沙箱写面：`materializeSandbox`（mcp/server-git.mjs）、`toolSandboxApply`/`toolSandboxDiscard`（mcp/tool-sandbox.mjs））＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，mcp/tool-pack.mjs）
 > - **脆度双轴评级**：面广度=中（两收口工具+组包三参）；**后果重度=第一梯队**（apply 的 merge 直接动主仓主线，git 历史不可逆——门禁链是唯一防线，故 apply 侧门禁最厚）
-> - **历史事故回链**：V6-08（两阶段 intent+幂等三态，治锁内长 git 崩窗）/V6-13（git 管线出锁，治锁占用风暴）/V6-35（teardown 后置降级，治 merge 已落仍抛）/V6-42 AUTH-08（qa 裸 verdict 纸门→四查链）/V6-10（coversPath 单一来源）/ENV-01（两慢 merge 场景套内重试稳定化，crv5-apply-envelope）
-> - **scope 注记**：本卡属 M4「不立项增强」（G1 同构裁定 K-6）；本卡只记现状契约。scope_paths 面写 allowlist 演进（v1.0 manifest 起取代 oob_allowlist 主口径）由 M2/M3 卡族承载，本卡按现状并记两参。
+> - **历史事故回链**：V6-08（两阶段 intent+幂等三态）/V6-13（git 管线出锁）/V6-35（teardown 后置降级）/V6-42 AUTH-08（qa 裸 verdict 纸门→四查链）/V6-10（coversPath 单一来源）/ENV-01（两慢 merge 套内重试，crv5-apply-envelope）
+> - **scope 注记**：本卡属 M4「不立项增强」（G1 同构裁定 K-6），只记现状契约；scope_paths 面 allowlist 演进由 M2/M3 卡族承载，本卡按现状并记两参。
 
 **失效语义三分类记法**：`fail-loud`（显式报错，行为可见）／`自愈`（自动收敛到正确态）／`静默降级`（按安全缺省继续，留痕有限）。
 
@@ -46,7 +46,7 @@
 
 | 前置态 | 判定 | 收敛 |
 |---|---|---|
-| 已应用 | `applied_at` 在 | 补偿关闭：status≠closed 则置 closed+auto-ack（by=sandbox_apply），返回 `already_applied:true`（v0.4.1 fix 保留：幂等分支先于 done/qa 门——merge 既落，结账恒正确） |
+| 已应用 | `applied_at` 在 | 补偿关闭：status≠closed 则置 closed+auto-ack（by=sandbox_apply），返回 `already_applied:true`（v0.4.1 fix：幂等分支先于 done/qa 门） |
 | intent+已合入 | `apply_intent_at` 在 ∧ `merge-base --is-ancestor` 判分支已在主线 | crash-after-merge 自愈（`自愈`）：直达 phase-3，applied_commit 取收口时 HEAD，响应 `recovered:true` |
 | intent 新鲜未合入 | `apply_intent_at` 在 10min 新鲜窗（`applyIntentFresh`）内 | 结构化 busy：`{ok:true, apply_in_progress:true, note}`（跨进程在飞保护+apply↔discard 互斥同窗） |
 | intent 过期未合入 | 新鲜窗外 | 删 intent 落回门禁链重走（qa 可能已变，全量重验） |

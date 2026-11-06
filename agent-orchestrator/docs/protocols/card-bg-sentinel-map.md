@@ -1,6 +1,6 @@
 # 契约卡：bg-sentinel 职责地图（M7，不分解裁定存证）
 
-> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（分节注释 grep，worker v12-m71；bg-sentinel.mjs 恰 2517 行）。行号**不作跨版引用**；跨版定位以分节标题+函数名锚为准（l-20261022-6a14d6）。
+> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（分节注释 grep，worker v12-m71）。行号**不作跨版引用**；跨版定位以分节标题+函数名锚为准（l-20261022-6a14d6）。
 >
 > - **归属模块**：M7 hooks（`hooks/bg-sentinel.mjs`，单文件独立进程）
 > - **本卡性质**：**职责地图＋裁定存证**——不是逐文件契约卡（那是 `card-sentinel.md` 的职责），也不是重构任务书。读者要「某行某节在干什么」读本卡；要「sentinel/ 某文件谁写谁读怎么失效」读 card-sentinel.md
@@ -11,13 +11,13 @@
 
 ## 0. G1 声明（先读这个，防误读）
 
-**本卡是虚拟分区地图，不是重构 mandate。**主控终裁 G1：server.mjs 与 bg-sentinel 这类枢纽巨石**逻辑分区、物理不拆**（与 K-6 裁定「bg-sentinel 不物理分解」同构）。任何以本卡分节为依据的「按节拆文件/抽模块」施工都是越界——文件集变化会被 l0 骨架红线与 LM-04 结构锁机械检出（文件集变化即红）。本卡的存在目的恰是：**让不拆的巨石可导航**，从而消除「因为读不懂所以想拆」的拆分动机。
+**本卡是虚拟分区地图，不是重构 mandate。**主控终裁 G1：server.mjs 与 bg-sentinel 这类枢纽巨石**逻辑分区、物理不拆**（与 K-6 裁定「bg-sentinel 不物理分解」同构）。任何以本卡分节为依据的「按节拆文件/抽模块」施工都是越界——文件集变化会被 l0 骨架红线与 LM-04 结构锁机械检出（文件集变化即红）。本卡的存在目的=**让不拆的巨石可导航**。
 
 ## 1. 不分解裁定（2026-10-28 存证，三理由）
 
 物理分解在当期**明确不做**，理由（DP2c 职责分解评估节实测结论，2026-10-27）：
 
-1. **断言面全量重钉**：黑盒套件 sentinel-teardown（T1-T10 加速参数驱动的生命周期断言，超千行量级）以「单文件黑盒」为被测对象——拆分即全部断言重钉，回归安全网重建成本远超收益；
+1. **断言面全量重钉**：黑盒套件 sentinel-teardown（T1-T10 生命周期断言）以「单文件黑盒」为被测对象——拆分即全部断言重钉，回归安全网重建成本远超收益；
 2. **hook 部署形态约束**：hook 脚本=独立进程单文件自包含（与 v1.3 拆分前 server.mjs 零依赖单文件形态同构约束）。拆模块必须引入加载器或构建物化，两者都破坏 hooks 的直接部署形态；
 3. **状态机跨节纠缠**：租约 wx 守卫文件、槽位、quarantine、fired、冷却戳互相引用成网，静态切分线切在状态机关节上——拆分收益低、风险高。
 
@@ -41,13 +41,11 @@
 | hooks/bg-sentinel/wake-kick.mjs | 哨兵 drain | 完成即唤队列滞留消费（滞留两 tick 判定） | drain 族 |
 | hooks/bg-sentinel/classify.mjs | 条件分类 classify | 板事件龄期条件分级，C3>C1>C2，每 mission 至多一条 | classify 族 |
 | hooks/bg-sentinel/classify.mjs | 告警汇总 | 四类文案分组（含「疑似崩溃」「放弃通告」段） | 告警组族 |
-| hooks/bg-sentinel/glean-launch.mjs〔v1.6 W-p parked：随 -p 通道迁 parked/agent-orchestrator/，本行=历史语义；恢复=parked README 指引+行回植〕 | 归敛自动拉起 | 门槛复刻+锁前置+headless 拉起（glean） | `writeGleanState`/`readGleanState`/`clearGleanState` |
-| 〔v1.6 W-p parked 同上〕 `gleanStampFile` | 冷却戳 | JSON 冷却戳（时刻+TTL+种类；长冷却 24h/短冷却 1h 两档，用户裁定） | `gleanStampFile` |
+| hooks/bg-sentinel/glean-launch.mjs＋`gleanStampFile`〔v1.6 W-p parked：随 -p 通道迁 parked/agent-orchestrator/，本行组=历史语义（归敛自动拉起/冷却戳长 24h 短 1h/在跑子进程状态文件 `sentinel/glean-launch-state.json`）；恢复=parked README 指引+行回植〕 | 归敛自动拉起族 | 门槛复刻+锁前置+headless 拉起（glean）+冷却戳+状态文件 | `writeGleanState`/`readGleanState`/`clearGleanState`/`gleanStampFile` |
 | hooks/bg-sentinel/family.mjs | 租约 wx 守卫 | 「读-比-写」串行化，多实例家族只成一 | 租约守卫族 |
-| 〔v1.6 W-p parked 同上〕 | 在跑子进程状态文件 | `sentinel/glean-launch-state.json`（在飞 glean 子进程状态；文件面退役=历史语义） | glean-launch-state 读写族 |
 | hooks/bg-sentinel.mjs（入口主循环） | 主循环 | tick 编排（cfg 重读/槽位/分类/开枪/回声/自毁判定） | `main` |
 
-**职责族计数**：上表即多族确认（DP1「多职责族」判断成立；族数随演进增减，以分节注释为准——本卡不钉族数，计数恒为台账非门禁）。
+**职责族计数**：上表即多族确认（族数随演进增减，以分节注释为准；本卡不钉族数，计数恒为台账非门禁）。
 
 **逐文件协议契约**：本表全部职责的自有落盘（槽位族/teardown/fired/echo/quarantine/锚/信号/归敛状态/冷却戳）的写方/读方/字段/失效语义，**全部在 `card-sentinel.md`**——两卡分工：本卡管「行→职责」导航，card-sentinel 管「文件→契约」。
 

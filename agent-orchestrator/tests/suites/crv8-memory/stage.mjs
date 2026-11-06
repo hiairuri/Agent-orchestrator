@@ -138,11 +138,15 @@ export async function scenGlean05() {
     //  首尾两个逐字片段 + 枚举行，三段同钉）
     // v1.3 切分重基（修复轮 C）：server 读取面走族 helper（薄入口+模块族拼接——schema 描述行与
     // 枚举已迁 mcp/server-registry.mjs），断言与期望值零改动。
+    // v1.6.1 P-W1 改判（R1-01，m-20261105-100000-v161w1）：lessons stage 行 CJK 英文化
+    //（v1.6.1 design §5.1/OPEN-3 主案 a）——need 串同步改英文新句，与 server-registry 新字面
+    // 逐字一致；改判登记 tests/assertions/v0.11.x.md A-v0110-PO-W3-02（§0 2026-11-05 条）+
+    // tests/assertions/v1.6.1.md §W1；防漂移互检=A-v0161-N3②（po-static 三方互检）；枚举段零触。
     const srvSrc52 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
     ck.ok(
-      "GLEAN-05k §9.4 逐字稿落 schema：stage 描述行首尾片段逐字在案 + action 枚举含 stage/promote_batch",
-      srvSrc52.includes("stage: 主控随手暂存（ORCHTEMP）。写 source=") &&
-        srvSrc52.includes("；不合并不注入；由归敛代理消费（置 retired+视图层落笔）。trigger/fix 必填。") &&
+      "GLEAN-05k §9.4 逐字稿落 schema（v1.6.1 P-W1 英文化改判）：stage 描述行首尾片段逐字在案 + action 枚举含 stage/promote_batch",
+      srvSrc52.includes("stage: Coordinator-side staging (ORCHTEMP): writes source=") &&
+        srvSrc52.includes("/candidate/confidence=0; no merge no injection; consumed by the gleaner (retired+view-layer write-back). trigger/fix required.") &&
         srvSrc52.includes('["list", "add", "promote", "promote_batch", "retire", "stage"]'),
       null,
     );

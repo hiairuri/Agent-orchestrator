@@ -1,7 +1,7 @@
 # 缓存策略：probe 会话读缓存（LRU64 + SQL 门）
 
-- **定位**：observe 侧缓存策略文档（v0.7 V7-01/W-A §2 落地面的契约文档；probe 协议本体归 `card-probe.md`——G1 虚拟分区：probe 不物理拆，本文档与 probe 卡**分立**：卡管四动作协议面，本文管「同参重探怎么省字节」的缓存机制面）
-- **设计动机**：重复同参 probe 的完整响应会把已读过的字节再灌一遍上下文。缓存把「不要重复探查」从模型纪律变成机制——同参重探折算成 ~100B 存根（W-A §2：在唯一分发咽喉点 toolProbe 收口）
+- **定位**：observe 侧缓存策略文档（v0.7 V7-01/W-A §2 落地面的契约文档；probe 协议本体归 `card-probe.md`——G1 虚拟分区：probe 不物理拆，两者**分立**：卡管四动作协议面，本文管「同参重探怎么省字节」的缓存机制面）
+- **设计动机**：缓存把「不要重复探查」从模型纪律变成机制——同参重探折算成 ~100B 存根（W-A §2：在唯一分发咽喉点 toolProbe 收口）
 - **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
 
 ---
@@ -21,7 +21,7 @@
 | 项 | 内容 | 锚点 |
 |---|---|---|
 | 键形状 | `JSON([action, flatArgs, mtimeMs, size])`——flatArgs=入参去 page_token/no_cache、键排序、undefined 剔除后的规范形 | probeCacheKey :9105-9112 |
-| 失效因子 | **mtimeMs+size 双因子内嵌在键里**——宿主任何写动作都移动键→miss→全量重读。无需任何写通知协议（与 page_token sz 绑定同一哲学：文件事实自证） | :9095-9097；:9101-9104 |
+| 失效因子 | **mtimeMs+size 双因子内嵌在键里**——宿主任何写动作都移动键→miss→全量重读，无需任何写通知协议（与 page_token sz 绑定同一哲学） | :9095-9097；:9101-9104 |
 | 双因子理由 | V7-01/CACHE-06 教训：单 mtime 抗不住同毫秒写；bytes+mtimeMs 双读才稳 | :10142-10145 同款论述 |
 
 ## 3. 存根与 LRU64
@@ -30,7 +30,7 @@
 |---|---|---|
 | 容量 | PROBE_CACHE_MAX_ENTRIES=**64** 条；每条 envelope 本身 ≤10KB（probe 自帽）→整缓存 ≤640KB，无第二字节帽 | :195-198 |
 | 淘汰 | Map 插入序即 LRU：命中 delete+set 触摸（touch）；超 64 驱逐最旧（插入序最早） | :9099；:9157-9166 |
-| 存根形状 | `{ok, tool, action, path, cached:true, cached_at, prior_hash, prior_bytes, note}`——**机器诚实的指针，永不携 payload**（携 payload 即抵消省字节）；note 声明 no_cache:true 逃逸面 | probeCacheStub :9114-9130 |
+| 存根形状 | `{ok, tool, action, path, cached:true, cached_at, prior_hash, prior_bytes, note}`——**机器诚实的指针，永不携 payload**；note 声明 no_cache:true 逃逸面 | probeCacheStub :9114-9130 |
 | 触达路径 | toolProbe 咽喉：可缓存动作∧无 page_token∧无 no_cache→解析 path+stat→查缓存→命中返存根/未命中执行并入缓存 | toolProbe :9142-9172 |
 
 **残余场景（no_cache 存在的理由）**：首次全量响应已被会话浓缩/裁剪出上下文、只剩 hash 指针在场——此时存根指向的上文已不可见，`no_cache:true` 强制真重读（:9114-9117 注释原文语义）。
