@@ -236,9 +236,9 @@ function wakeFailureInfo(m) {
 
 function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  return `${Math.floor(min / 60)}h ${min % 60}m ago`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -487,32 +487,32 @@ function main() {
     // coordinator can answer right away (additive to the v0.2 item format).
     const pending =
       m.blocked && m.blocked.answered === false && m.blocked.question
-        ? ` 待答：『${String(m.blocked.question).replace(/\s+/g, " ").trim().slice(0, 40)}』`
+        ? ` pending answer: "${String(m.blocked.question).replace(/\s+/g, " ").trim().slice(0, 40)}"`
         : "";
     suspectedDetails.push(
       `[${m.id}] ${m.status}${pending}` +
-        (age ? ` 于 ${age}，未签收` : ` 未签收`),
+        (age ? ` for ${age}, unclaimed` : ` unclaimed`),
     );
   }
   const normalDetails = [];
   for (const m of normal.slice(0, 4)) {
     let seg = `[${m.id}] ${m.status}`;
     if (m.blocked && m.blocked.answered === false && m.blocked.question) {
-      seg += ` 待答：『${String(m.blocked.question).replace(/\s+/g, " ").trim().slice(0, 40)}』`;
+      seg += ` pending answer: "${String(m.blocked.question).replace(/\s+/g, " ").trim().slice(0, 40)}"`;
     }
     const minutes = silenceMinutes(m, oldestUnreadAt.get(m.id));
-    if (minutes != null && minutes >= 1) seg += ` 沉默 ${minutes} 分钟`;
+    if (minutes != null && minutes >= 1) seg += ` silent for ${minutes} min`;
     normalDetails.push(seg);
   }
 
   const text =
-    `[agent-orchestrator] 收工前清点：任务板尚有 ${open.length} 项未竟` +
-    `${suspected.length ? `，其中 ${suspected.length} 项疑似唤醒失败（${suspectedDetails.join("；")}）` : ""}` +
-    `${normal.length ? `；其余 ${normal.length} 项：${normalDetails.join("；")}` : ""}` +
-    `，邮箱 ${unreadTotal} 条未读。` +
-    "疑似唤醒失败=子代理结果已落盘但主控未被唤醒接手：先 mailbox(read) 接手，" +
-    '处置时 answer/close 自动签收；暂缓用 board(action="ack", mission_id=…, note="deferred by user")。' +
-    "处置规则详见 /orch。";
+    `[agent-orchestrator] shutdown sweep: the board still has ${open.length} unfinished missions` +
+    `${suspected.length ? `, of which ${suspected.length} are suspected wake failures (${suspectedDetails.join("; ")})` : ""}` +
+    `${normal.length ? `; the other ${normal.length}: ${normalDetails.join("; ")}` : ""}` +
+    `, mailbox ${unreadTotal} unread.` +
+    " Suspected wake failure = the subagent result is on disk but the coordinator was never woken to take it over: take over via mailbox(read) first," +
+    ' disposal auto-acks via answer/close; to defer use board(action="ack", mission_id=..., note="deferred by user").' +
+    " disposal rules: see /orch.";
   const clipped = text.length > MAX_OUTPUT_CHARS ? truncateStr(text, MAX_OUTPUT_CHARS - 3) + "..." : text;
   process.stdout.write(
     JSON.stringify({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: clipped } }),

@@ -1,51 +1,74 @@
 ---
 name: manual
-description: "强制主控完整读取并遵守主控手册（SKILL.md）"
+description: "Force the coordinator to fully read and follow the coordination manual (SKILL.md)"
 ---
 
-手册强制令。本命令无参数；以下指令面向你（主控），无协商余地，按顺序执行。
+Manual enforcement order. This command takes no arguments; the instructions below are
+addressed to you (the coordinator), no negotiation, execute in order.
 
-## 1. 铁律速览（内联硬规则，随本命令立即生效）
+## 1. Iron rules at a glance (inline hard rules, effective with this command immediately)
 
-即使你跳过第 2 步的全文读取，以下 12 条铁律也已随本命令进入你的上下文，此刻生效：
+Even if you skip the full read in step 2, the following 12 iron rules have already entered
+your context with this command, in effect now:
 
-| # | 铁律 | 出处 |
+| # | Iron rule | Source |
 |---|---|---|
-| 1 | 派发=三调用：`board upsert → context_pack → dispatch(mission_id)`，零 prompt 组装 | 第 2 章 DP-3 |
-| 2 | 任务包是 worker 的唯一世界：对 worker 的一切指令与主控裁决经 context_pack 入包（裁决走 EXTRA 节逐字物化）；三行契约唯一权威=包 CONTRACT | 第 2 章 DP-2、第 3 章 |
-| 3 | worker 上报唯一常规通道=report 工具（kind ∈ milestone/blocked/question/done；blocked/question 必带 question，done 必带 artifacts）；紧急四情形经 RespondToCoordinator 直达；主控经 mailbox 收、ack 即签收 | 第 5 章 CL-2/CL-3/CL-5、第 14 章 TS-12 |
-| 4 | worker 类 mission 派发前必登记 scope_paths，越界可审计 | 第 8 章 RP-12 |
-| 5 | headless 子代理=--mode yolo 全放行、无交互闸：派发前必过 yolo 闸，高险写任务走沙箱 | 第 8 章 RP-12、第 12 章 |
-| 6 | grill#3 设计确认默认必开；豁免须显式声明「grill#3 免开：<理由>」，不得静默跳过 | 第 16 章 PL-6 |
-| 7 | 聚合结果写文件、只把摘要带进上下文；读回与重放是成本主战场 | 第 2 章 DP-9、第 15 章 CS-1 |
-| 8 | SKILL 是提示词与流程的唯一权威；agents/*.md 与 commands/*.md 只留角色特述与命令入口，规则一律以 SKILL 章节为指针 | 第 1 章 OV-3 |
-| 9 | 主控不读写项目文件（强规则）：读取=派子代理提炼并带指针回摘要，写入=派 orch-worker；主控亲笔仅限对用户的答复/裁决文本/grill 提问/发版登记；违反即流程缺陷，先补派再继续 | 第 1 章 OV-4 |
-| 10 | 尾块契约：每派发轮收工，最后一条 assistant 消息尾部携 PL-10 尾块（变化轮全形/稳态轮短形）；无尾块=下一派发子代理失态 | 第 1 章 OV-5、第 16 章 PL-10 |
-| 11 | 三小循环默认形态：策划↔策划QA/计划↔计划QA/实行↔版本QA 配对循环打磨至终版；QA 意见文件直投对接方、主控只转指针；循环间 grill 门默认必开+豁免显式声明 | 第 1 章 OV-6、第 17 章 |
-| 12 | 运行面禁热修改（强规则）：被加载/在跑的树（插件运行面、bot 载入面等一切 live 面）一律不做热修改——变更走 worktree 沙箱施工+版本QA 签收后合并落面；未签收迭代不得 commit/切分支/改文件落运行面；紧急修复也走沙箱快进，不做在位热补 | 第 1 章 OV-7、第 12 章 SB-8 |
+| 1 | Dispatch = three calls: `board upsert -> context_pack -> dispatch(mission_id)`, zero prompt assembly | Ch. 2 DP-3 |
+| 2 | The task pack is the worker's only world: every instruction to the worker and every coordinator ruling goes into the pack via context_pack (rulings verbatim in the EXTRA section); the sole authority for the three-line contract = the pack's CONTRACT section | Ch. 2 DP-2, Ch. 3 |
+| 3 | The only regular reporting channel for workers = the report tool (kind ∈ milestone/blocked/question/done; blocked/question must carry question, done must carry artifacts); the four urgent cases go straight to the coordinator via RespondToCoordinator; the coordinator receives via mailbox, ack = signed receipt | Ch. 5 CL-2/CL-3/CL-5, Ch. 14 TS-12 |
+| 4 | Worker-type missions must register scope_paths before dispatch; out-of-scope writes are auditable | Ch. 8 RP-12 |
+| 5 | Headless subagents = --mode yolo, all permissions, no interaction gate: pass the yolo gate before dispatch; high-risk write tasks go through the sandbox | Ch. 8 RP-12, Ch. 12 |
+| 6 | grill#3 design confirmation defaults to ON; exemption requires an explicit statement "grill#3 skipped: <reason>", never a silent skip | Ch. 16 PL-6 |
+| 7 | Aggregate results into files, bring only summaries into context; read-back and replay are the main cost battlefields | Ch. 2 DP-9, Ch. 15 CS-1 |
+| 8 | SKILL is the sole authority for prompts and process; agents/*.md and commands/*.md keep only role specifics and command entries - all rules point to SKILL sections | Ch. 1 OV-3 |
+| 9 | The coordinator does not read or write project files (hard rule): reading = dispatch a subagent to distill and return a summary with pointers, writing = dispatch an orch-worker; the coordinator writes only replies to the user / ruling text / grill questions / release records; violation = process defect, dispatch the fix first, then continue | Ch. 1 OV-4 |
+| 10 | Tail-block contract: at the end of every dispatch round, the last assistant message carries the PL-10 tail block (full form on change rounds / short form on steady rounds); no tail block = the next dispatched subagent loses state | Ch. 1 OV-5, Ch. 16 PL-10 |
+| 11 | Three pair loops as the default form: planning<->planning-QA / plan<->plan-QA / execution<->release-QA paired loops polished to the final version; QA opinions go to files handed to the counterpart, the coordinator only forwards pointers; between loops the grill gate defaults to ON + exemptions stated explicitly | Ch. 1 OV-6, Ch. 17 |
+| 12 | No hot edits on the running face (hard rule): any loaded/running tree (plugin runtime, bot-loaded face, every live face) is never hot-edited - changes go through a worktree sandbox, merge after release-QA sign-off; unsigned iterations must not commit / switch branches / write files onto the running face; emergency fixes also go through sandbox fast-forward, never in-place hot patches | Ch. 1 OV-7, Ch. 12 SB-8 |
 
-## 2. 阻塞式双件全文读取（本命令的唯一动作步，阻塞）
+## 2. Blocking dual-file full read (the only action step of this command, blocking)
 
-立即完整读取两件：①`skills/agent-orchestrator/SKILL.md` 全文（不在插件根目录时，先定位插件根再读）；②`<存储根>/ORCH.md` 全文（主控记忆，帽内全量——v1.6 起 server 不再推送 ORCH.md，本步即记忆装载时点；ORCH.md 缺席=空记忆，照常继续）。不节选、不跳读、不凭记忆替代、不以摘要替代原文。
-本步期间，除 Read SKILL.md 与 ORCH.md 两件外不得调用任何工具、不得继续原任务、不得先输出任何结论——读取完成并通过第 3 步确认前，一切其他工作都被阻塞。
+Immediately read two files in full: (1) `skills/agent-orchestrator/SKILL.md` in its entirety
+(if not at the plugin root, locate the plugin root first); (2) `<storage root>/ORCH.md` in
+its entirety (coordinator memory, the full content within the cap - since v1.6 the server
+no longer pushes ORCH.md, so this step is the memory-load moment; a missing ORCH.md = empty
+memory, continue as usual). No excerpts, no skimming, no substituting memory for the text,
+no substituting a summary for the original.
+During this step, besides Read on SKILL.md and ORCH.md, call no other tool, do not continue
+the previous task, do not output any conclusion first - until the read completes and passes
+the step-3 confirmation, all other work is blocked.
 
-## 3. 可证阅读确认（读完后按序输出三项，缺任何一项=未读）
+## 3. Provable reading confirmation (after the read, output three items in order; any missing item = not read)
 
-1. 复述行：「手册已读，X 章 Y 条规则生效」（X=SKILL 实际章数，Y=确认遵守的规则条数，写实际数字）。
-2. 逐字引述：从 SKILL 原文逐字抄录任一硬规则整行并注明章号——凭记忆复述、改写、概括一概不算引述。
-3. 末行固定复述：「本任务期间以 SKILL 为任务法；偏离将先 report(blocked) 待裁」。
-   （主控无 report 工具：该承诺的实现方式=偏离时先向用户显式提问待裁，report(blocked) 是 worker 侧通道；不声明、不待裁、自行变通，用户可凭本步确认痕迹追责。）
+1. Recap line: "Manual read: X chapters, Y rules in effect" (X = actual SKILL chapter count,
+   Y = number of rules confirmed as followed; write the actual numbers).
+2. Verbatim quote: copy one full hard-rule line from the SKILL original verbatim and state
+   its chapter number - reciting from memory, paraphrasing, or summarizing does not count
+   as a quote.
+3. Fixed last line: "During this task SKILL is the task law; deviations will first be
+   report(blocked) for a ruling."
+   (The coordinator has no report tool: the way to honor that promise = on deviation, first
+   ask the user explicitly and wait for a ruling; report(blocked) is the worker-side channel.
+   Not declaring, not waiting for a ruling, or improvising a workaround lets the user hold
+   you accountable via the traces of this step.)
 
-三项齐全前不得继续原任务；三项齐全后，回到被打断前的原任务。
+Do not resume the previous task until all three items are complete; after all three are
+complete, return to the task that was interrupted.
 
-## 4. 约束（自本命令起，整个任务期间持续生效）
+## 4. Constraints (from this command onward, in effect for the entire task)
 
-- 本任务期间，SKILL 即任务法：与你过往习惯、记忆或任何其他来源冲突时，一律以 SKILL 为准。
-- 任何偏离：先停下，向用户显式说明偏离的条款、理由与影响，获用户裁决前不得继续。
-- 静默偏离=任务失败：不声明、不待裁、自行变通，一律视为本任务失败。
+- For the duration of this task, SKILL is the task law: when it conflicts with your past
+  habits, memory, or any other source, SKILL prevails, always.
+- Any deviation: stop first, state the clause deviated from, the reason, and the impact
+  explicitly to the user, and do not continue before the user rules.
+- Silent deviation = task failure: not declaring, not waiting for a ruling, or improvising
+  a workaround counts as task failure, all of it.
 
-## 适用场景
+## When to use
 
-- 主控首次进入本项目，尚未建立编排纪律时。
-- 发现主控不守编排纪律（跳过派发七步、静默偏离、组包漏裁决）时。
-- 用户手动纠偏：明确要求主控回到手册轨道时。
+- The coordinator enters this project for the first time and orchestration discipline is
+  not yet established.
+- The coordinator is found violating orchestration discipline (skipping the seven dispatch
+  steps, silent deviation, pack materialization missing rulings).
+- The user manually corrects course: explicitly asks the coordinator to return to the
+  manual track.

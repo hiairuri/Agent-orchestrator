@@ -226,7 +226,7 @@ export async function run(ctx) {
     const w2Opens = w2Relay.received.filter((m) => m.payload && m.payload.zcode_type === "workspace-bridge-open").length;
     ck.ok("W2-01 B1① 锚消费面前置形状校验：coord-session.txt=sess_subagent_agent_<id> → wakeCoordSession 前置 fail-loud 拒用（code=coord-anchor-subagent，错误串含 sess_subagent/拒绝消费；warn 面同串），不建桥（workspace-bridge-open=0）不发帧不写锚（存量锚逐字不动）；allowLegacyFirst:true 逃生口不豁免形状闸（同误拒）",
       w2Err && w2Err.code === "coord-anchor-subagent" &&
-      String(w2Err.message).includes("sess_subagent") && String(w2Err.message).includes("拒绝消费") &&
+      String(w2Err.message).includes("sess_subagent") && String(w2Err.message).includes("refusing to consume") &&
       w2Warns.some((w) => w.includes("coord-anchor-subagent") && w.includes("sess_subagent")) &&
       w2Opens === 0 && w2Hijack.writesRef() === 0 &&
       fs.readFileSync(w2Hijack.coordPath, "utf8") === w2SubagentId + "\n" &&

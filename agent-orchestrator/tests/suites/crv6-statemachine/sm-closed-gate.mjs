@@ -78,7 +78,7 @@ export async function run(ctx) {
     const c1 = await s.call("board", { action: "claim", mission_id: "m-sm1d", worker: "w-sm1" });
     ck.ok(
       "SM-01b claim 依赖门报 依赖未就绪 并点名上游",
-      c1.isError === true && c1.text.includes("依赖未就绪") && c1.text.includes("m-sm1u"),
+      c1.isError === true && c1.text.includes("dependencies not ready") && c1.text.includes("m-sm1u"),
       c1.text.slice(0, 140),
     );
     // marker 对照：补 A3 qa 结构体的 pass 判据（isGreenClosed 第一腿）→ sweep 即解锁
@@ -96,7 +96,7 @@ export async function run(ctx) {
     const x1 = await s.call("board", { action: "upsert", mission: { id: "m-sm2a", status: "closed" } });
     ck.ok(
       "SM-02a drafted 直达 closed（无 confirm）→ ToolError 含 禁止直达",
-      x1.isError === true && x1.text.includes("禁止直达"),
+      x1.isError === true && x1.text.includes("forbidden directly"),
       x1.text.slice(0, 140),
     );
     const x2 = await s.call("board", {
@@ -105,7 +105,7 @@ export async function run(ctx) {
     });
     ck.ok(
       "SM-02b 携 close_confirmed 但 drafted 直达仍拒（未派发即归档无意义）",
-      x2.isError === true && x2.text.includes("禁止直达"),
+      x2.isError === true && x2.text.includes("forbidden directly"),
       x2.text.slice(0, 140),
     );
     await s.call("board", { action: "upsert", mission: { id: "m-sm2b", title: "待归档" } });

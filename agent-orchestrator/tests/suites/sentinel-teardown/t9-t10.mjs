@@ -27,7 +27,7 @@ export async function run(ctx) {
         "WS-8 空目录 → instances=[] ∧ summary 无哨兵（available:true 不报错）",
         !ls8.isError && sh8 && sh8.available === true && Array.isArray(sh8.instances) && sh8.instances.length === 0
           && sh8.summary && sh8.summary.state === "none" && sh8.summary.on_duty === false
-          && String(sh8.summary.text).includes("无哨兵"),
+          && String(sh8.summary.text).includes("no sentinel"),
         sh8,
       );
 
@@ -57,7 +57,7 @@ export async function run(ctx) {
         "WS-9b 混编 summary=在岗待命（可补员不因含 stale 误判）",
         Boolean(sh9 && sh9.summary) && sh9.summary.state === "standby" && sh9.summary.on_duty === true
           && sh9.summary.on_duty_n === 1 && sh9.summary.total === 2
-          && String(sh9.summary.text).includes("在岗待命"),
+          && String(sh9.summary.text).includes("standby on duty"),
         sh9 && sh9.summary,
       );
 
@@ -68,7 +68,7 @@ export async function run(ctx) {
       ck.ok(
         "WS-9c 无任何存活实例 → summary 槽位 stale（可补员）",
         Boolean(sum9c) && sum9c.state === "reinforce" && sum9c.on_duty === false && sum9c.on_duty_n === 0
-          && String(sum9c.text).includes("可补员"),
+          && String(sum9c.text).includes("replenishable"),
         sum9c,
       );
 
@@ -101,7 +101,7 @@ export async function run(ctx) {
       ck.ok(
         "WS-9e 全 fresh standby → summary 在岗待命（自动接管新派发）",
         Boolean(sum9e) && sum9e.state === "standby" && sum9e.on_duty === true && sum9e.on_duty_n === 2
-          && String(sum9e.text).includes("在岗待命") && String(sum9e.text).includes("自动接管"),
+          && String(sum9e.text).includes("standby on duty") && String(sum9e.text).includes("auto-takes-over"),
         sum9e,
       );
     } finally {
@@ -196,8 +196,8 @@ export async function run(ctx) {
     const rW1 = await Promise.race([bgW1.done, sleep(5000).then(() => null)]);
     ck.ok(
       "WAKE-01 watcher 信号新鲜→C1 类别静默零开枪；信号过期→既有兜底告警恢复（exit 1 + fired 落盘）",
-      silentW1 && exitedW1 && Boolean(rW1) && rW1.code === 1 && rW1.stdout.includes("唤醒失败告警") && firedNames10("m-wake1--unclaimed_terminal--").length >= 1,
-      { silentW1, ticksW1, shotW1, rW1: rW1 && { code: rW1.code, wake: rW1.stdout.includes("唤醒失败告警") }, fired: firedNames10("m-wake1--") },
+      silentW1 && exitedW1 && Boolean(rW1) && rW1.code === 1 && rW1.stdout.includes("wake failure alert") && firedNames10("m-wake1--unclaimed_terminal--").length >= 1,
+      { silentW1, ticksW1, shotW1, rW1: rW1 && { code: rW1.code, wake: rW1.stdout.includes("wake failure alert") }, fired: firedNames10("m-wake1--") },
     );
     try {
       fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生：不污染后续
@@ -225,9 +225,9 @@ export async function run(ctx) {
     const bgW2 = spawnSentinel({});
     const rW2 = await Promise.race([bgW2.done, sleep(10000).then(() => null)]);
     ck.ok(
-      "WAKE-02 watcher 信号缺失→哨兵兜底路径不回归（既有唤醒失败告警 exit 1 + fired 落盘保持）",
-      Boolean(rW2) && rW2.code === 1 && rW2.stdout.includes("唤醒失败告警") && firedNames10("m-wake2--unclaimed_terminal--").length >= 1,
-      rW2 && { code: rW2.code, wake: rW2.stdout.includes("唤醒失败告警"), fired: firedNames10("m-wake2--") },
+      "WAKE-02 watcher 信号缺失→哨兵兜底路径不回归（既有wake failure alert exit 1 + fired 落盘保持）",
+      Boolean(rW2) && rW2.code === 1 && rW2.stdout.includes("wake failure alert") && firedNames10("m-wake2--unclaimed_terminal--").length >= 1,
+      rW2 && { code: rW2.code, wake: rW2.stdout.includes("wake failure alert"), fired: firedNames10("m-wake2--") },
     );
 
     // WAKE-03：stall 死寂检测无条件保留——fresh D2 覆盖在位下 inflight_stall 照旧开枪
@@ -260,9 +260,9 @@ export async function run(ctx) {
     const bgW3 = spawnSentinel({});
     const rW3 = await Promise.race([bgW3.done, sleep(12000).then(() => null)]);
     ck.ok(
-      "WAKE-03 stall 检测职责保留：watcher 覆盖在位（fresh D2）下 inflight_stall 照旧开枪（exit 1 + 在飞任务龄期告警，无 crash）",
-      Boolean(rW3) && rW3.code === 1 && rW3.stdout.includes("在飞任务龄期告警") && !rW3.stdout.includes("疑似崩溃告警") && firedNames10("m-wake3--inflight_stall--").length >= 1,
-      rW3 && { code: rW3.code, stall: rW3.stdout.includes("在飞任务龄期告警"), crash: rW3.stdout.includes("疑似崩溃告警"), fired: firedNames10("m-wake3--") },
+      "WAKE-03 stall 检测职责保留：watcher 覆盖在位（fresh D2）下 inflight_stall 照旧开枪（exit 1 + in-flight age alert，无 crash）",
+      Boolean(rW3) && rW3.code === 1 && rW3.stdout.includes("in-flight age alert") && !rW3.stdout.includes("suspected crash alert") && firedNames10("m-wake3--inflight_stall--").length >= 1,
+      rW3 && { code: rW3.code, stall: rW3.stdout.includes("in-flight age alert"), crash: rW3.stdout.includes("suspected crash alert"), fired: firedNames10("m-wake3--") },
     );
     try {
       fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生

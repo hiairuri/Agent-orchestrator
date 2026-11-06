@@ -27,9 +27,9 @@ export async function scenLessonsHash() {
     await call({ action: "add", type: "pitfall", trigger: "基线种子", fix: "首调前置", lesson: "种子正文" });
     const r1 = await call({ action: "list", token: "tokA" });
     ck.ok(
-      "LH-01a 首调建基线：短答（mode:short∧message「无新增教训（基线 <ts>，在册 1 条）」）∧ 基线 state 落位 <存储根>/memory/lessons-read-state.json（v:1/readers[tokA]={base_hash,base_ts,seen_ids} 三键）",
+      "LH-01a 首调建基线：短答（mode:short∧message「no new lessons (baseline <ts>, 1 on record)」）∧ 基线 state 落位 <存储根>/memory/lessons-read-state.json（v:1/readers[tokA]={base_hash,base_ts,seen_ids} 三键）",
       r1.isError === false && r1.json && r1.json.mode === "short" &&
-        /^无新增教训（基线 \d{4}-\d{2}-\d{2}T.+，在册 1 条）$/.test(r1.json.message ?? "") &&
+        /^no new lessons \(baseline [^,]+, 1 on record\)$/.test(r1.json.message ?? "") &&
         fs.existsSync(STATE),
       { json: r1.json, exists: fs.existsSync(STATE) },
     );
@@ -67,12 +67,12 @@ export async function scenLessonsHash() {
     const r4 = await call({ action: "list", token: "tokA" });
     const inc = r4.json?.new_lessons ?? [];
     ck.ok(
-      "LH-03 有新增量：mode:increment∧new_lessons 恰 1∧全文域齐全（id/type/trigger/lesson/fix/scope=project）∧message「新增教训 1 条」",
+      "LH-03 有新增量：mode:increment∧new_lessons 恰 1∧全文域齐全（id/type/trigger/lesson/fix/scope=project）∧message「1 new lessons」",
       r4.json?.mode === "increment" && inc.length === 1 &&
         typeof inc[0].id === "string" && inc[0].type === "error-fix" &&
         inc[0].trigger === "增量腿触发" && inc[0].fix === "增量腿修正" &&
         inc[0].lesson === "增量腿正文" && inc[0].scope === "project" &&
-        r4.json?.message === "新增教训 1 条",
+        r4.json?.message === "1 new lessons",
       { message: r4.json?.message, got: inc[0] },
     );
 
@@ -96,7 +96,7 @@ export async function scenLessonsHash() {
     );
 
     // ---- LH-06：写闸负向双支（携 token 五写 action 一律拒；双支=add/stage 一支+promote/promote_batch/retire 一支）
-    const gateMsg = "携 token 只读";
+    const gateMsg = "with a token is read-only"; // v1.6.2 W5 重订：server-lessons 英文闸错误串
     const gA1 = await call({ action: "add", token: "tokA", type: "pitfall", trigger: "t", fix: "f" });
     const gA2 = await call({ action: "stage", token: "tokA", trigger: "t", fix: "f" });
     const gB1 = await call({ action: "promote", token: "tokA", id: "whatever" });

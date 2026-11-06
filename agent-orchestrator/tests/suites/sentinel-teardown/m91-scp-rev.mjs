@@ -101,8 +101,8 @@ export async function run(ctx) {
     ]);
     const rB91 = await Promise.race([bgB91.done, sleep(12000).then(() => null)]);
     ck.ok(
-      "SCP-b② 归因补齐自动恢复盯守：同 mission 转 owned 后照旧开枪（exit 1 唤醒失败告警 + fired 落盘）",
-      Boolean(rB91) && rB91.code === 1 && rB91.stdout.includes("唤醒失败告警") && firedNamesM("m-scp-b--unclaimed_terminal--").length >= 1,
+      "SCP-b② 归因补齐自动恢复盯守：同 mission 转 owned 后照旧开枪（exit 1 wake failure alert + fired 落盘）",
+      Boolean(rB91) && rB91.code === 1 && rB91.stdout.includes("wake failure alert") && firedNamesM("m-scp-b--unclaimed_terminal--").length >= 1,
       rB91 && { code: rB91.code, fired: firedNamesM("m-scp-b--") },
     );
 
@@ -125,7 +125,7 @@ export async function run(ctx) {
     const catchupN = (echoC.match(/"category":"catchup"/g) || []).length;
     ck.ok(
       "REV-③ 补告警：复活首扫对缺位期已到期升级集中补告警恰一次（echo catchup ×1 + 计数文案）且正常开枪路径照旧（exit 1 + fired）",
-      Boolean(rC91) && rC91.code === 1 && catchupN === 1 && echoC.includes("补告警：哨兵缺位期间到期升级 1 件") && firedNamesM("m-rev-c--unclaimed_terminal--").length >= 1,
+      Boolean(rC91) && rC91.code === 1 && catchupN === 1 && echoC.includes("catch-up alerts: 1 escalations fell due while the sentinel was absent") && firedNamesM("m-rev-c--unclaimed_terminal--").length >= 1,
       { code: rC91 && rC91.code, catchupN, echo: echoC.slice(0, 200) },
     );
 
@@ -172,7 +172,7 @@ export async function run(ctx) {
         "REV-⑤b 接线静态锁（v1.6 W3a 改写：谓词下行迁 server-board+消费换装 STATE 入包）：dispatchScopingAbsentCount 恰一定义在 server-board（板域谓词）∧ tool-pack buildStateSection 调用点在位（STATE 节 scoping 行，context_pack 物化）∧ 触发面② ensureSentinelFamily() 在 dispatch-core nested 分支在位（零迁）",
         (boardSrc.match(/function dispatchScopingAbsentCount\(/g) || []).length === 1 &&
           packSrc.includes("dispatchScopingAbsentCount(missionId)") &&
-          packSrc.includes("【哨兵 scoping】归因缺席在盯 mission：") &&
+          packSrc.includes("[Sentinel scoping] watched missions missing dispatch attribution") &&
           srvSrc.includes("ensureSentinelFamily();"),
         { boardDef: (boardSrc.match(/function dispatchScopingAbsentCount\(/g) || []).length, packWired: packSrc.includes("dispatchScopingAbsentCount(missionId)"), face2: srvSrc.includes("ensureSentinelFamily();") },
       );

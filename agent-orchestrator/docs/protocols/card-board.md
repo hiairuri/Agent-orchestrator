@@ -1,49 +1,48 @@
-# 契约卡⑤：board.json + p2p 记录（含 spool 事件信封引用的 board 字段面）
+# Contract card 5: board.json + the p2p record family (the board-field face referenced by spool event envelopes)
 
-- **归属模块**：mcp/server-board.mjs（board 全部读写经 server；`card-state-machine.md` 承载状态腿，两卡合起来才是完整写协议）
-- **脆度评级**（面广度×后果重度双轴）：**断言最厚=最不易坏；但语义最复杂**——crv6-statemachine+crv5-auth+crv2-pack 三套件锁面；失效后果限单 mission/单编排轮，复杂度集中在 merge 白名单/租约/p2p 鉴权三面
-- **历史事故回链**：v0.4.1 merge 白名单 schema 漂移、V6-26 板损坏曾整工具面砖死、V6-49 畸形事件文件致 close 假 unread 永挂、v1.1.1 P2P schema 缺口、l-20261019-d38f65/l-20261023-576af5（写法禁区，详见状态机卡 §4）
-- **锚点声明**：本卡行号系总装时点（v1.1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
+- **Home module**: mcp/server-board.mjs (all board reads/writes go through the server; `card-state-machine.md` carries the status legs - the two cards together form the complete write protocol)
+- **Brittleness rating** (surface-breadth x consequence-severity dual axis): **thickest assertions = least likely to break; but the most complex semantics** - locked by crv6-statemachine + crv5-auth + crv2-pack; failure consequences limited to a single mission/one orchestration round; complexity concentrates in the merge allowlist/lease/p2p auth trio
+- **Anchor declaration**: all line numbers in this card were measured at assembly time (v1.1.2 source); **line numbers are not referenced across versions** (l-20261022-6a14d6); function/constant-name dual anchors are the locating authority
 
 ---
 
-## 导读
+## Reading guide
 
-| 节 | 内容 | 速查锚 |
+| Section | Content | Quick anchor |
 |---|---|---|
-| §1 | board.json 文件面/布局/加载自愈链/原子保存 | `loadBoard`/`saveBoard`（mcp/server-board.mjs） |
-| §2 | mission 记录字段表+merge 白名单机制+读侧派生字段 | `MERGEABLE_KEYS`/`ONE_LEVEL`/`mergeMission`（mcp/server-board.mjs） |
-| §3 | 写方清单（唯一写方=server 进程，临界区=根锁） | `withRootLock`（mcp/server-core.mjs） |
-| §4 | spool 事件信封引用的 board 字段（与卡②接缝） | `card-spool.md` §2-§4 |
-| §5 | p2p/ 记录族（ask/answer 协议+token 鉴权） | `p2pTokenGate`/`appendP2pEcho`（mcp/server-p2p.mjs） |
-| §6 | 失效语义总表（缺文件/损坏/竞态/时钟漂移 × 读方行为） | 本表自足 |
-| §7/§8 | 断言锚+维护规则 | crv6-statemachine/crv5-auth/crv2-pack |
+| §1 | board.json file face, layout, the load self-healing chain, atomic save | `loadBoard`/`saveBoard` (mcp/server-board.mjs) |
+| §2 | mission record field table + merge allowlist mechanism + read-side derived fields | `MERGEABLE_KEYS`/`ONE_LEVEL`/`mergeMission` (mcp/server-board.mjs) |
+| §3 | Writer inventory (single writer = the server process, critical section = root lock) | `withRootLock` (mcp/server-core.mjs) |
+| §4 | board fields referenced by the spool event envelope (seam with the spool card) | `card-spool.md` §2-§4 |
+| §5 | the p2p/ record family (ask/answer protocol + token auth) | `p2pTokenGate`/`appendP2pEcho` (mcp/server-p2p.mjs) |
+| §6 | invalidity semantics master table (missing/corrupt/race/clock-drift x reader behavior) | self-contained |
+| §7/§8 | assertion anchors + maintenance rules | crv6-statemachine/crv5-auth/crv2-pack |
 
-状态腿（11 态迁移门+外部写者禁区）归 `card-state-machine.md`；存储根定位归 `card-root-txt.md`。
+Status legs (the 11-state transition gate + external-writer forbidden zones) live in `card-state-machine.md`; storage-root locating lives in `card-root-txt.md`.
 
-## 1. 文件面与布局
+## 1. File face and layout
 
-| 项 | 内容 | 锚点 |
+| Item | Content | Anchor |
 |---|---|---|
-| 路径 | `<root>/board.json`（root=存储根，root.txt 指针解析；root 协议归卡③） | boardFile（mcp/server-board.mjs） |
-| 顶层形状 | `{ version: number, updated_at: ISO, missions: [] }`；version=BOARD_VERSION(2) 仅标记，**读方永不校验** | emptyBoard/saveBoard（mcp/server-board.mjs）；BOARD_VERSION（mcp/server-core.mjs） |
-| 归档 | `archive/board-<ts>.json`（mailbox gc 把 closed mission 整体迁出：先归档后从活板移除；ts 冲突加 -<2hex> 后缀；归档文档=`{archived_at, missions}`） | mcp/tool-mailbox.mjs mailbox gc |
-| 根锁 | `.lock/owner.json` `{holder,pid,heartbeatAt}`；**全部 board 读改写临界区跑在 withRootLock 内**（v0.3.1 A1）——包括 git 子进程（沙箱链） | `withRootLock`（mcp/server-core.mjs） |
-| 反巨石 | 大 payload（original_prompt 之外的正文/manifest 全文）走文件+指针，**永不入 board.json**（anti-giant-board） | mcp/server-p2p.mjs anti-giant-board 注释 |
+| Path | `<root>/board.json` (root = storage root, resolved via the root.txt pointer; the root protocol belongs to the root-txt card) | boardFile (mcp/server-board.mjs) |
+| Top-level shape | `{ version: number, updated_at: ISO, missions: [] }`; version = BOARD_VERSION(2) is a marker only, **readers never validate it** | emptyBoard/saveBoard (mcp/server-board.mjs); BOARD_VERSION (mcp/server-core.mjs) |
+| Archive | `archive/board-<ts>.json` (mailbox gc moves closed missions out wholesale: archive first, then remove from the live board; a ts collision gets a -<2hex> suffix; archive document = `{archived_at, missions}`) | mcp/tool-mailbox.mjs mailbox gc |
+| Root lock | `.lock/owner.json` `{holder,pid,heartbeatAt}`; **all board read-modify-write critical sections run inside withRootLock** - including git subprocesses (the sandbox chain) | `withRootLock` (mcp/server-core.mjs) |
+| Anti-monolith | large payloads (bodies other than original_prompt / full manifests) go file+pointer, **never into board.json** (anti-giant-board) | mcp/server-p2p.mjs anti-giant-board comment |
 
-**加载自愈链**（`loadBoard`（mcp/server-board.mjs），失效语义核心）：
+**Load self-healing chain** (`loadBoard` (mcp/server-board.mjs), the core of invalidity semantics):
 
-1. 文件"缺失"先重查 3 次（50ms 间隔，A2——防 unlink-then-rename 窗口被误读为空板）；
-2. 仍缺 → 找 `board.json.recovered`（原子写最后手段的停车档）→ 恢复；
-3. 仍缺 → 空板；
-4. 读到 BOM 先剥（V6-27，"记事本另存"曾砖死全部 board 工具）；
-5. JSON.parse 失败或非对象 → **隔离不抛**：rename 为 `board.json.corrupt-<ts>`（证据保留永不删），重建空板，置 `boardDegradedFrom`，下一次 board list 响应带 `board_degraded_from:<ts>` 一次性告知主控（V6-26；竞争败方 rename 失败容忍——见 §6 竞态行）。
+1. A "missing" file is re-checked 3 times first (50ms interval - guards the unlink-then-rename window being misread as an empty board);
+2. still missing -> look for `board.json.recovered` (the parking spot of last-resort atomic writes) -> restore;
+3. still missing -> empty board;
+4. strip a BOM if read (V6-27 - a "Notepad save-as" once bricked all board tools);
+5. JSON.parse failure or non-object -> **quarantine without throwing**: rename to `board.json.corrupt-<ts>` (evidence kept forever), rebuild an empty board, set `boardDegradedFrom`, and the next board list response carries `board_degraded_from:<ts>` to inform the coordinator once (V6-26; the race loser tolerates rename failure - see the §6 race row).
 
-**保存**：saveBoard 原子写（atomicWriteFileSync），回写前统一刷 version/updated_at（mcp/server-board.mjs `saveBoard`）。
+**Save**: saveBoard atomic write (atomicWriteFileSync), refreshing version/updated_at uniformly before write-back (mcp/server-board.mjs `saveBoard`).
 
-## 2. mission 记录字段表
+## 2. The mission record field table
 
-newMission 默认形状（mcp/server-board.mjs）+ 懒迁移键。**schema 校验面=merge 白名单**（无 JSON schema 文件）：
+The newMission default shape (mcp/server-board.mjs) + lazy-migration keys. **The schema validation face = the merge whitelist** (no JSON schema file):
 
 | 字段 | 类型/默认 | 写方 | 语义与约束 |
 |---|---|---|---|
@@ -71,26 +70,26 @@ newMission 默认形状（mcp/server-board.mjs）+ 懒迁移键。**schema 校�
 
 **读侧派生字段**（`withComputed`（mcp/server-board.mjs），response-only 零新存储）：wake_failure（W1 status∈RESULT_STATUSES[done,failed,blocked,question] ∨ W2 dispatch.agent_id 真值 ∨ W3 未 ack ∨ W4 dispatch.mode!=="workflow"）、t1_head（最新 report 事件 summary 头 160 字符，T1_HEAD_CAP :158）、artifacts_n/output_files_n/has_question/scope 摘要。**board list 紧凑行**（`compactMissionRow`（mcp/server-board.mjs））白名单=id/title/status/question/unacked/unread/t1_head/artifacts_n/output_files_n/scope_paths/strict_scope（+scope_violations 有值透出）；内部态（claim/dispatch/pack/manifest/wake_failure/ack 对象/timeline/original_prompt）不上 list 面，board get（compact 默认/full 豁免）与 probe 承载明细。
 
-## 3. 写方清单（唯一写方=server 进程，临界区=根锁）
+## 3. Writer inventory (single writer = the server process; critical section = the root lock)
 
-board.json **没有外部进程写方**——hooks/bg-sentinel/watcher 全是读方或别的文件族的写方。server 内写点（状态腿详见状态机卡 §3）：
+board.json **has no external-process writers** - hooks/bg-sentinel/watcher are all readers or writers of other file families. Server-internal write points (status legs: the state-machine card §3):
 
-| 写点 | 写什么 | 锚点 |
+| Write point | What it writes | Anchor |
 |---|---|---|
-| board upsert（外部唯一状态门） | 白名单 patch+迁移守卫 | mcp/tool-board.mjs board upsert（剥只读/瞬态键） |
-| board ack | m.ack+timeline（不改状态） | mcp/tool-board.mjs board ack |
-| board claim | owner/claim/status=running/dispatch.token 换发 | mcp/tool-board.mjs board claim |
-| report | 状态腿+blocked 重写+artifacts/manifest/scope_violations+续租 | mcp/tool-report.mjs toolReport |
-| mailbox answer | blocked.blocked 回填+状态腿+auto-ack | mcp/tool-mailbox.mjs mailbox answer |
-| mailbox gc | closed 迁 archive | mcp/tool-mailbox.mjs mailbox gc |
-| context_pack / dispatch / sandbox:create | pack/scope_paths/dispatch 注册 | mcp/tool-pack.mjs（pack 登记）+mcp/tool-dispatch.mjs（dispatch 登记） |
-| sandbox_apply | 直改 closed+auto-ack+applied 标记 | mcp/tool-sandbox.mjs `toolSandboxApply`（主路/补偿分支） |
-| sweepGraph（每次板写同临界区） | unlock/cascade/租约回收/dangling | mcp/server-board.mjs `sweepGraph` |
-| p2p_ask/p2p_answer/gcP2pFiles | 双侧 timeline echo（**仅 append，status/updated_at 零触碰**） | mcp/server-p2p.mjs `appendP2pEcho` |
+| board upsert (the sole external status gate) | allowlist patch + transition guard | mcp/tool-board.mjs board upsert (strips read-only/transient keys) |
+| board ack | m.ack + timeline (no status change) | mcp/tool-board.mjs board ack |
+| board claim | owner/claim/status=running/dispatch.token rotation | mcp/tool-board.mjs board claim |
+| report | status legs + blocked rewrite + artifacts/manifest/scope_violations + lease renewal | mcp/tool-report.mjs toolReport |
+| mailbox answer | blocked.blocked backfill + status legs + auto-ack | mcp/tool-mailbox.mjs mailbox answer |
+| mailbox gc | closed -> archive | mcp/tool-mailbox.mjs mailbox gc |
+| context_pack / dispatch / sandbox:create | pack/scope_paths/dispatch registration | mcp/tool-pack.mjs (pack registration) + mcp/tool-dispatch.mjs (dispatch registration) |
+| sandbox_apply | direct write to closed + auto-ack + applied markers | mcp/tool-sandbox.mjs `toolSandboxApply` (main path/compensation branch) |
+| sweepGraph (same critical section as every board write) | unlock/cascade/lease reclaim/dangling | mcp/server-board.mjs `sweepGraph` |
+| p2p_ask/p2p_answer/gcP2pFiles | two-sided timeline echo (**append only; status/updated_at zero-touch**) | mcp/server-p2p.mjs `appendP2pEcho` |
 
-## 4. spool 事件信封引用的 board 字段面（M6-1 卡②素材）
+## 4. The board field face referenced by the spool event envelope (card-2 material, M6-1)
 
-> 卡②（spool）写事件信封全貌与目录协议（落箱面权威，机制细则=卡② §2/§4）；本节只钉**信封生成与消费所读写的 board 字段**——两卡的接缝。report 落箱与改板同临界区（v0.3.1 A1，mcp/tool-report.mjs toolReport）。
+> Card 2 (spool) documents the event envelope in full and the directory protocol (the boxing-face authority; mechanism details = card 2 §2/§4); this section only pins **the board fields the envelope generation and consumption read and write** - the seam between the two cards. report boxes the event and mutates the board inside the same critical section (v0.3.1 A1, mcp/tool-report.mjs toolReport).
 
 | 信封行为 | board 字段 | 语义 | 锚点 |
 |---|---|---|---|
@@ -107,22 +106,22 @@ board.json **没有外部进程写方**——hooks/bg-sentinel/watcher 全是读
 
 反向引用（board 读 spool）：compactMissionRow 的 `unread` 计数=countUnreadSafe（每 mission 一次目录 IO，best-effort，畸形 id 记 0 不炸 list，QA P2-b）；close 类路径的 unread 告警消费同一计数（V6-49：畸形事件文件 rename `<file>.bad` 隔离防假 unread 永挂，mcp/server-stores.mjs `readEventFile`）。
 
-## 5. p2p/ 记录族
+## 5. The p2p/ record family
 
-| 项 | 内容 | 锚点 |
+| Item | Content | Anchor |
 |---|---|---|
-| 布局 | `p2p/p2p-<id>.json`；id=`<15位零填充epochMs>-<4hex>`； | mcp/server-p2p.mjs p2p 记录族布局 |
-| 记录 schema | `{v:1, id, from:{mission_id,worker}, to:{mission_id,worker}, question, status:"open", created_at, answered_at:null, answer:null, expired_at:null, echo:{ask,answer:null}}`；question/answer ≤ DETAILS_MAX_CHARS(4000) 存储侧截断 | mcp/server-p2p.mjs 记录 schema |
-| 状态机 | open → answered（p2p_answer）/ expired（TTL sweep，默认 30min，--p2p-ttl-min 可调；畸形/未来 created_at 读作未到期=保守方向） | mcp/server-p2p.mjs 状态机 |
-| 写方 | p2p_ask / p2p_answer / TTL sweep（saveP2pRecord 原子写）；**asker 前置态=blocked/question**（P2P_ASK_PRECONDITION_STATUSES，主等待通道 report(question) 恒可用） | mcp/server-p2p.mjs `saveP2pRecord` |
-| 鉴权（p2pTokenGate） | expectedToken=mission.dispatch.token：有 token 则必携且匹配（缺/错=硬 ToolError，**无 report 的 archive-anyway 回退——p2p 无板写可扣**）；--strict-tokens/成对鉴权语义同 §4 token 门向；**调用携各自 mission 自有 token**（asker 用 from 侧，answerer 用 to 侧） | mcp/server-p2p.mjs `p2pTokenGate` |
-| 目标校验（ask） | target 存在、非终态（P2P_TERMINAL_STATUSES=[done,failed,skipped,closed]）、to_worker=target 当前持有者（owner∥claim.worker 在场时强制）——不合法**不建档**（P2P 是优化通道，降级=report(question) 恒可用） | mcp/tool-board.mjs p2p_ask 目标校验 |
-| 边界②（answer 零触碰） | p2p_answer 只写 p2p 记录+双侧 echo；提问方 mission 的 status/字段/租约**零触碰** | mcp/tool-board.mjs p2p_answer 零触碰 |
-| 双侧强制 echo（边界③） | appendP2pEcho 只 append timeline，**不改 status/updated_at**（echo 是审计事实非状态变更；liveness 靠 timeline `at`，哨兵 lastActivityMs 计任意 timeline 事件=echo 自动计入，防 updated_at 语义污染） | mcp/server-p2p.mjs `appendP2pEcho` |
-| 消费语义 | **advisory 数据**：读失败/损坏当 absent，无 quarantine（loadP2pRecord 双 catch 返 null）；提问方自行消化答案后经自己的 report 入账——mission 状态演进仍只经 report | mcp/server-p2p.mjs `loadP2pRecord` |
-| 懒扫面 | gcP2pFiles 骑 startup+p2p_ask/p2p_answer+board list；countOpenP2p 骑 board list（open_p2p 计数） | mcp/server-p2p.mjs `gcP2pFiles`/`countOpenP2p`（startup 骑挂=mcp/server-boot.mjs） |
+| Layout | `p2p/p2p-<id>.json`; id=`<15-digit zero-padded epochMs>-<4hex>` | mcp/server-p2p.mjs p2p record family layout |
+| Record schema | `{v:1, id, from:{mission_id,worker}, to:{mission_id,worker}, question, status:"open", created_at, answered_at:null, answer:null, expired_at:null, echo:{ask,answer:null}}`; question/answer <= DETAILS_MAX_CHARS(4000) storage-side truncation | mcp/server-p2p.mjs record schema |
+| State machine | open -> answered (p2p_answer) / expired (TTL sweep, default 30min, --p2p-ttl-min adjustable; malformed/future created_at reads as not-yet-expired = the conservative direction) | mcp/server-p2p.mjs state machine |
+| Writers | p2p_ask / p2p_answer / TTL sweep (saveP2pRecord atomic write); **asker precondition state = blocked/question** (P2P_ASK_PRECONDITION_STATUSES; the primary waiting channel report(question) is always available) | mcp/server-p2p.mjs `saveP2pRecord` |
+| Auth (p2pTokenGate) | expectedToken = mission.dispatch.token: if a token exists it must be carried and match (missing/wrong = hard ToolError; **no report-style archive-anyway fallback - p2p has no board write to withhold**); --strict-tokens/paired-auth semantics follow the §4 token gate direction; **each call carries its own mission's token** (asker uses the from side, answerer the to side) | mcp/server-p2p.mjs `p2pTokenGate` |
+| Target validation (ask) | target exists, non-terminal (P2P_TERMINAL_STATUSES=[done,failed,skipped,closed]), to_worker = the target's current holder (enforced when owner or claim.worker is present) - invalid targets **create no record** (P2P is an optimization channel; degradation = report(question), always available) | mcp/tool-board.mjs p2p_ask target validation |
+| Boundary (2) (answer zero-touch) | p2p_answer writes only the p2p record + two-sided echo; the asker mission's status/fields/lease are **zero-touch** | mcp/tool-board.mjs p2p_answer zero-touch |
+| Mandatory two-sided echo (boundary (3)) | appendP2pEcho appends timeline only, **never touches status/updated_at** (echo is an audit fact, not a state change; liveness rides the timeline `at` - the sentinel lastActivityMs counts any timeline event, so echo is automatically counted, protecting updated_at semantics from pollution) | mcp/server-p2p.mjs `appendP2pEcho` |
+| Consumption semantics | **advisory data**: read failure/corruption counts as absent, no quarantine (loadP2pRecord double-catch returns null); the asker digests the answer itself and books it via its own report - mission status evolution still goes only through report | mcp/server-p2p.mjs `loadP2pRecord` |
+| Lazy scan face | gcP2pFiles rides startup + p2p_ask/p2p_answer + board list; countOpenP2p rides board list (the open_p2p count) | mcp/server-p2p.mjs `gcP2pFiles`/`countOpenP2p` (startup piggyback = mcp/server-boot.mjs) |
 
-## 6. 失效语义（缺文件/损坏/半写/竞态/时钟漂移 × 读方行为）
+## 6. Failure semantics (missing file / corruption / partial write / race / clock drift × reader behavior)
 
 | 情形 | 行为 | 分类 |
 |---|---|---|
@@ -136,15 +135,15 @@ board.json **没有外部进程写方**——hooks/bg-sentinel/watcher 全是读
 | 时钟漂移 | B7：负 elapsed 钳 0（wake_failure 分钟数 max(0,·)）；租约畸形走龄期兜底非裸时钟 | 钳制 |
 | board 上的畸形 mission（无 id 等） | 遍历侧 `m &&` 守卫跳过（findIndex/find/filter 全部 falsy-safe） | 静默跳过 |
 
-## 7. 断言锚
+## 7. Assertion anchors
 
-- **crv6-statemachine**：SM-01..08（closed 双门/白名单/reopen/清 ack/租约/answer 联动/closed 拒改板）+ A-v070-P2P-01..06（token 边界/零触碰/回放/失效/前置态/活性）+ WB-SRV-a..g（完成即唤队列）+ FA-1..5（dispatch 播种）。
-- **crv5-auth**：AUTH-01..08——fail-closed token 门（含"三探针零事件落箱+板面零改动"）、成对鉴权、claim 必换发。
-- **crv2-pack**：组包对拍基线（pack 字段面）；**crv1-scope**：scope_paths 注册/审计；**root-contract**：root 定位链（本卡的路径前置）。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（MERGEABLE_KEYS/ONE_LEVEL/p2pTokenGate 等）mcp/server-board.mjs grep 可见+卡存在非空。
+- **crv6-statemachine**: SM-01..08 (the closed dual gates / allowlist / reopen / ack clearing / lease / answer interplay / closed rejects board-mutating reports) + A-v070-P2P-01..06 (token boundaries / zero-touch / replay / invalidation / precondition states / liveness) + WB-SRV-a..g (the done-and-wake queue) + FA-1..5 (dispatch seeding).
+- **crv5-auth**: AUTH-01..08 - the fail-closed token gate (including "three probes, zero events boxed, zero board changes"), paired authentication, claim must rotate the token.
+- **crv2-pack**: the pack-materialization comparison baseline (the pack field face); **crv1-scope**: scope_paths registration/audit; **root-contract**: the root locating chain (this card's path prerequisite).
+- **LM-05** (lint-manifest, M1-3 registration): this card's constant/function names (MERGEABLE_KEYS/ONE_LEVEL/p2pTokenGate etc.) grep-visible in mcp/server-board.mjs + the card exists and is non-empty.
 
-## 8. 维护规则
+## 8. Maintenance rules
 
-- 本卡唯一写方=协议卡批 mission（W1-M1-2 首写）+ W6-M6-1（卡②引用本节消费素材；若信封字段演进，卡②与 §4 表同波同步）+ 后续 board 字段演进波次随改。
-- 新增 mission 字段：先入 MERGEABLE_KEYS（或 ONE_LEVEL/scope 整替组）并过 §2 表补行；**从未**把未知键静默入库当作兼容手段（v0.4.1 QA 前车）。
-- p2p 记录 schema 演进：`v` 字段递增+loadP2pRecord 容错策略复核（advisory 语义不许升级成 fail-loud，除非同时给主控加显式信号面）。
+- This card's only writers = the protocol-card batch mission (first written in W1-M1-2) + W6-M6-1 (the spool card consumed this section's material; if envelope fields evolve, the spool card and the §4 table sync in the same wave) + subsequent board-field evolution waves.
+- Adding a mission field: enter MERGEABLE_KEYS first (or the ONE_LEVEL/scope whole-replacement group) and add a §2 table row; **never** silently admitting unknown keys as a compatibility measure.
+- p2p record schema evolution: increment `v` + re-audit the loadP2pRecord fault-tolerance policy (advisory semantics must not be upgraded to fail-loud unless the coordinator simultaneously gains an explicit signal face).

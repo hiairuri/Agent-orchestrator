@@ -98,7 +98,7 @@ function toolBoard(args) {
           const cycle = detectCycle(loadBoard(), targetId, patch.blockedBy.map(String));
           if (cycle) {
             throw new ToolError(
-              `blockedBy 构成环：<${[targetId, ...cycle].join(" → ")}>；依赖必须是 DAG（board 未改动）`,
+              `blockedBy forms a cycle: <${[targetId, ...cycle].join(" -> ")}>; dependencies must be a DAG (board unchanged)`,
             );
           }
         }
@@ -140,7 +140,7 @@ function toolBoard(args) {
     const ignoredKeys = ignoredPatchKeys(patch);
     if (ignoredKeys.length) {
       out.ignored_keys = ignoredKeys;
-      out.note = `未知字段未入库（schema 白名单）：${ignoredKeys.join(", ")}`;
+      out.note = `unknown fields not stored (schema allowlist): ${ignoredKeys.join(", ")}`;
     }
     // v0.3.1 (C6): closing over an unread mailbox / pending question does not
     // block, but the coordinator must see it.
@@ -151,9 +151,9 @@ function toolBoard(args) {
       );
       if (unreadLeft > 0 || pendingQ) {
         const parts = [];
-        if (unreadLeft > 0) parts.push(`仍有 ${unreadLeft} 条未读事件`);
-        if (pendingQ) parts.push("存在未答问题");
-        out.warn = `关闭时${parts.join("且")}——已按关闭处理（不阻止）；如需处置先 mailbox(read, mission_id="${mission.id}")`;
+        if (unreadLeft > 0) parts.push(`still ${unreadLeft} unread event(s)`);
+        if (pendingQ) parts.push("an unanswered question is present");
+        out.warn = `on close: ${parts.join(" and ")} - closed anyway (non-blocking); to handle it first mailbox(read, mission_id="${mission.id}")`;
       }
     }
     return out;
@@ -276,10 +276,10 @@ function toolBoard(args) {
       const m = findMission(board, id);
       if (!m) throw new ToolError(`mission not found: ${id}`);
       if (m.owner) {
-        throw new ToolError(`已被领取（owner=${m.owner}）：不可重复领取`);
+        throw new ToolError(`already claimed (owner=${m.owner}): cannot claim twice`);
       }
       if (m.status !== "drafted" && m.status !== "ready") {
-        throw new ToolError(`状态不可领取（status=${m.status}）：仅 drafted/ready 可 claim`);
+        throw new ToolError(`status not claimable (status=${m.status}): only drafted/ready can claim`);
       }
       const deps = Array.isArray(m.blockedBy) ? m.blockedBy : [];
       const pending = deps.filter((d) => {
@@ -287,7 +287,7 @@ function toolBoard(args) {
         return !dm || !depSatisfied(dm); // v0.6 (V6-11): closed 上游须有绿档凭证
       });
       if (pending.length) {
-        throw new ToolError(`依赖未就绪：blockedBy 未绿项 ${pending.join(", ")}`);
+        throw new ToolError(`dependencies not ready: blockedBy not-yet-green ${pending.join(", ")}`);
       }
       const at = nowIso();
       // v0.6 (V6-14, AUTH-04/05): claim ALWAYS re-mints — the reuse branch is
@@ -307,7 +307,7 @@ function toolBoard(args) {
       m.timeline.push({
         at,
         event: "claim",
-        summary: `${worker} 领取（租约至 ${leaseUntil}；token 已换发，旧 token 作废）`,
+        summary: `${worker} claimed (lease until ${leaseUntil}; token re-minted, the old token is void)`,
       });
       saveBoard(board);
       return {
@@ -319,8 +319,8 @@ function toolBoard(args) {
         lease_until: leaseUntil,
         task: { title: m.title || "" },
         next_hint:
-          "先 Read 任务包按 TASK/RULES 执行；期间每完成一步 report（自动续租）；完成后 report(kind=done)。" +
-          "token 以本响应为准（若此前领过本任务，旧 token 已作废）。",
+          "Read the task pack first and execute per its TASK/RULES; report after each completed step (auto-renews the lease); report(kind=done) when finished." +
+          "the token in this response is authoritative (if you claimed this mission before, the old token is void).",
       };
     });
   }
@@ -354,29 +354,29 @@ function toolBoard(args) {
       p2pTokenGate(asker, askerId, worker, token);
       if (!P2P_ASK_PRECONDITION_STATUSES.includes(asker.status)) {
         throw new ToolError(
-          `p2p_ask 前置态不满足：${askerId} status=${asker.status}（仅 blocked/question 可问；` +
-            `主等待通道 report(blocked|question) 恒可用）`,
+          `p2p_ask precondition not met: ${askerId} status=${asker.status} (only blocked/question may ask; ` +
+            `the primary waiting channel report(blocked|question) is always available)`,
         );
       }
       const target = findMission(board, toMissionId);
       if (!target) {
         throw new ToolError(
-          `p2p_ask target mission 不存在：${toMissionId}（不建档；降级 = report(question)）`,
+          `p2p_ask target mission does not exist: ${toMissionId} (no record created; fallback = report(question))`,
         );
       }
       if (target.id === asker.id) {
-        throw new ToolError("p2p_ask 不能自问自答（from 与 to 为同一 mission）");
+        throw new ToolError("p2p_ask cannot ask and answer itself (from and to are the same mission)");
       }
       if (P2P_TERMINAL_STATUSES.includes(target.status)) {
         throw new ToolError(
-          `p2p_ask target mission 已终态（${target.status}）：${toMissionId}（不建档；降级 = report(question)）`,
+          `p2p_ask target mission is terminal (${target.status}): ${toMissionId} (no record created; fallback = report(question))`,
         );
       }
       const holder = target.owner || (target.claim && target.claim.worker) || null;
       if (holder && holder !== toWorker) {
         throw new ToolError(
-          `p2p_ask target worker 非该 mission 当前持有者：${toMissionId} holder=${holder}，` +
-            `to_worker=${toWorker}（不建档，否则无人能合法应答）`,
+          `p2p_ask target worker is not the mission's current holder: ${toMissionId} holder=${holder}, ` +
+            `to_worker=${toWorker} (no record created - otherwise nobody could answer legitimately)`,
         );
       }
       const at = nowIso();
@@ -412,9 +412,9 @@ function toolBoard(args) {
         to: { mission_id: toMissionId, worker: toWorker },
         question_truncated: questionTruncated,
         hint:
-          "等待对方 p2p_answer 直答（server 双向强制 echo，board get 回放双方 timeline）。" +
-          "收到答案后自行消化并经自己的 report 入账——mission 状态演进仍只经 report，租约不因 p2p 续期。",
-        next_hint: `对方应答：board(action="p2p_answer", mission_id="${toMissionId}", worker="${toWorker}", token=<对方 token>, p2p_id="${p2pId}", answer=…)`,
+          "Wait for the counterpart's direct p2p_answer (server-forced two-way echo; board get replays both timelines)." +
+          "Absorb the answer yourself and record outcomes via your own report - mission state evolution still goes only through report; the lease is not renewed by p2p.",
+        next_hint: `counterpart answers: board(action="p2p_answer", mission_id="${toMissionId}", worker="${toWorker}", token=<their token>, p2p_id="${p2pId}", answer=...)`,
       };
     });
   }
@@ -442,17 +442,17 @@ function toolBoard(args) {
       // to a caller that cannot authenticate.
       p2pTokenGate(answerer, answererId, worker, token);
       const rec = loadP2pRecord(p2pId);
-      if (!rec) throw new ToolError(`p2p 记录不存在：${p2pId}`);
+      if (!rec) throw new ToolError(`p2p record not found: ${p2pId}`);
       if (rec.status !== "open") {
-        throw new ToolError(`p2p 记录非 open（status=${rec.status}）：${p2pId}`);
+        throw new ToolError(`p2p record not open (status=${rec.status}): ${p2pId}`);
       }
       if (
         String(rec.to && rec.to.worker) !== worker ||
         String(rec.to && rec.to.mission_id) !== answererId
       ) {
         throw new ToolError(
-          `p2p_answer 仅限记录 to 侧（${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}）：` +
-            `调用方 ${answererId}/${worker} 非指定应答者`,
+          `p2p_answer is restricted to the record's to side (${rec.to && rec.to.mission_id}/${rec.to && rec.to.worker}): ` +
+            `caller ${answererId}/${worker} is not the designated answerer`,
         );
       }
       const at = nowIso();
@@ -484,8 +484,8 @@ function toolBoard(args) {
         answered_at: at,
         answer_truncated: answerTruncated,
         hint:
-          "双向 echo 已落（board get 回放双方 timeline）；提问方自行消化后经自己的 report 入账，" +
-          "其 mission 状态/字段未被本调用触碰（p2p 不续租）。",
+          "Two-way echo recorded (board get replays both timelines); the asker absorbs it and records via its own report," +
+          "its mission status/fields untouched by this call (p2p does not renew the lease).",
       };
     });
   }

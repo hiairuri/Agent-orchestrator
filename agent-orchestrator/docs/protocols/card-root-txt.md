@@ -1,30 +1,28 @@
-# 契约卡③ root.txt + root-id（存储根指针与身份）
+# Contract card 3: root.txt + root-id (the storage-root pointer and identity)
 
-> **行号声明（卡头）**：本文全部行号系 **2026-10-28 总装时点实测**（grep + 实码逐行核对，worker v12-m11，plugin v1.1.2：mcp/server.mjs 10657 行 / hooks 五脚本合计 ~3748 行）。行号**不作跨版引用**；跨版定位以函数名/文件名锚为准（l-20261022-6a14d6）。
+> **Line-number declaration (card head)**: all line numbers in this document were measured at assembly time (grep + line-by-line source verification). Line numbers are **not referenced across versions**; cross-version locating relies on function/file-name anchors (l-20261022-6a14d6).
 >
-> - 归属模块：mcp/server-core.mjs（发布+自愈，root.txt bridge 区；`ensureRootId`/`rootIdOf`/`isTempDirPath`/`isTempRoot` 四锚）＋ locateRoot 五处 verbatim twin（hooks/{bg-gate,journal,session-start,stop-check}.mjs ＋ hooks/bg-sentinel/core.mjs——bg-sentinel 系 v1.3 族拆分后 locateRoot 驻留模块；行为由 tests/suites/root-contract.mjs 矩阵锁定，零代码共享）
-> - 脆度双轴评级：**后果重度=第一梯队（五协议中最重，与 sentinel/ 并列）**——唯一失效后果**全局性**的协议：残留失真=hooks 全体失明／bg-gate 误报／哨兵自毁（遗留清单第 7 条在案；他协议失效后果均限单 mission/单子代理）；**面广度=中**（读方固定为 5 个 hook 脚本＋root-id 六处校验点，无演进面）
-> - 历史事故回链：AGENTS.md 遗留清单第 7 条（存储根迁移后 root.txt 指向失效旧根=hooks 全体失明/bg-gate 误报/哨兵自毁，本卡失效语义节的直接标的）；V6-30（≤v0.4.0 旧版无 root-id 劫持，v1 弱校验天然中和）；V6-12（v0.6 发布侧 v2 指针）；W20/W22（祖先回退）；W24（五处 twin 一致性锁）
-> - 2026-11-02 W4 E1 勘误：v1.1.2 时点旧单体行号死锚已按 split-anchor-map §3 终态映射改模块级锚（server 侧=mcp/server-core.mjs 四锚；bg 域 locateRoot/rootIdOf=hooks/bg-sentinel/core.mjs）；未拆分单文件行引用逐条核现址更新。本勘误只涉锚面与表述面；W3 行为腿的卡面语义同步未在 E1 域内——遗留观察见 tests/assertions/v1.4.0.md W4 节。
+> - Home modules: mcp/server-core.mjs (publish + self-heal, the root.txt bridge section; the four anchors `ensureRootId`/`rootIdOf`/`isTempDirPath`/`isTempRoot`) + the five verbatim locateRoot twins (hooks/{bg-gate,journal,session-start,stop-check}.mjs + hooks/bg-sentinel/core.mjs - locateRoot resides in the bg-sentinel module after the family split; behavior is matrix-locked by tests/suites/root-contract.mjs, zero code sharing)
+> - Brittleness dual-axis rating: **consequence severity = top tier (the heaviest of the five protocols, tied with sentinel/)** - the only protocol whose failure consequences are **global**: residual distortion = all hooks go blind / bg-gate false alarms / sentinel self-destruction (legacy list item 7; all other protocols' failure consequences stay within a single mission/subagent); **surface breadth = medium** (readers fixed at 5 hook scripts + six root-id validation points, no evolution face)
 
-**失效语义三分类记法**：`fail-loud`（stderr 告警一行，行为可见）／`自愈`（自动恢复到正确态）／`静默降级`（按安全缺省继续）。
+**Invalidity semantics, three classes of notation**: `fail-loud` (one stderr warning line, behavior visible) / `self-healing` (recovers automatically to the correct state) / `silent degradation` (continues on the safe default).
 
 ---
 
-## 0. 两个文件、一个契约
+## 0. Two files, one contract
 
 | 文件 | 位置 | 格式 |
 |---|---|---|
 | `root-id` | 每个存储根内（含自定义根与默认根） | 单行 16 hex＋`\n`；server `ensureRootId` 生成（mcp/server-core.mjs，`hex(8)`）；**写一次永不轮换**（persistent and stable，契约注释） |
 | `root.txt` | **默认根** `<project>/.zcode/orchestrator/root.txt`（指针永落默认根，不随自定义根走） | **v2 双行**：L1=目标存储根路径，L2=目标 root-id（16 hex）；**v1 单行**（v0.4.1-v0.5.1 旧格式，兼容读） |
 
-契约权威注释块：mcp/server-core.mjs root.txt bridge 区（publish side / self-heal / hooks 同契约三段）。server 自身**从不读指针定位自己**——它经 --root/默认规则已知自己的根。
+The contract-authority comment block: the mcp/server-core.mjs root.txt bridge section (three sections: publish side / self-heal / hooks sharing the same contract). The server itself **never reads the pointer to locate itself** - it already knows its root via --root/the default rule.
 
 ---
 
-## 四栏
+## The four columns
 
-### 写方
+### Writers
 
 | 写点 | 语义（实测锚） |
 |---|---|
@@ -34,7 +32,7 @@
 | **temp 测试根豁免** | isTempRoot（mcp/server-core.mjs）→ 既不发布指针也不进入自愈分支——套件/探针零真实根污染 |
 | **hooks** | **零写方**——hooks 不删指针（session-start.mjs 契约头注释现址 :186「删除职责全归 server 自愈」，2026-11-02 实测；bg-gate :75／journal :33／stop-check :708 同文在册）、不改写指针；watcher 也从不触碰（watcher/watcher.mjs :12 明示从不读） |
 
-### 读方
+### Readers
 
 | 读方 | 语义（实测锚） |
 |---|---|
@@ -43,7 +41,7 @@
 | **watcher 不读**（DP2a 勘误注记） | watcher/watcher.mjs :12 注释明示「**从不读 root.txt 指针**」——定根走 --root 优先/默认 `<cwd>/.zcode/orchestrator`。DP2a 卡③「7 消费方」的 grep 命中实为该否定注释；本卡以实测 **5 读方** 为准 |
 | **server 不读指针自定位** | 契约注释明示（mcp/server-core.mjs root.txt bridge 区）；server 的 root 来自 --root 参数或默认规则，指针只服务 hook 脚本面契约 |
 
-### 字段
+### Fields
 
 | 字段 | 类型/值域 | 语义 |
 |---|---|---|
@@ -54,7 +52,7 @@
 
 无 schema 校验=裸 txt；hooks 侧对 L1/L2 的唯一结构假设=按 `\r?\n` split＋trim＋滤空。
 
-### 失效语义（hooks 消费侧六分支 + server 自愈侧六分支）
+### Failure semantics (hooks consumer-side six branches + server self-heal-side six branches)
 
 **hooks 侧（locateRoot，任一失败 → 回退默认根＋stderr 告警一行 `fail-loud`，hooks 永不删指针）**：
 
@@ -73,8 +71,8 @@
 
 ---
 
-## 断言锚
+## Assertion anchors
 
-- **root-contract.mjs**（tests/suites/root-contract.mjs，v0.6 B1 行为矩阵）——五协议中断言最厚的一张：六处实现（五脚本 verbatim twin＋stop-check 两路径）× 分代门（temp 拒绝/强校验/弱校验/悬空/空指针）× W22 祖先回退矩阵 × W24 五处 twin 一致性锁；server 发布/自愈侧（V6-12 归簇 A）行为探测后启用。**文档卡只需对拍不需补断言（非裸区）**。
-- root-id 生成/校验：root-contract fixture 面覆盖（V6-56 槽位 root 字段联动断言）。
-- 裸区注记：**无**（本卡为五协议中断言覆盖最完整的协议面；残余=v1→v2 自动升级「旧 server 下次启动升级」路径依赖混跑，无独立断言，注记接受）。
+- **root-contract.mjs** (tests/suites/root-contract.mjs, the behavioral matrix) - the thickest assertion face of the five protocols: six implementations (five verbatim twin scripts + the two stop-check paths) x generation gates (temp rejection / strong validation / weak validation / dangling / empty pointer) x the ancestor-fallback matrix x the five-twin consistency lock; the server publish/self-heal side activates after behavioral probing. **This document card needs comparison only, no added assertions (not a bare zone)**.
+- root-id generation/validation: covered by the root-contract fixture face (the V6-56 slot root field linkage assertion).
+- Bare-zone note: **none** (this card is the most completely assertion-covered protocol face of the five; the residue = the v1->v2 automatic upgrade path "the old server upgrades on its next start" depends on mixed running and has no standalone assertion - noted and accepted).

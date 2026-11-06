@@ -45,28 +45,28 @@ function probeEncodeToken(obj) {
  *  replayed across actions; shape failures are ToolErrors, never crashes. */
 function probeDecodeToken(tok, action) {
   if (typeof tok !== "string" || !tok.trim()) {
-    throw new ToolError("page_token 无效：需为上次 probe 响应原样返回的令牌");
+    throw new ToolError("invalid page_token: must be the token exactly as returned by the previous probe response");
   }
   let obj;
   try {
     obj = JSON.parse(Buffer.from(tok.trim(), "base64url").toString("utf8"));
   } catch {
-    throw new ToolError("page_token 无效：解码失败（令牌已损坏）");
+    throw new ToolError("invalid page_token: decode failed (token corrupted)");
   }
   if (!obj || typeof obj !== "object" || obj.v !== 1 || obj.a !== action) {
     throw new ToolError(
-      `page_token 无效或与 action 不匹配（期望 ${action} 的令牌）`,
+      `invalid page_token or mismatched action (expected a ${action} token)`,
     );
   }
   const o = Math.floor(Number(obj.o));
-  if (!Number.isFinite(o) || o < 0) throw new ToolError("page_token 无效：偏移越界");
+  if (!Number.isFinite(o) || o < 0) throw new ToolError("invalid page_token: offset out of range");
   const out = { o };
   if (action !== "db.query") {
     const ln = Math.floor(Number(obj.ln));
-    if (!Number.isFinite(ln) || ln < 1) throw new ToolError("page_token 无效：行号越界");
+    if (!Number.isFinite(ln) || ln < 1) throw new ToolError("invalid page_token: line number out of range");
     out.ln = ln;
     out.sz = Math.floor(Number(obj.sz));
-    if (!Number.isFinite(out.sz) || out.sz < 0) throw new ToolError("page_token 无效：尺寸越界");
+    if (!Number.isFinite(out.sz) || out.sz < 0) throw new ToolError("invalid page_token: size out of range");
   }
   return out;
 }
@@ -81,7 +81,7 @@ function probeTextToken(action, o, ln, size) {
 /** Resolve a probe target (absolute, or relative to the project dir). */
 function probeResolvePath(raw) {
   const s = String(raw ?? "").trim();
-  if (!s) throw new ToolError("probe 需要 path（绝对路径，或相对项目根的路径）");
+  if (!s) throw new ToolError("probe requires path (an absolute path, or relative to the project root)");
   return path.resolve(projectDir, s);
 }
 
@@ -90,9 +90,9 @@ function probeStatFile(p) {
   try {
     st = fs.statSync(p);
   } catch {
-    throw new ToolError(`probe 目标不可读：${displayPath(p)}`);
+    throw new ToolError(`probe target unreadable: ${displayPath(p)}`);
   }
-  if (!st.isFile()) throw new ToolError(`probe 目标不是常规文件：${displayPath(p)}`);
+  if (!st.isFile()) throw new ToolError(`probe target is not a regular file: ${displayPath(p)}`);
   return st;
 }
 
@@ -105,7 +105,7 @@ function probeLooksBinary(buf) {
 }
 
 function probeBinaryHint(p) {
-  return `${displayPath(p)} 疑似二进制（含 NUL 字节）——二进制探针用 action=bin.inspect（类型/大小/哈希/首 256 字节）`;
+  return `${displayPath(p)} looks binary (contains NUL bytes) - use action=bin.inspect for binary probing (type/size/hash/first 256 bytes)`;
 }
 
 /** Decode one line for display: strip CR (CRLF files), BOM on physical line 1,
@@ -156,25 +156,25 @@ function probeEnvelope(action, p, payload, { rowsTruncated, bytes, hash, pageTok
  */
 function probeValidateSql(raw) {
   const sql = String(raw ?? "").trim();
-  if (!sql) throw new ToolError("db.query 需要 query（只读 SQL）");
+  if (!sql) throw new ToolError("db.query requires query (read-only SQL)");
   if (sql.length > PROBE_QUERY_MAX_CHARS) {
     throw new ToolError(
-      `query 过长（${sql.length} > ${PROBE_QUERY_MAX_CHARS} 字符）——探针只收小查询`,
+      `query too long (${sql.length} > ${PROBE_QUERY_MAX_CHARS} chars) - the probe accepts small queries only`,
     );
   }
   if (sql.includes(";")) {
-    throw new ToolError("query 含分号——探针只执行单条语句（禁多语句）");
+    throw new ToolError("query contains a semicolon - the probe executes a single statement only (no multi-statements)");
   }
   if (sql.includes("--") || sql.includes("/*")) {
-    throw new ToolError("query 禁含 SQL 注释（-- 或 /*）——注释会破坏服务端强制分页的语句拼装");
+    throw new ToolError("query must not contain SQL comments (-- or /*) - comments break the server-enforced pagination statement assembly");
   }
   const lead = sql.match(/^[A-Za-z]+/);
   const kw = lead ? lead[0].toUpperCase() : "";
   if (kw !== "SELECT" && kw !== "WITH") {
-    throw new ToolError("query 仅允许只读 SELECT / WITH 语句（探针面 fail-closed，非读语句一律拒绝）");
+    throw new ToolError("query allows read-only SELECT / WITH statements only (probe face is fail-closed; any non-read statement is rejected)");
   }
   if (/\bINTO\b/i.test(sql)) {
-    throw new ToolError("query 禁含 INTO（防 SELECT-INTO 形态）");
+    throw new ToolError("query must not contain INTO (blocks the SELECT-INTO shape)");
   }
   const stripped = sql
     .replace(/'(?:[^']|'')*'/g, "''")
@@ -183,14 +183,14 @@ function probeValidateSql(raw) {
     const withoutCountStar = stripped.replace(/\(\s*\*/g, "("); // COUNT( * ) stays legal
     if (withoutCountStar.includes("*")) {
       throw new ToolError(
-        "裸 SELECT * 被帽拒绝（SELECT 列表禁 * / 别名.*；COUNT(*) 除外）——请显式列字段或聚合",
+        "bare SELECT * is rejected by the cap (the SELECT list bans * / alias.*; COUNT(*) excepted) - list fields or aggregates explicitly",
       );
     }
   }
   for (const m of stripped.matchAll(/\bLIMIT\s+(\d+)/gi)) {
     if (Number(m[1]) > PROBE_DB_MAX_LIMIT) {
       throw new ToolError(
-        `LIMIT ${m[1]} 超帽（≤${PROBE_DB_MAX_LIMIT}）——请调低，或去掉 LIMIT 由服务端分页接管`,
+        `LIMIT ${m[1]} over the cap (<=${PROBE_DB_MAX_LIMIT}) - lower it, or drop LIMIT and let server-side pagination take over`,
       );
     }
   }
@@ -223,21 +223,21 @@ function probeDbQuery(args) {
   );
   if (r.error || (r.signal !== undefined && r.signal !== null)) {
     throw new ToolError(
-      `db.query 子进程异常${r.signal ? `（${r.signal}，可能超时 ${PROBE_DB_TIMEOUT_MS}ms）` : ""}：${r.error?.message ?? "no detail"}`,
+      `db.query subprocess error${r.signal ? ` (${r.signal}, possibly timed out at ${PROBE_DB_TIMEOUT_MS}ms)` : ""}: ${r.error?.message ?? "no detail"}`,
     );
   }
   if (r.status !== 0) {
     const tail = String(r.stderr || "").trim().split("\n").slice(-3).join(" | ").slice(0, 300);
     if (/node:sqlite/i.test(tail)) {
-      throw new ToolError(`db.query 不可用：本机 node 缺 node:sqlite 内建（需 Node ≥22.13 / 23.4）｜${tail}`);
+      throw new ToolError(`db.query unavailable: local node lacks the node:sqlite builtin (needs Node >=22.13 / 23.4) | ${tail}`);
     }
-    throw new ToolError(`db.query 失败（exit ${r.status}）：${tail || "no stderr"}`);
+    throw new ToolError(`db.query failed (exit ${r.status}): ${tail || "no stderr"}`);
   }
   let parsed;
   try {
     parsed = JSON.parse(r.stdout);
   } catch {
-    throw new ToolError("db.query 子进程输出不可解析（无有效 JSON）");
+    throw new ToolError("db.query subprocess output unparsable (no valid JSON)");
   }
   const fetched = Array.isArray(parsed.rows) ? parsed.rows : [];
   const columns = Array.isArray(parsed.columns) ? parsed.columns : [];
@@ -271,7 +271,7 @@ function probeDbQuery(args) {
       row_count: shown.length,
       rows: shown,
       ...(shown.length === 0 && truncated
-        ? { note: "首行即超 10KB 响应帽——请收窄列或改聚合（行级分页无法再切）" }
+        ? { note: "the first row alone exceeds the 10KB response cap - narrow the columns or aggregate instead (row pagination cannot split further)" }
         : {}),
     },
     {
@@ -291,7 +291,7 @@ function probeFileHead(args) {
   const tail = args.tail === true;
   let want = args.lines == null ? PROBE_MAX_ROWS : Math.floor(Number(args.lines));
   if (!Number.isFinite(want) || want < 1) {
-    throw new ToolError("lines 需为 ≥1 的数字（帽 50 行/次，超帽自动收敛）");
+    throw new ToolError("lines must be a number >= 1 (cap 50 lines per call; over-cap values are clamped)");
   }
   want = Math.min(want, PROBE_MAX_ROWS);
 
@@ -363,7 +363,7 @@ function probeFileHead(args) {
     if (args.page_token) {
       const t = probeDecodeToken(args.page_token, "file.head");
       if (t.sz !== st.size) {
-        throw new ToolError("page_token 与当前文件状态不符（文件已变化）——请从头重探");
+        throw new ToolError("page_token does not match the current file state (the file changed) - re-probe from the start");
       }
       o = Math.min(t.o, st.size);
       ln = t.ln;
@@ -476,20 +476,20 @@ function probeFileGrep(args) {
   const p = probeResolvePath(args.path);
   const st = probeStatFile(p);
   const pattern = String(args.pattern ?? "");
-  if (!pattern.trim()) throw new ToolError("file.grep 需要 pattern（JS 正则）");
+  if (!pattern.trim()) throw new ToolError("file.grep requires pattern (a JS regex)");
   if (pattern.length > PROBE_PATTERN_MAX_CHARS) {
-    throw new ToolError(`pattern 过长（> ${PROBE_PATTERN_MAX_CHARS} 字符）`);
+    throw new ToolError(`pattern too long (> ${PROBE_PATTERN_MAX_CHARS} chars)`);
   }
   let re;
   try {
     re = new RegExp(pattern, args.ignore_case === true ? "i" : "");
   } catch (e) {
-    throw new ToolError(`pattern 不是合法正则：${e.message}`);
+    throw new ToolError(`pattern is not a valid regex: ${e.message}`);
   }
   let maxCount =
     args.max_count == null ? PROBE_MAX_ROWS : Math.floor(Number(args.max_count));
   if (!Number.isFinite(maxCount) || maxCount < 1) {
-    throw new ToolError("max_count 需为 ≥1（grep -m 语义，帽 50/页）");
+    throw new ToolError("max_count must be >= 1 (grep -m semantics; cap 50 per page)");
   }
   maxCount = Math.min(maxCount, PROBE_MAX_ROWS);
 
@@ -498,7 +498,7 @@ function probeFileGrep(args) {
   if (args.page_token) {
     const t = probeDecodeToken(args.page_token, "file.grep");
     if (t.sz !== st.size) {
-      throw new ToolError("page_token 与当前文件状态不符（文件已变化）——请从头重探");
+      throw new ToolError("page_token does not match the current file state (the file changed) - re-probe from the start");
     }
     o = Math.min(t.o, st.size);
     ln = t.ln;
@@ -724,7 +724,7 @@ function probeCacheStub(entry, action, p) {
     cached_at: entry.at,
     prior_hash: entry.hash,
     prior_bytes: entry.bytes,
-    note: "本会话上文已含同 hash 完整结果；no_cache:true 可强制重读",
+    note: "this session context already holds the full same-hash result; no_cache:true forces a re-read",
   };
 }
 

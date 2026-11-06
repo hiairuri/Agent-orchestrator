@@ -108,8 +108,8 @@ export async function scenInj06bHost() {
   await s10.call("context_pack", { mission_id: "m-6bon", title: "开关开启包", task: "PROBE6B 缓存损坏重建" });
   const pack10on = readPack(R10, "m-6bon");
   ck.ok(
-    "SEC72-a pack_global_section:true 显式开 → 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行）",
-    Boolean(pack10on) && pack10on.includes("## GLOBAL MEMORY（全端子代理记忆") && pack10on.includes("GLOBALSEC 全端稳定事实行"),
+    "SEC72-a pack_global_section:true 显式开 → 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行；W5 重订=英文节头）",
+    Boolean(pack10on) && pack10on.includes("## GLOBAL MEMORY (fleet-wide subagent memory") && pack10on.includes("GLOBALSEC 全端稳定事实行"),
     pack10on && pack10on.split("\n").filter((l) => l.startsWith("## ")),
   );
   const iL10 = pack10on.indexOf("## LESSONS");

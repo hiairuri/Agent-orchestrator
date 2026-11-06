@@ -1,24 +1,23 @@
-# 契约卡：sandbox 沙箱生命周期（M4）
+# Contract card: the sandbox lifecycle (M4)
 
-> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码逐行核对，worker v12-m71）。行号**不作跨版引用**；跨版定位以函数名锚为准（l-20261022-6a14d6）。
+> **Line-number declaration (card head)**: all line numbers in this card were measured at assembly time (grep + line-by-line source verification). Line numbers are **not referenced across versions**; cross-version locating relies on function-name anchors (l-20261022-6a14d6).
 >
-> - **归属模块**：M4 sandbox（沙箱写面：`materializeSandbox`（mcp/server-git.mjs）、`toolSandboxApply`/`toolSandboxDiscard`（mcp/tool-sandbox.mjs））＋ M3 dispatch（context_pack 的 isolation/oob_allowlist/scope_paths/share_node_modules 参，mcp/tool-pack.mjs）
-> - **脆度双轴评级**：面广度=中（两收口工具+组包三参）；**后果重度=第一梯队**（apply 的 merge 直接动主仓主线，git 历史不可逆——门禁链是唯一防线，故 apply 侧门禁最厚）
-> - **历史事故回链**：V6-08（两阶段 intent+幂等三态）/V6-13（git 管线出锁）/V6-35（teardown 后置降级）/V6-42 AUTH-08（qa 裸 verdict 纸门→四查链）/V6-10（coversPath 单一来源）/ENV-01（两慢 merge 套内重试，crv5-apply-envelope）
-> - **scope 注记**：本卡属 M4「不立项增强」（G1 同构裁定 K-6），只记现状契约；scope_paths 面 allowlist 演进由 M2/M3 卡族承载，本卡按现状并记两参。
+> - **Home modules**: M4 sandbox (the sandbox write face: `materializeSandbox` (mcp/server-git.mjs), `toolSandboxApply`/`toolSandboxDiscard` (mcp/tool-sandbox.mjs)) + M3 dispatch (the context_pack isolation/oob_allowlist/scope_paths/share_node_modules parameters, mcp/tool-pack.mjs)
+> - **Brittleness dual-axis rating**: surface breadth = medium (two close-out tools + three pack parameters); **consequence severity = top tier** (apply's merge touches the main repo's mainline directly and git history is irreversible - the gate chain is the only defense, hence the thickest gates on the apply side)
+> - **Scope note**: this card is M4 "no enhancement initiatives" (the G1-isomorphic ruling K-6) and records the current contract only; scope_paths allowlist evolution is carried by the M2/M3 card family - this card records both parameters as-is.
 
-**失效语义三分类记法**：`fail-loud`（显式报错，行为可见）／`自愈`（自动收敛到正确态）／`静默降级`（按安全缺省继续，留痕有限）。
+**Invalidity semantics, three classes of notation**: `fail-loud` (explicit error, behavior visible) / `self-healing` (converges automatically to the correct state) / `silent degradation` (continues on the safe default, limited traces).
 
 ---
 
-## 0. 生命周期总览（create → 施工 → apply / discard）
+## 0. Lifecycle overview (create -> work -> apply / discard)
 
-| 阶段 | 执行者 | 关键函数锚 | 产物 |
+| Phase | Actor | Key function anchors | Product |
 |---|---|---|---|
-| create | context_pack（isolation=worktree 时） | `materializeSandbox`（mcp/server-git.mjs，调用点 mcp/tool-pack.mjs，根锁内） | worktree＋分支＋`pack.sandbox` 记录＋SANDBOX 节 |
-| 施工 | worker（沙箱内） | —（SANDBOX 节红线约束） | 分支上提交＋diff 存证 artifacts |
-| 收口 A | 主控 | `toolSandboxApply`（mcp/tool-sandbox.mjs，三阶段） | merge 落主线＋board closed 自动签收 |
-| 收口 B | 主控 | `toolSandboxDiscard`（mcp/tool-sandbox.mjs，三阶段） | 分支/worktree 弃置，board 状态不动 |
+| create | context_pack (when isolation=worktree) | `materializeSandbox` (mcp/server-git.mjs, called from mcp/tool-pack.mjs, inside the root lock) | worktree + branch + `pack.sandbox` record + the SANDBOX section |
+| work | worker (inside the sandbox) | - (bound by the SANDBOX section red lines) | commits on the branch + diff evidence artifacts |
+| close-out A | coordinator | `toolSandboxApply` (mcp/tool-sandbox.mjs, three phases) | merge onto the mainline + board closed auto-ack |
+| close-out B | coordinator | `toolSandboxDiscard` (mcp/tool-sandbox.mjs, three phases) | branch/worktree discarded, board status untouched |
 
 ## 1. create：materializeSandbox
 
@@ -33,7 +32,7 @@
 
 **SANDBOX 节物化**（`buildSandboxLines`（mcp/server-git.mjs），逐行）：工作区路径+分支+基点；包内项目路径已改写声明（未改写残留按同相对路径到工作区读）；红线行「绝不写原项目路径——写穿主仓会被主仓 status 巡检与 reviewer 越界审查检出，整单丢弃（sandbox_discard）」；node_modules 行（junction 共享=只读使用、禁 install/upgrade/delete、需装依赖先删链接独立安装并报告注明）；done 上报必附 `git diff --stat <base>` 与 `git diff --name-only <base>` 输出各存文件进 artifacts（**diff 存证要求**，reviewer 审查输入）。
 
-## 2. apply：toolSandboxApply 三阶段（V6-08/13/35）
+## 2. apply: the toolSandboxApply three phases (V6-08/13/35)
 
 | 阶段 | 锁 | 内容 |
 |---|---|---|
@@ -71,7 +70,7 @@
 - **结算事务**：status=closed＋auto-ack（by=sandbox_apply）＋`applied_at/applied_commit` 落 sandbox＋timeline `sandbox:apply` 事件（含 crash 恢复收口措辞）。
 - **teardown 降级**（V6-35）：junction 链接先摘（rmSync 对 junction 只摘链不摘目标）；worktree 移除失败 → `worktree_removed:false`+warning，残留可被 discard 的 force 路径收尾（`静默降级`，有痕）。
 
-## 3. discard：toolSandboxDiscard 三阶段
+## 3. discard: the toolSandboxDiscard three phases
 
 | 阶段 | 内容 | 失效语义 |
 |---|---|---|
@@ -81,7 +80,7 @@
 
 主仓零损伤不变量：discard 全程不触主仓工作树与主线（git 三连只作用沙箱侧）；apply 全程主仓唯一写点=phase-2 末次 merge（其前置门禁全在 phase-1/2）。
 
-## 4. scope 三粒度冲突语义（登记面，与 apply 门禁分立）
+## 4. The scope three-granularity conflict semantics (the registration face, separate from the apply gates)
 
 | 粒度 | 机制 | 锚 |
 |---|---|---|
@@ -91,16 +90,16 @@
 
 与沙箱越界检出的分工：登记冲突管「派发前写集声明」，coversPath 越界 diff 管「施工后实际改动」——两道独立，缺一不可互替。
 
-## 5. 断言锚
+## 5. Assertion anchors
 
-- **crv5-apply-envelope**：apply/discard 两阶段包络＋幂等三态＋ENV-01 两慢 merge 场景套内失败重试一次（全新临时根重跑、断言集不变）。
-- **crv1-scope**：scope 三粒度冲突语义（scope_warnings/strict 拒绝/scope_conflicts）。
-- **crv6-resilience / root-contract / twin-lock**：根锁与路径包含校验为共享基建（跨卡：card-root-txt）。
-- **函数名锚（LM-05 候选行素材，供持 lint-manifest 写面的波次注册）**：`materializeSandbox`／`applyGateAndIntent`／`applyGitPipeline`／`applySettleBoard`／`applyTeardown`／`toolSandboxApply`／`toolSandboxDiscard`／`discardGate`／`discardGitTriple`／`discardSettleBoard`／`assertMergeTreeSupport`／`parseMergeTreeConflicts`／`applyIntentFresh`／`buildSandboxLines`／`coversPath`／`scopePairConflict`（v1.3 拆分后按模块族现形：mcp/server-git.mjs 5 锚=materializeSandbox/assertMergeTreeSupport/parseMergeTreeConflicts/buildSandboxLines/scopePairConflict、mcp/server-core.mjs 1 锚=coversPath、mcp/tool-sandbox.mjs 10 锚=其余——split-anchor-map §3 终态映射；2026-11-02 W4 E1 勘误，原「均 server.mjs 2026-10-28 grep 实证可见」系旧单体表述）。
+- **crv5-apply-envelope**: the apply/discard two-phase envelopes + the idempotent three states + ENV-01 (a slow-merge scenario retries once inside the suite on a fresh temporary root, assertion set unchanged).
+- **crv1-scope**: the scope three-granularity conflict semantics (scope_warnings / strict rejection / scope_conflicts).
+- **crv6-resilience / root-contract / twin-lock**: the root lock and path-containment checks are shared infrastructure (cross-card: card-root-txt).
+- **Function-name anchors (LM-05 candidate-row material, for waves holding the lint-manifest write face to register)**: `materializeSandbox` / `applyGateAndIntent` / `applyGitPipeline` / `applySettleBoard` / `applyTeardown` / `toolSandboxApply` / `toolSandboxDiscard` / `discardGate` / `discardGitTriple` / `discardSettleBoard` / `assertMergeTreeSupport` / `parseMergeTreeConflicts` / `applyIntentFresh` / `buildSandboxLines` / `coversPath` / `scopePairConflict` (post-split module-family mapping: mcp/server-git.mjs 5 anchors = materializeSandbox/assertMergeTreeSupport/parseMergeTreeConflicts/buildSandboxLines/scopePairConflict; mcp/server-core.mjs 1 anchor = coversPath; mcp/tool-sandbox.mjs 10 anchors = the rest - the final mapping per split-anchor-map §3).
 
-## 6. 维护规则
+## 6. Maintenance rules
 
-- apply 门禁链新增查项：本卡 §2.2 补行＋crv5-apply-envelope 补断言同波落；删查项=防御降级，须 DESIGN 治理面留痕。
-- 幂等三态窗口/新鲜窗时长调整：属行为契约变更，按 l-20261022-5564ee 先盘点断言面再动（crv5 有字面与行为双面）。
-- scope 语义演进（如 scope_paths 取代 oob_allowlist 的过渡收尾）：§4 与 crv1-scope 同波改，过渡期双参并存事实在本卡与 card-result-dir 各自记一面。
-- 本卡不立项增强（G1/K-6）：机制改动仅限缺陷修复；物理拆 server.mjs 沙箱段被 G1 虚拟分区裁定禁止，勿将本卡读作拆分 mandate。
+- Adding a gate to the apply gate chain: add a §2.2 row + a crv5-apply-envelope assertion in the same wave; removing a gate = defensive downgrade and requires a trace in the DESIGN governance face.
+- Adjusting the idempotent-three-state windows / freshness-window durations: a behavioral contract change - inventory the assertion face first (crv5 carries both literal and behavioral pins).
+- Scope semantics evolution (e.g., the transition closing scope_paths over oob_allowlist): §4 and crv1-scope change in the same wave; the transitional two-parameter coexistence is recorded once in this card and once in card-result-dir.
+- This card launches no enhancement initiatives (G1/K-6): mechanism changes are limited to defect fixes; physically splitting the sandbox section is forbidden by the G1 virtual-partition ruling - do not read this card as a split mandate.

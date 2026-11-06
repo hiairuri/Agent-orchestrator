@@ -88,7 +88,7 @@ function readLastJsonLine(file, capBytes) {
     const len = end - start;
     if (len > 0) {
       if (len > capBytes) {
-        throw new ToolError(`转录末行 ${len} 字节超出收割上限（${capBytes}）`);
+        throw new ToolError(`transcript last line ${len} bytes exceeds the harvest cap (${capBytes})`);
       }
       const text = readRange(start, end);
       try {
@@ -153,7 +153,7 @@ function renderHarvestMessages(messages, includeTools, tail) {
       lines.push("[user] " + harvestText(m.content).replace(/\s+/g, " ").slice(0, 400));
     } else if (role === "assistant") {
       const text = harvestText(m.content).replace(/\s+/g, " ").trim();
-      lines.push("[assistant] " + (text ? text.slice(0, 600) : "(无文本)"));
+      lines.push("[assistant] " + (text ? text.slice(0, 600) : "(no text)"));
       if (includeTools && Array.isArray(m.toolCalls)) {
         for (const tc of m.toolCalls) {
           if (!tc) continue;
@@ -197,8 +197,8 @@ function toolAgentHarvest(args) {
     (String(args.session_id ?? "").trim() || String(args.agent_id ?? "").trim())
   ) {
     throw new ToolError(
-      "agent_harvest：--strict-tokens 模式仅接受 mission_id 定位" +
-        "（session_id/agent_id 直读已收口为经板面解析 dispatch.agent_id），请改传 mission_id",
+      "agent_harvest: --strict-tokens mode accepts mission_id lookup only" +
+        " (session_id/agent_id direct reads are funnelled through board-resolved dispatch.agent_id); pass mission_id instead",
     );
   }
 
@@ -221,19 +221,19 @@ function toolAgentHarvest(args) {
     const m = findMission(loadBoard(), missionId);
     if (!m) throw new ToolError(`mission not found: ${missionId}`);
     const aid = (m.dispatch && m.dispatch.agent_id) || null;
-    if (!aid) throw new ToolError(`mission ${missionId} 无 dispatch.agent_id（未派发或池工领取，无转录可收割）`);
+    if (!aid) throw new ToolError(`mission ${missionId} has no dispatch.agent_id (never dispatched or claimed by a pool worker; no transcript to harvest)`);
     sessionId = safeSegment(`sess_subagent_agent_${safeSegment(aid, "agent_id")}`, "session_id");
   }
   if (!sessionId) {
-    throw new ToolError('agent_harvest 需要 session_id / agent_id / mission_id 其一');
+    throw new ToolError('agent_harvest requires one of session_id / agent_id / mission_id');
   }
 
   const file = path.join(harvestRolloutDir(), `model-io-${sessionId}.jsonl`);
   assertInside(harvestRolloutDir(), file);
   if (!fs.existsSync(file)) {
     throw new ToolError(
-      `未找到转录 model-io-${sessionId}.jsonl（rollout 目录 ${harvestRolloutDir()}）。` +
-        "未派发、池工领取、或平台未写 rollout 时无转录可收割；终态产出请以 report artifacts 为准",
+      `transcript model-io-${sessionId}.jsonl not found (rollout dir ${harvestRolloutDir()}). ` +
+        "no transcript exists when the mission was never dispatched, was pool-claimed, or the platform wrote no rollout; final deliverables live in the report artifacts",
     );
   }
   let rec;
@@ -250,7 +250,7 @@ function toolAgentHarvest(args) {
     fileBytes = fs.statSync(file).size; // H1 (v0.5): one statSync for the file_bytes metadata
   } catch (err) {
     if (err instanceof ToolError) throw err;
-    throw new ToolError("转录读取失败：" + (err && err.message ? err.message : err));
+    throw new ToolError("transcript read failed: " + (err && err.message ? err.message : err));
   }
   if (!rec && lastLineScalar) {
     // V5-P4 / V6-50: bare scalar last record — keep the ok response, degrade to
@@ -260,8 +260,8 @@ function toolAgentHarvest(args) {
   if (!rec) {
     throw new ToolError(
       lastLineUnparsable
-        ? "转录无可解析记录（末行畸形且尾窗回退 256KB 内无完整可解析行，无回退可用）"
-        : "转录文件为空或无完整记录",
+        ? "transcript has no parsable records (malformed last line and no complete parsable line within the 256KB tail window; no fallback available)"
+        : "transcript file is empty or has no complete records",
     );
   }
   const messages = Array.isArray(rec.request && rec.request.messages) ? rec.request.messages : [];
@@ -274,7 +274,7 @@ function toolAgentHarvest(args) {
   const rendered = renderHarvestMessages(messages, includeTools, tail);
   let transcript = rendered.lines.join("\n");
   const fullLen = transcript.length;
-  if (transcript.length > maxChars) transcript = "…（头部截断，保留尾部）\n" + transcript.slice(transcript.length - maxChars);
+  if (transcript.length > maxChars) transcript = "...(head truncated, tail kept)\n" + transcript.slice(transcript.length - maxChars);
 
   return {
     ok: true,
@@ -292,9 +292,9 @@ function toolAgentHarvest(args) {
     // last_line_unparsable when the tail window backoff returned an earlier
     // record; note when the last line was a bare scalar (empty transcript).
     ...(lastLineUnparsable
-      ? { last_line_unparsable: true, note: "转录末行畸形不可解析，已回退至上一条完整记录" }
+      ? { last_line_unparsable: true, note: "transcript last line malformed/unparsable; fell back to the previous complete record" }
       : {}),
-    ...(lastLineScalar ? { note: "转录末行为合法 JSON 标量（非对象），已按空转录处理" } : {}),
+    ...(lastLineScalar ? { note: "transcript last line is a legal JSON scalar (not an object); treated as an empty transcript" } : {}),
     // H1 (v0.5, D2 §1.2): additive probe metadata — tail=0 turns this response into the
     // zero-echo probe mode (transcript empty) for CR-10 usage sampling. Keys only, no new tool.
     usage: usage

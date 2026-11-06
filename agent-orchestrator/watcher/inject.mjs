@@ -87,9 +87,9 @@ export function subagentRefusal(value, { source = "session_id" } = {}) {
   const shown = String(value ?? "").replace(/[\r\n]+/g, " ").slice(0, 200); // 单行纪律（日志注入面）
   return Object.assign(
     new Error(
-      `coord-anchor-subagent: ${source}="${shown}" 命中 sess_subagent 前缀（子代理短寿命会话，` +
-        "EXP10-findings R6 锚劫持形态）——拒绝消费该值（fail-loud：不建桥、不发帧、不写锚；劫持态宁可不唤醒）；" +
-        "锚只由主控会话（sess_<uuid>）经 SessionStart/toolResume 写入，子代理侧走 report/mailbox 通道",
+      `coord-anchor-subagent: ${source}="${shown}" hits the sess_subagent prefix (short-lived subagent session, ` +
+        "anchor-hijacking shape) - refusing to consume this value (fail-loud: no bridge, no frame, no anchor write; rather skip the wake than consume a hijacked state);" +
+        "anchors are written only by the coordinator session (sess_<uuid>) via SessionStart/toolResume; subagents use the report/mailbox channels",
     ),
     { code: "coord-anchor-subagent" },
   );
@@ -122,12 +122,12 @@ export function buildTemplateShell({ missionId, state, summary, eventId } = {}) 
   }
   const s = sanitizeSummary(summary);
   if (eventId === null) {
-    return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(无摘要)"} ${NO_EVENT_GUIDANCE}`;
+    return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(no summary)"} ${NO_EVENT_GUIDANCE}`;
   }
   const ev = String(eventId);
   if (!ev.trim()) throw Object.assign(new Error("shell-bad-args"), { code: "shell-bad-args" });
   const ptr = `spool/${id}/unread/${ev}.json`;
-  return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(无摘要)"} 指引=请消费 ${ptr}（路径指针，非正文）`;
+  return `${SHELL_PREFIX} mission=${id} state=${st} summary=${s || "(no summary)"} 指引=请消费 ${ptr}（路径指针，非正文）`;
 }
 
 /** 壳纪律自检：单行、含前缀、含指针或显式无事件句、不含反引号/花括号注入面。 */

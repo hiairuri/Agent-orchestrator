@@ -72,9 +72,9 @@ function sentinelHealth() {
     {
       const duty = out.instances.filter((i) => i.on_duty);
       if (out.instances.length === 0) {
-        out.summary = { state: "none", on_duty: false, on_duty_n: 0, total: 0, text: "无哨兵（建议拉起）" };
+        out.summary = { state: "none", on_duty: false, on_duty_n: 0, total: 0, text: "no sentinel (recommend raising one)" };
       } else if (duty.length === 0) {
-        out.summary = { state: "reinforce", on_duty: false, on_duty_n: 0, total: out.instances.length, text: "槽位 stale（可补员）" };
+        out.summary = { state: "reinforce", on_duty: false, on_duty_n: 0, total: out.instances.length, text: "slots stale (replenishable)" };
       } else {
         const famState = duty.some((i) => i.state === "active")
           ? "active"
@@ -83,10 +83,10 @@ function sentinelHealth() {
             : "standby";
         const text =
           famState === "active"
-            ? "在岗盯守（新派发在飞，分级告警值守中）"
+            ? "on duty (new dispatches in flight; graded-alert watch)"
             : famState === "quarantined"
-              ? "隔离值守（在岗：观测异常期告警挂起，低频值守中）"
-              : "在岗待命（自动接管新派发）";
+              ? "quarantined duty (on duty: alerts suspended during the observation anomaly; low-frequency watch)"
+              : "standby on duty (auto-takes-over new dispatches)";
         out.summary = { state: famState, on_duty: true, on_duty_n: duty.length, total: out.instances.length, text };
       }
     }

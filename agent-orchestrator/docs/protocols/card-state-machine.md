@@ -1,9 +1,8 @@
-# 契约卡：M1 mission 状态机（ALLOWED_TRANSITIONS）
+# Contract card: the M1 mission state machine (ALLOWED_TRANSITIONS)
 
-- **归属模块**：mcp/server-board.mjs（board 写路径的迁移门 + 各内部写点）；配套字段/merge 语义见 `card-board.md`（卡⑤）
-- **脆度评级**（面广度×后果重度双轴）：**后果重度=第一梯队**——crv6-statemachine 厚锁面（代码冻结，改动高危）；白名单写错一条腿=要么死锁（腿缺失）要么假归档/双跑（腿放水）。面广度中等（单文件单表）
-- **历史事故回链**：l-20261019-d38f65（外部 upsert 直写 running 被拒）、l-20261023-576af5（upsert 缺 mission.id 误新建）、V6-11/V6-20/V6-21/V6-28 设计裁定（W-A1 §1 表文逐条）
-- **锚点声明**：本卡行号系总装时点（v1.1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威。实测基线：`ALLOWED_TRANSITIONS`（mcp/server-board.mjs）、守卫 `upsertMission`（mcp/server-board.mjs）、`sweepGraph`（mcp/server-board.mjs）
+- **Home module**: mcp/server-board.mjs (the transition gate on the board write path + the internal write points); companion field/merge semantics live in `card-board.md`
+- **Brittleness rating** (surface-breadth x consequence-severity dual axis): **consequence severity = top tier** - a thick crv6-statemachine lock face (code frozen, changes high-risk); one wrong whitelist leg = either deadlock (missing leg) or fake-archive/double-run (leg leak). Surface breadth medium (single file, single table)
+- **Anchor declaration**: all line numbers in this card were measured at assembly time (v1.1.2 source); **line numbers are not referenced across versions** (l-20261022-6a14d6); function/constant-name dual anchors are the locating authority. Measured baseline: `ALLOWED_TRANSITIONS` (mcp/server-board.mjs), guard `upsertMission` (mcp/server-board.mjs), `sweepGraph` (mcp/server-board.mjs)
 
 ---
 
@@ -15,7 +14,7 @@
 drafted, dispatched, ready, running, blocked, question, done, failed, skipped, resumed, closed
 ```
 
-语义速览：
+Semantics at a glance:
 
 | 状态 | 语义 | 谁通常放进去 |
 |---|---|---|
@@ -33,7 +32,7 @@ drafted, dispatched, ready, running, blocked, question, done, failed, skipped, r
 
 ## 2. ALLOWED_TRANSITIONS 全表（对拍锚）
 
-源码原文（mcp/server-board.mjs `ALLOWED_TRANSITIONS`，逐字节对拍基线——M1-3 contract-sync 从源码抽取本表与卡对拍）：
+Source excerpt (mcp/server-board.mjs `ALLOWED_TRANSITIONS`, the byte-exact comparison baseline - M1-3 contract-sync extracts this table from the source and compares it against the card):
 
 ```js
 const ALLOWED_TRANSITIONS = {
@@ -51,7 +50,7 @@ const ALLOWED_TRANSITIONS = {
 };
 ```
 
-人读矩阵（列=to；空格=禁止；**本表是外部 upsert 可请求的腿**，内部写者经 `opts.internal` 绕表——见 §4）：
+Human-readable matrix (columns = to; blank = forbidden; **this table = the legs external upsert may request**; internal writers bypass the table via `opts.internal` - see §4):
 
 | from \ to | drafted | dispatched | ready | running | done | blocked | question | failed | skipped | closed |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -67,7 +66,7 @@ const ALLOWED_TRANSITIONS = {
 | resumed | | ✓ | | | | | | | | |
 | closed | （无离开路径；重开=新建 mission） | | | | | | | | | |
 
-**全局守卫注记**（对每腿适用）：
+**Global guard notes** (apply to every leg):
 
 - **✗禁**：`drafted→closed` 直达禁止（V6-11 门 B half 1，mcp/server-board.mjs `upsertMission`）——未派发即归档是假归档，先 `dispatched` 再 `closed`，或走删除/废弃语义。
 - **✓¹**：任何 →`closed` 的外部请求需 `close_confirmed:true` 一次性确认（V6-11 门 B half 2，mcp/server-board.mjs `upsertMission`）；确认键是 transient 键，消费后不落盘。
@@ -77,7 +76,7 @@ const ALLOWED_TRANSITIONS = {
 
 **内部专属腿刻意缺席于白名单**（mcp/server-board.mjs `ALLOWED_TRANSITIONS` 头注原文语义）：`*→running`（claim 专属）、`drafted→ready`（sweep unlock 专属）、`running→ready`（sweep 租约回收专属）——这些腿的唯一写者绕过门，白名单不收。
 
-## 3. 每腿×内部写者正面矩阵（O3 裁定=含）
+## 3. The per-leg × internal-writer positive matrix (O3 ruling = included)
 
 > l-20261019-d38f65 类踩坑的根源就是只有负面清单没有正面矩阵。内部写者经 `opts.internal:true` 绕过 §2 白名单（mcp/server-board.mjs `upsertMission` 注释：sweep/claim/report/answer/sandbox_apply 各写点是白名单设计里的合法内部写者），但**各写点自身的准入前置**如下表——演进者先查本表。
 
@@ -93,32 +92,32 @@ const ALLOWED_TRANSITIONS = {
 | **sandbox_apply**（gated merge-back） | 直改（不走 upsertMission） | （done）→closed；crash 恢复补偿分支 applied_at 存在且 status≠closed → closed | done + qa.verdict=pass + 主仓干净 + merge-tree 预检过门后落锁直改；auto-ack {by:"sandbox_apply"}；写 pack.sandbox.applied_at/applied_commit | mcp/tool-sandbox.mjs `toolSandboxApply`（主路/补偿分支） |
 | **context_pack 登记 / sandbox:create**（pack 侧写点） | 外部形态 upsert（无 internal 标志） | **零状态腿**（只写 title/scope_paths/pack/timeline；from===merged.status 不触发迁移门） | 循环门（`detectCycle`）+scope 冲突预检（CR-05）+重复 mission 预检（P9），均先于板写 | mcp/tool-pack.mjs |
 
-读法示例：想把 mission 弄成 running，唯一写点=board claim（第 2 行）；想让 blocked mission 回到可领取，写点=answer（owner 缺席时→ready）或 sweep 租约回收，外部 upsert 走白名单腿 blocked→ready 亦可。
+Reading example: to get a mission to running, the only write point = board claim (row 2); to return a blocked mission to claimable, the write points = answer (owner absent -> ready) or the sweep lease reclaim, and external upsert via the whitelist leg blocked->ready also works.
 
-## 4. 外部写者禁区三条（error-fix 教训的文档化收口）
+## 4. Three external-writer forbidden zones (the documented close-out of error-fix lessons)
 
-> 权威=本卡+源码。教训回链：l-20261019-d38f65、l-20261023-576af5。
+> Authority = this card + source.
 
-1. **`→running` 仅 board claim 可达**。租约语义归 claim：leaseUntil 由 report 续期、超时由 sweep 回收。外部 upsert 直写 running 必被拒（hint=§2 三分支，mcp/server-board.mjs `upsertMission`）。需要 running 语义时用 board(claim)——注意 V6-14 会换发 token，新 token 须转告 worker。
-2. **drafted→running 对外部写者整体关闭**：主控登记派发一律 `status:"dispatched"`（dispatch 工具内部写点同此，mcp/tool-dispatch.mjs）；worker 首个 report 经 opts.internal 旁路自行演进状态。**禁止**用外部 upsert 把 drafted 顶成 running（l-20261019-d38f65 正身）。
-3. **upsert 定位键是 mission.id 字段**：更新既有 mission 必须在 mission 对象内带 `id`；顶层 mission_id 参数仅供 get/list/ack 等动作用，upsert 缺 `mission.id` 一律新建（l-20261023-576af5 正身，mcp/server-board.mjs `upsertMission` 定位逻辑）。
+1. **`->running` is reachable only via board claim**. Lease semantics belong to claim: leaseUntil is renewed by report, reclaimed by sweep on timeout. An external upsert writing running directly is always rejected (hint = the §2 three branches, mcp/server-board.mjs `upsertMission`). When you need running semantics, use board(claim) - note V6-14 rotates the token; the new token must be relayed to the worker.
+2. **drafted->running is closed to external writers entirely**: the coordinator registers dispatches with `status:"dispatched"` (the dispatch tool's internal write point does the same, mcp/tool-dispatch.mjs); the worker's first report evolves the state itself via the opts.internal bypass. **Never** push drafted to running with an external upsert.
+3. **The upsert locating key is the mission.id field**: updating an existing mission requires `id` inside the mission object; the top-level mission_id parameter serves get/list/ack actions only - an upsert without `mission.id` always creates new (mcp/server-board.mjs `upsertMission` locating logic).
 
-**附则（禁区的外延）**：
+**Addendum (extensions of the forbidden zones)**:
 
-- opts.internal 旁路白名单=内部写者全集（§3 表 9 个写点；跨迁移时 ack 强制清空 SM-05，blocked/question 新报告清旧 ack C1，close 自动 ack——均 mcp/server-board.mjs `upsertMission`）。外部调用者没有也不该有 internal 通道。
-- 每次板写=同临界区 sweepGraph（unlock/cascade skip/租约回收/dangling 清理，mcp/server-board.mjs `sweepGraph`）——外部写者无需也**不应**自行解锁下游，写完状态即完事。
+- The opts.internal bypass allowlist = the full internal-writer set (§3 table, 9 write points; ack forcibly cleared on cross-transition SM-05, a new blocked/question report clears the stale ack C1, close auto-acks - all in mcp/server-board.mjs `upsertMission`). External callers have - and should have - no internal channel.
+- Every board write = a sweepGraph in the same critical section (unlock/cascade skip/lease reclaim/dangling cleanup, mcp/server-board.mjs `sweepGraph`) - external writers need not, and **must not**, unlock downstream themselves; writing the state is the whole job.
 - 新建 mission 的 status 进门约定：外部 upsert 新建时 from 按 "drafted" 起（mcp/server-board.mjs `upsertMission`），所以新建即写 closed/done 等一律按白名单腿判——`drafted→closed` 直接 ✗禁。
 
-## 5. 与 merge 语义的接口（状态如何进板）
+## 5. Interface with merge semantics (how status enters the board)
 
-状态字段经 `mergeMission`（mcp/server-board.mjs）进板；merge 机制权威=卡⑤ §2 字段表（互指不合并），本节只钉状态相关四点：
+The status field enters the board via `mergeMission` (mcp/server-board.mjs); the merge-mechanism authority = the card-board §2 field table (cross-referenced, not merged). This section pins only the four status-related points:
 
-- `status` ∈ `MERGEABLE_KEYS`（白名单 18 键）；白名单外键丢弃并 ignoredPatchKeys 上报不落盘。
-- `id` 永不合并——定位键兼不可变键。
-- 读侧 owned 键 `ack`/`owner`/`claim`/`manifest` 在 upsert 入口剥除（mcp/tool-board.mjs）——归属细则=卡⑤ §2。
-- 跨迁移清 ack：`prevStatus !== merged.status` → `merged.ack = null`（SM-05）——旧签收不得漂白迁移后的状态。
+- `status` ∈ `MERGEABLE_KEYS` (allowlist of 18 keys); keys outside the allowlist are dropped and reported via ignoredPatchKeys without landing.
+- `id` is never merged - the locating key doubles as an immutable key.
+- Read-side owned keys `ack`/`owner`/`claim`/`manifest` are stripped at the upsert entrance (mcp/tool-board.mjs) - ownership details in card-board §2.
+- Cross-transition ack clearing: `prevStatus !== merged.status` -> `merged.ack = null` (SM-05) - a stale ack must not whitewash the post-transition state.
 
-## 6. 失效语义（状态机视角）
+## 6. Failure semantics (state-machine view)
 
 | 情形 | 行为 | 分类 |
 |---|---|---|
@@ -130,15 +129,15 @@ const ALLOWED_TRANSITIONS = {
 | 租约畸形（leaseUntil 不可解析） | 不永久卡死：claimedAt+4×lease → 24h updated_at 硬帽兜底回收，事件 lease_invalid（V6-28，mcp/server-board.mjs `sweepGraph` 回收） | 自愈 |
 | 内部写者绕表滥用（理论面） | 准入前置各自把门（token/成对鉴权/绿档/qa verdict）；绕表本身无第二道表锁——新增内部写点必须先入 §3 矩阵并补 crv6 断言 | 防波堤约定 |
 
-## 7. 断言锚
+## 7. Assertion anchors
 
-- **crv6-statemachine**（tests/suites/crv6-statemachine.mjs，主锁）：A-v060-SM-01/02（closed 双门：采信侧 isGreenClosed=qa.verdict==="pass" ∨ pack.sandbox.applied_at；写入侧 close_confirmed+drafted 禁直达+sandbox_apply 直改不受限）；SM-03/04/05（白名单矩阵回归、reopen:true+note、跨迁移清 ack、→running 仅 claim、opts.internal 旁路）；SM-06/07（租约回收扩容+终态豁免；running/dispatched→ready、blocked/question 保状态；answer 对 owner=null 翻 ready）；SM-08（closed 拒改板 report 机读语义）；A-v070-P2P-01..06（p2p 边界/失效/前置态/活性）。
-- **crv5-auth**（tests/suites/crv5-auth.mjs）：A-v060-AUTH-01..08——fail-closed token 门、成对鉴权、claim 必换发（V6-14）。
-- **crv6-resilience / crv1-scope / crv2-pack**：派发链路、scope 审计、组包对拍面（板写外围）。
-- **M1-3 对拍（本卡的设计消费方）**：contract-sync.mjs 经模块族源码拼接（server.mjs 入口+mcp/ 全集，familySource）抽取 §2 源码表体与本卡对拍（卡≈码，漂移即红）；lint-manifest LM-05=卡内常量名（ALLOWED_TRANSITIONS/MERGEABLE_KEYS/ONE_LEVEL）在 server-board/server-core 等模块族现形可见+卡存在非空。（2026-11-02 W4 E1 勘误：原「在 server.mjs grep 可见」表述随 v1.3 拆分失真，按模块族现形改写。）
+- **crv6-statemachine** (tests/suites/crv6-statemachine.mjs, primary lock): A-v060-SM-01/02 (the closed dual gates: acceptance side isGreenClosed=qa.verdict==="pass" OR pack.sandbox.applied_at; write side close_confirmed + drafted no-direct-path + sandbox_apply direct-write unrestricted); SM-03/04/05 (whitelist matrix regression, reopen:true+note, cross-transition ack clearing, ->running claim-only, opts.internal bypass); SM-06/07 (lease-reclaim extensions + terminal-state exemption; running/dispatched->ready, blocked/question state-preserving; answer flips owner=null to ready); SM-08 (closed rejects board-mutating reports, machine-readable semantics); A-v070-P2P-01..06 (p2p boundaries/invalidation/preconditions/liveness).
+- **crv5-auth** (tests/suites/crv5-auth.mjs): A-v060-AUTH-01..08 - fail-closed token gate, paired authentication, claim must rotate the token (V6-14).
+- **crv6-resilience / crv1-scope / crv2-pack**: the dispatch chain, scope audit, and pack-materialization comparison faces (periphery of board writes).
+- **M1-3 comparison (this card's design consumer)**: contract-sync.mjs extracts the §2 source table body via module-family source concatenation (server.mjs entry + the mcp/ set, familySource) and compares it against this card (card ~= code; drift is red); lint-manifest LM-05 = this card's constant names (ALLOWED_TRANSITIONS/MERGEABLE_KEYS/ONE_LEVEL) visible in the server-board/server-core module families + the card exists and is non-empty.
 
-## 8. 维护规则（本卡的写方）
+## 8. Maintenance rules (who writes this card)
 
-- 本卡唯一写方=协议卡批 mission（W1-M1-2 首写；后续状态机改动波次随改）。**代码先改卡后改或卡先改码后改均须同 mission 内闭环**，M1-3 对拍红=两源漂移信号。
-- 新增内部写点（新 opts.internal 调用方）时：§3 矩阵加行 + crv6-statemachine 补断言 + 本卡锚点重测，三件套缺一即失真。
-- `resumed` 态处置：白名单保留离开腿（resumed→dispatched）但无生产写者——若未来启用，先补 §1 表"谁通常放进去"列与断言，不得静默复活。
+- This card's only writer = the protocol-card batch mission (first written in W1-M1-2; later state-machine change waves update it alongside). **Code first/card second or card first/code second must both close within the same mission**; an M1-3 comparison red = two-source drift signal.
+- When adding an internal write point (a new opts.internal caller): add a §3 matrix row + a crv6-statemachine assertion + re-measure this card's anchors - all three or the card drifts.
+- Disposition of `resumed`: the whitelist keeps the outgoing leg (resumed->dispatched) with no production writer - if ever activated, first fill the §1 table's "who usually puts it there" column and add assertions; never revive silently.

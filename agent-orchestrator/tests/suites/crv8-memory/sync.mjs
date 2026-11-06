@@ -92,7 +92,7 @@ export async function scenSync06to09() {
  * 帽值句渲染=保留消费面）。帽两键经 readGleanCfg（junk 回落+缺省常量源）进
  * materializeGleanPack 渲染——glean 面零触预判的 server 侧承载（M-2 功能面；
  * GL-20 同源消费 brief.cfg）。cfg 读贯穿（L-9 禁进程级缓存）语义不变。
- * 默认路径回归由 SYNC-20 承载（cfg 无帽键 → 逐字「帽 120 行/10KB」）。
+ * 默认路径回归由 SYNC-20 承载（cfg 无帽键 → 逐字「cap 120 lines/10KB」；v1.6.2 W5 重订英文形）。
  */
 export async function scenSyncW4Caps() {
   const R6c = subRoot("r-caps");
@@ -102,7 +102,7 @@ export async function scenSyncW4Caps() {
   try {
     const rawCall = (name, args) => s6c.request("tools/call", { name: PRE + name, arguments: args });
 
-    // ---- SYNC-20：pack 帽值句默认渲染回归——cfg 无帽键 → 固定包 RULES 仍逐字「帽 120 行/10KB」
+    // ---- SYNC-20：pack 帽值句默认渲染回归——cfg 无帽键 → 固定包 RULES 仍逐字「cap 120 lines/10KB」
     fs.mkdirSync(MEM6c, { recursive: true }); // spawn 竞态防御（GLEAN-01a 同款）
     fs.writeFileSync(cfg6c, JSON.stringify({ idle_hours: 0, new_events: 1 }));
     writeJsonl(path.join(R6c, "memory", "lessons.jsonl"), [
@@ -132,8 +132,8 @@ export async function scenSyncW4Caps() {
     const dueA = r.result && r.result.orch_memory && r.result.orch_memory.glean;
     const packRawA = fs.existsSync(pack6c) ? fs.readFileSync(pack6c, "utf8") : "";
     ck.ok(
-      "SYNC-20 pack 帽值句默认渲染回归：cfg 无帽键 → due 物化固定包 RULES 逐字「帽 120 行/10KB」（与 W4 前字节等价）",
-      Boolean(dueA) && dueA.due === true && packRawA.includes("帽 120 行/10KB"),
+      "SYNC-20 pack 帽值句默认渲染回归：cfg 无帽键 → due 物化固定包 RULES 逐字「cap 120 lines/10KB」（W5 重订=E-0③ 英化模板帽值句）",
+      Boolean(dueA) && dueA.due === true && packRawA.includes("cap 120 lines/10KB"),
       { due: Boolean(dueA) && dueA.due, packLen: packRawA.length },
     );
 
@@ -145,8 +145,8 @@ export async function scenSyncW4Caps() {
     const dueB = r.result && r.result.orch_memory && r.result.orch_memory.glean;
     const packRawB = fs.existsSync(pack6c) ? fs.readFileSync(pack6c, "utf8") : "";
     ck.ok(
-      "SYNC-21 pack 帽值句随 cfg 渲染：cfg 上调 30 行/20480B → 重物化固定包 RULES「帽 30 行/20KB」且缺省句消失（M-2 机械验证腿）",
-      Boolean(dueB) && dueB.due === true && packRawB.includes("帽 30 行/20KB") && !packRawB.includes("帽 120 行/10KB"),
+      "SYNC-21 pack 帽值句随 cfg 渲染：cfg 上调 30 行/20480B → 重物化固定包 RULES「cap 30 lines/20KB」且缺省句消失（M-2 机械验证腿）",
+      Boolean(dueB) && dueB.due === true && packRawB.includes("cap 30 lines/20KB") && !packRawB.includes("cap 120 lines/10KB"),
       { due: Boolean(dueB) && dueB.due, packLen: packRawB.length },
     );
   } finally {

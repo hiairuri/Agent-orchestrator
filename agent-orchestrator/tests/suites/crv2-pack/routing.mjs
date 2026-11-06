@@ -12,9 +12,9 @@ export async function runRouting(cur) {
   await seedSidecar(TROOT, "m1", { PROJ });
   await cur.call("context_pack", { mission_id: "mR1", title: "牵引包", task: "验证三层路由", inputs: ["m1"] });
   const pR1 = readPack("packs/mR1/pack.md");
-  ck.ok("CR-V23 T0→CONTEXT 块头逐字", pR1.includes("> 来源 m1#c01 · 任务目标与约束 · docs/a.md（§目标）"), pR1.split("\n").find((l) => l.includes("> 来源")));
-  ck.ok("CR-V23 T1→SUMMARY 行逐字", pR1.includes("- m1#c02 阶段结论：参数入口与沙箱合流已完成。"));
-  ck.ok("CR-V23 T2→READ FIRST 行逐字", pR1.includes("- src/app.py（L1）——来自 m1#c03"));
+  ck.ok("CR-V23 T0→CONTEXT 块头逐字", pR1.includes("> source m1#c01 · 任务目标与约束 · docs/a.md（§目标）"), pR1.split("\n").find((l) => l.includes("> source")));
+  ck.ok("CR-V23 T1→SUMMARY 行逐字", pR1.includes("- m1#c02 阶段结论: 参数入口与沙箱合流已完成。"));
+  ck.ok("CR-V23 T2→READ FIRST 行逐字", pR1.includes("- src/app.py（L1） - from m1#c03"));
   {
     const iC = pR1.indexOf("## CONTEXT"), iS = pR1.indexOf("## SUMMARY"), iR = pR1.indexOf("## READ FIRST");
     ck.ok("CR-V23 节序 CONTEXT→SUMMARY→READ FIRST", iC >= 0 && iC < iS && iS < iR, [iC, iS, iR]);
@@ -33,7 +33,7 @@ export async function runRouting(cur) {
   {
     const p = readPack("packs/mR5/pack.md");
     const ctx = p.slice(p.indexOf("## CONTEXT"), p.indexOf("## TASK"));
-    const pulled = ctx.split("\n").filter((l) => l.includes("——来自") || l.includes("> 来源") || l.includes("逐字原文"));
+    const pulled = ctx.split("\n").filter((l) => l.includes(" - from ") || l.includes("> source ") || l.includes("逐字原文"));
     const bad = pulled.filter((l) => l.includes(path.join(PROJ, "proj") + "\\") || l.includes(PROJ + "\\") || l.includes(PROJ));
     ck.ok("CR-V23 沙箱改写精确（牵引行全部 sandbox 根，n=" + pulled.length + "）", bad.length === 0 && pulled.length >= 3, bad.slice(0, 2));
   }
@@ -57,8 +57,8 @@ export async function runRouting(cur) {
     const collideLine = "docs/mC.md（§目标）——来自 mC#c01";
     await cur.call("context_pack", { mission_id: "mR6", title: "超帽去重包", task: "t", inputs: ["mA", "mB", "mC", "mB"], read_first: [collideLine] });
     const pR6 = readPack("packs/mR6/pack.md");
-    ck.ok("CR-V24 撞帽降级：mC T0 整块降指针+说明行（永不静默丢）", pR6.includes("其 T0 因总量帽未随包，见指针") && pR6.includes("docs/mC.md"));
-    ck.ok("CR-V24 去重：重复条目跳过+计数行", pR6.includes("（去重：4 条重复条目已跳过，首次出现胜出）"), pR6.split("\n").find((l) => l.includes("去重")));
+    ck.ok("CR-V24 撞帽降级：mC T0 整块降指针+说明行（永不静默丢）", pR6.includes("its T0 was not pulled into the pack (layer cap); see the pointer") && pR6.includes("docs/mC.md"));
+    ck.ok("CR-V24 去重：重复条目跳过+计数行", pR6.includes("(dedup: 4 duplicate entries skipped; first occurrence wins)"), pR6.split("\n").find((l) => l.includes("dedup")));
     ck.ok("CR-V24 撞行：手动行胜出（该串恰 1 处）", pR6.split(collideLine).length - 1 === 1);
     ck.ok("CR-V24 mA/mB 完整保留", pR6.includes("mA 目标") && pR6.includes("mB 补充"));
   }
@@ -76,18 +76,18 @@ export async function runRouting(cur) {
 
   await cur.call("context_pack", { mission_id: "mR7", title: "L1 存量牵引", task: "t", inputs: ["m4"] });
   const pR7 = readPack("packs/mR7/pack.md");
-  ck.ok("CR-V25 L1：done report 后 server 桩 sidecar 生效（CR-V21a 语义）", pR7.includes("reports/legacy.md——来自 m4#c01"));
+  ck.ok("CR-V25 L1：done report 后 server 桩 sidecar 生效（CR-V21a 语义）", pR7.includes("reports/legacy.md - from m4#c01"));
   await cur.call("context_pack", { mission_id: "mR7n", title: "L2 存量牵引", task: "t", inputs: ["m4n"] });
   const pR7n = readPack("packs/mR7n/pack.md");
-  ck.ok("CR-V25 L2：READ FIRST 桩行带 server 桩标记", pR7n.includes("reports/legacy.md——来自 m4n（server 桩）"));
+  ck.ok("CR-V25 L2：READ FIRST 桩行带 server 桩标记", pR7n.includes("reports/legacy.md - from m4n (server stub)"));
   const zero = await cur.call("context_pack", { mission_id: "mR8", title: "L3 零产物", task: "t", inputs: ["m5"] });
-  ck.ok("CR-V25 L3：全部零产出 → isError+引导语", zero.isError === true && zero.text.includes("inputs 全部零产出"), zero.text.slice(0, 150));
+  ck.ok("CR-V25 L3：全部零产出 → isError+引导语", zero.isError === true && zero.text.includes("All inputs produced zero yield"), zero.text.slice(0, 150));
   await cur.call("context_pack", { mission_id: "mR9", title: "混合回退", task: "t", inputs: ["m4n", "m5"] });
   const pR9 = readPack("packs/mR9/pack.md");
-  ck.ok("CR-V25 混合：m4n 正常+m5 跳过警示行，不整体失败", pR9.includes("reports/legacy.md——来自 m4n（server 桩）") && pR9.includes("已跳过") && pR9.includes("m5 无 manifest 且零产物"));
+  ck.ok("CR-V25 混合：m4n 正常+m5 跳过警示行，不整体失败", pR9.includes("reports/legacy.md - from m4n (server stub)") && pR9.includes("skipped") && pR9.includes("have no manifest and zero outputs, skipped"));
   await cur.call("context_pack", { mission_id: "mR10", title: "损坏侧车牵引", task: "t", inputs: ["m6"] });
   const pR10 = readPack("packs/mR10/pack.md");
-  ck.ok("CR-V25 损坏侧车视同 L2+警示行", pR10.includes("manifest sidecar 损坏不可解析") && pR10.includes("server 桩"));
+  ck.ok("CR-V25 损坏侧车视同 L2+警示行", pR10.includes("manifest sidecar corrupted/unparsable") && pR10.includes("server stub"));
 
   // ---- 不变量：缺省面包 mission（从未 done report）无 manifest 键；version=2
   //（m4 有 artifacts+done report → server 桩合法落指针，属 CR-V21a 语义，不在禁列）

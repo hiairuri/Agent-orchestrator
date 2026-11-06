@@ -86,7 +86,7 @@ try {
   makeOobChange(wt1, "README.md");
   wtCommit(wt1, "oob change");
   const ap1 = await s.call("sandbox_apply", { mission_id: m1 });
-  ck.ok("SB2 apply isError 含越界改动+README.md", ap1.isError && ap1.text.includes("越界改动") && ap1.text.includes("README.md"), ap1.text.slice(0, 120));
+  ck.ok("SB2 apply isError 含越界改动+README.md", ap1.isError && ap1.text.includes("out-of-scope changes") && ap1.text.includes("README.md"), ap1.text.slice(0, 120));
   ck.ok("SB2 board 未变仍 done", mission(m1)?.status === "done");
 
   // ---------- SB5 discard 零损伤 ----------

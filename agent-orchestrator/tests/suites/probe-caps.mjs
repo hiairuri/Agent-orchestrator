@@ -218,7 +218,7 @@ try {
     const ic = J(await probe({ action: "file.grep", path: "sample.log", pattern: "LINE-007", ignore_case: true }));
     ck.ok("PROBE-07c ignore_case 命中（grep -i）", ic.match_count === 1 && ic.matches[0].line_no === 7, ic.match_count);
     const badRe = await probe({ action: "file.grep", path: "sample.log", pattern: "([unclosed" });
-    ck.ok("PROBE-07d 非法正则明确拒绝", badRe.isError && badRe.text.includes("正则"), badRe.text.slice(0, 100));
+    ck.ok("PROBE-07d 非法正则明确拒绝", badRe.isError && badRe.text.includes("not a valid regex"), badRe.text.slice(0, 100));
     let all = 0;
     let tok = (J(await probe({ action: "file.grep", path: "sample.log", pattern: "line-\\d+" }))).page_token;
     all += 50;
@@ -258,7 +258,7 @@ try {
       const c1 = await probe({ action: "db.query", path: "test.db", query: "SELECT id FROM t; DROP TABLE t" });
       const c2 = await probe({ action: "db.query", path: "test.db", query: "SELECT id -- hidden" });
       ck.ok("PROBE-08d 多语句与注释拒绝（保分页拼装可判定）",
-        c1.isError && c1.text.includes("分号") && c2.isError && c2.text.includes("注释"),
+        c1.isError && c1.text.includes("semicolon") && c2.isError && c2.text.includes("comment"),
         { c1: c1.text.slice(0, 60), c2: c2.text.slice(0, 60) });
       const miss = await probe({ action: "db.query", path: "nope.db", query: "SELECT 1 AS x" });
       ck.ok("PROBE-08e 缺库文件明确报错不抛栈", miss.isError && miss.text.includes("nope.db"), miss.text.slice(0, 100));
@@ -307,12 +307,12 @@ try {
     // no_cache:true：PROBE-07a 已同参探过 → 不绕存根就拿不到 page_token（缓存归 CACHE 组管）
     const g = J(await probe({ action: "file.grep", path: "sample.log", pattern: "line-", max_count: 3, no_cache: true }));
     const misuse = await probe({ action: "file.head", path: "sample.log", page_token: g.page_token });
-    ck.ok("PROBE-10a 跨 action 令牌拒绝", misuse.isError && misuse.text.includes("不匹配"), misuse.text.slice(0, 90));
+    ck.ok("PROBE-10a 跨 action 令牌拒绝", misuse.isError && misuse.text.includes("mismatched action"), misuse.text.slice(0, 90));
     const garbage = await probe({ action: "file.head", path: "sample.log", page_token: "not-a-token" });
     ck.ok("PROBE-10b 垃圾令牌拒绝不抛栈", garbage.isError && garbage.text.includes("page_token"), garbage.text.slice(0, 90));
     fs.appendFileSync(path.join(PROJ, "sample.log"), "line-201 appended\n");
     const stale = await probe({ action: "file.grep", path: "sample.log", pattern: "line-", page_token: g.page_token });
-    ck.ok("PROBE-10c 文件变化后旧令牌拒绝（sz 失配）", stale.isError && stale.text.includes("变化"), stale.text.slice(0, 90));
+    ck.ok("PROBE-10c 文件变化后旧令牌拒绝（sz 失配）", stale.isError && stale.text.includes("the file changed"), stale.text.slice(0, 90));
     const unk = await probe({ action: "sqlite.exec", path: "x" });
     ck.ok("PROBE-10d 未知 action 明确报错并列出四 action",
       unk.isError && ["db.query", "file.head", "file.grep", "bin.inspect"].every((a) => unk.text.includes(a)),

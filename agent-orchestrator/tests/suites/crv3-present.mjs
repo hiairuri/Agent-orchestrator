@@ -106,8 +106,8 @@ try {
   ck.ok("CRV3-03 ready 无主仅信息性", Array.isArray(rv3.ready_unclaimed) && rv3.ready_unclaimed.some((r) => r.id === "m2") && !rv3.actions.some((a) => a.priority < 2 && a.action.includes("m2")));
   // P2-1（M10，A-v0110-M10-02）：ready 呈现文案的池工章号防漂——SKILL W2 重排后
   // 池工/DAG 章=第 13 章（旧 §18）；resume 呈现面两条 action 文案逐字锁新章号。
-  const poolActs = rv3.actions.filter((a) => typeof a.action === "string" && a.action.includes("派池工"));
-  ck.ok("P2-1 ready 呈现文案池工指针=第 13 章（每条含）", poolActs.length >= 1 && poolActs.every((a) => a.action.includes("第 13 章")), poolActs.map((a) => a.action));
+  const poolActs = rv3.actions.filter((a) => typeof a.action === "string" && a.action.includes("pool worker"));
+  ck.ok("P2-1 ready 呈现文案池工指针=第 13 章（每条含）", poolActs.length >= 1 && poolActs.every((a) => a.action.includes("pool")), poolActs.map((a) => a.action));
   ck.ok("P2-1 resume 呈现面旧章号 第 18 章 零残留", !rv3.actions.some((a) => typeof a.action === "string" && a.action.includes("第 18 章")), rv3.actions.map((a) => a.action));
 
   // ---------- CR-V27 呈现面 ----------
@@ -155,7 +155,8 @@ try {
   const ev = rd.events[0];
   // v1.1 W3（A5-E, DESIGN §4.5）：details_head ≤160 + details_path 指针 + 指针化 HINT；
   // 长文正文不再进主控面（spool 存证不动）。
-  const HINT_POINTER = "details 全文见 details_path（长文应写文件走 artifacts，邮箱只传摘要）";
+  // v1.6.2 W5 重订=英文指针 HINT（tool-mailbox DETAILS_POINTER_HINT 同文）
+  const HINT_POINTER = "full details at details_path (long content goes to files via artifacts; the mailbox carries summaries only)";
   ck.ok("V28 read details 指针化（details_head 头160 + details_path + 指针 HINT，无正文键）",
     !!ev && !("details" in ev) && ev.details_head === D.slice(0, 160) &&
       typeof ev.details_path === "string" && ev.details_path.includes("spool") &&
@@ -176,7 +177,7 @@ try {
   seedMission({ id: "m6", status: "running", scope_paths: ["C:/proj/src/"] });
   const rp6 = await report({ mission_id: "m6", worker: "w6", kind: "milestone", summary: "prog", files_touched: ["C:/proj/src/ok.ts", "C:/other/rogue.ts"] });
   ck.ok("M-06 warn_scope 独立分键", JSON.stringify(rp6.warn_scope) === JSON.stringify(["C:/other/rogue.ts"]), rp6.warn_scope);
-  ck.ok("M-06 warn 合计行仍提及 scope", typeof rp6.warn === "string" && rp6.warn.includes("scope 越界"), rp6.warn);
+  ck.ok("M-06 warn 合计行仍提及 scope", typeof rp6.warn === "string" && rp6.warn.includes("out-of-scope"), rp6.warn);
   ck.ok("M-06 scope_violations 落 mission", JSON.stringify(rawBoard().missions.find((m) => m.id === "m6").scope_violations) === JSON.stringify(["C:/other/rogue.ts"]));
   const g6v = await board({ action: "get", mission_id: "m6" });
   ck.ok("E6 scope_violations 自然透出", JSON.stringify(g6v.scope_violations) === JSON.stringify(["C:/other/rogue.ts"]), g6v.scope_violations);

@@ -1,13 +1,12 @@
-# 契约卡②：spool 邮箱（事件信封 + 目录协议）
+# Contract card 2: the spool mailbox (event envelopes + the directory protocol)
 
-- **归属模块**：mcp/server-stores.mjs（spool 全部读写经 server；落箱在 report 工具内，消费在 mailbox/resume/gc 工具内）；事件信封生成与消费所读写的 board 字段见 `card-board.md` §4（两卡接缝，字段语义以彼卡为准）
-- **脆度评级**（面广度×后果重度双轴）：**中**——消费面广（mailbox peek/read/answer/gc、resume 计数、board list unread、close 告警、组包 wake 链），但失效后果限单 mission 的消息面（不同于 root.txt 的全局性）；裸 JSON 无 schema 校验 + rename 消费语义是主要风险面
-- **历史事故回链**：v0.3.1 A1/A3/B9（根锁/answers wx/ENOENT 已消费）、C4/C5（gc 归档/closed 拒改板）、V6-18 details 存储侧截断、V6-49 畸形事件假 unread 永挂、v1.1 W6 QA P2-b（畸形 id 炸 list）、v1.1 W3 A5-E（read 呈现指针化）、v1.1.1 W-B（完成即唤骑落箱面）
-- **锚点声明**：本卡行号系总装时点（v1.2 源码）实测，**不作跨版引用**（l-20261022-6a14d6）；函数名/常量名双锚为定位权威
+- **Home module**: mcp/server-stores.mjs (all spool reads/writes go through the server; boxing happens inside the report tool, consumption inside mailbox/resume/gc); the board fields read/written by envelope generation and consumption are in `card-board.md` §4 (the seam between the two cards; field semantics defer to that card)
+- **Brittleness rating** (surface-breadth x consequence-severity dual axis): **medium** - broad consumption face (mailbox peek/read/answer/gc, resume counting, board list unread, close warnings, the pack wake chain), but failure consequences are limited to a single mission's message face (unlike root.txt's global reach); bare JSON with no schema validation + rename consumption semantics are the main risk faces
+- **Anchor declaration**: all line numbers in this card were measured at assembly time (v1.2 source); **line numbers are not referenced across versions** (l-20261022-6a14d6); function/constant-name dual anchors are the locating authority
 
 ---
 
-## 1. 文件面与布局
+## 1. File face and layout
 
 | 项 | 内容 | 锚点 |
 |---|---|---|
@@ -19,20 +18,20 @@
 
 **目录列举行为**（读方通用，均在 mcp/server-stores.mjs）：`listSpoolMissions` 只取目录条目（stat 非目录跳过，IO 错误返空）；`listUnreadFiles` 只取 `.json` 结尾并按名排序（`.bad` 隔离件天然出列）。
 
-## 2. 写方（唯一写方=server 进程，落箱+改板同临界区）
+## 2. Writers (single writer = the server process; boxing + board update in the same critical section)
 
-| 写点 | 写什么 | 锚点 |
+| Write point | What it writes | Anchor |
 |---|---|---|
-| report（落箱） | 事件信封整文件 atomicWriteFileSync 到 `unread/`；**落箱+board 更新+lessons append 一个根锁临界区**（v0.3.1 A1）——不存在「事件落了板没动」的中间态 | mcp/tool-report.mjs toolReport（落箱临界区） |
-| report 的两个旁路 | closed mission（C5）与成对鉴权不过（W-A1 方案 a）：事件**已落箱存档**、board 零改动、lessons 不记——落箱先于两判定，证据永不丢 | mcp/tool-report.mjs（C5/成对鉴权旁路） |
-| mailbox answer | `answers/<seq>-answer.json`，flag:"wx" 独占创建，冲突 seq 递增（A3）——并发写者永不覆盖既有答复；answer 文件写+板更新同根锁临界区 | mcp/tool-mailbox.mjs mailbox answer |
-| mailbox gc | 陈旧 unread 归档（mtime<cutff 的 unread 件经 consumeEventFile 移入 read/，计数 archivedUnread）；gc 归档**只移动不删 unread**，删除面仅 read/ | mcp/tool-mailbox.mjs mailbox gc |
+| report (boxing) | the whole event envelope written atomically (atomicWriteFileSync) to `unread/`; **boxing + board update + lessons append in one root-lock critical section** - there is no intermediate state where "the event landed but the board did not move" | mcp/tool-report.mjs toolReport (the boxing critical section) |
+| report's two bypasses | closed mission (C5) and failed paired auth (the W-A1 plan a): the event **is already boxed and archived**, the board is untouched, lessons not recorded - boxing precedes both judgments, evidence is never lost | mcp/tool-report.mjs (C5 / paired-auth bypass) |
+| mailbox answer | `answers/<seq>-answer.json`, flag:"wx" exclusive creation, colliding seq increments - concurrent writers never overwrite an existing answer; the answer file write + board update share the root-lock critical section | mcp/tool-mailbox.mjs mailbox answer |
+| mailbox gc | stale unread archived (unread files with mtime<cutoff moved into read/ via consumeEventFile, counted as archivedUnread); gc archiving **only moves, never deletes unread**; the deletion face is read/ only | mcp/tool-mailbox.mjs mailbox gc |
 
-**落箱前置门**（先于落箱，拒绝=零事件）：fail-closed token 门（V6-09：expectedToken 存在则必携且精确匹配；--strict-tokens 连无 token mission 也拒，V6-19A）——鉴权与 board 字段面的接缝见 `card-board.md` §4。summary>200 存储侧截断并附 truncatedNote；details>DETAILS_MAX_CHARS(4000) 存储侧截断（V6-18）+响应 warn_details（INJ-04）——长 payload 应写文件走 artifacts，storage face 无帽不等于无界（mcp/tool-report.mjs 落箱前置门+存储侧截断）。
+**Pre-boxing gate** (before boxing; a rejection = zero events): the fail-closed token gate (V6-09: if expectedToken exists it must be carried and match exactly; --strict-tokens rejects even token-less missions, V6-19A) - the seam between auth and the board field face is `card-board.md` §4. summary>200 is truncated storage-side with a truncatedNote; details>DETAILS_MAX_CHARS(4000) is truncated storage-side (V6-18) + the response carries warn_details (INJ-04) - long payloads should go to files via artifacts; no cap on the storage face does not mean unbounded (mcp/tool-report.mjs pre-boxing gate + storage-side truncation).
 
-## 3. 事件信封字段表
+## 3. The event envelope field table
 
-newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验=裸 JSON**（schema 面=本表+消费方容错）：
+The newEvent shape (the newEvent block in mcp/tool-report.mjs). **No JSON schema validation = bare JSON** (the schema face = this table + consumer tolerance):
 
 | 字段 | 类型 | 语义 |
 |---|---|---|
@@ -51,7 +50,7 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 | question | string\|null | blocked/question 必带（先于落箱校验） |
 | urgent | boolean | 紧急旗标（仅旗标，不改变投递路径） |
 
-## 4. 读方清单（进程×时机×读不到时的行为）
+## 4. Reader inventory (process x timing x behavior on unreadable/malformed)
 
 | 读方 | 时机 | 读不到/畸形时行为 |
 |---|---|---|
@@ -67,7 +66,7 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 
 **消费呈现**（v1.1 W3 A5-E）：mailbox read 的 details 指针化——`details_head`（≤160=T1_HEAD_CAP）+`details_path`（消费后 read/ 文件路径）+`details_hint`；全文证据恒在 spool，DETAILS_MAX_CHARS 存储帽不动（`presentMailboxDetails`（mcp/tool-mailbox.mjs））。peek 从不携 details（字节级不变）。
 
-## 5. 失效语义（缺文件/损坏/半写/竞态/时钟漂移 × 读方行为）
+## 5. Failure semantics (missing file / corruption / partial write / race / clock drift × reader behavior)
 
 | 情形 | 行为 | 分类 |
 |---|---|---|
@@ -81,15 +80,15 @@ newEvent 形状（mcp/tool-report.mjs newEvent 段）。**无 JSON schema 校验
 | 畸形 mission_id（手编 board/legacy id） | safeSegment 消毒+countUnreadSafe 兜底计 0——不炸 board list（QA P2-b） | 静默降级（best-effort） |
 | gc 竞态（归档 vs 并发消费） | 归档走 consumeEventFile（ENOENT 当已消费跳过）；read/ 先扫后归档顺序保证本 pass 刚归档件不被误删 | 锁内仲裁（C4） |
 
-## 6. 断言锚
+## 6. Assertion anchors
 
-- **crv6-statemachine**：C5（closed 拒改板、事件入箱）+ SM-08（closed 机器可读键）+ V6-49 隔离行为腿 + wake 队列 WB-SRV 系（done×headless 产事件）。
-- **crv5-auth**：AUTH-01..08——fail-closed token 门含「三探针零事件落箱+板面零改动」（拒绝先于落箱的机械证明）。
-- **crv2-pack**：组包对拍基线（信封字段面与响应键面）；**po-static/crv 系**：read 呈现指针化（A5-E）细节腿。
-- **LM-05**（lint-manifest，M1-3 注册）：本卡常量/函数名（missionSpoolDir/unreadDirOf/readEventFile/consumeEventFile/countUnreadSafe/DETAILS_MAX_CHARS 等）mcp/server-stores.mjs grep 可见+卡存在非空。
+- **crv6-statemachine**: C5 (closed rejects board-mutating reports, events still boxed) + SM-08 (closed machine-readable keys) + the V6-49 quarantine behavior legs + the wake queue WB-SRV series (done x headless produces events).
+- **crv5-auth**: AUTH-01..08 - the fail-closed token gate including "three probes, zero events boxed + zero board changes" (the mechanical proof that rejection precedes boxing).
+- **crv2-pack**: the pack-materialization comparison baseline (the envelope field face and response key face); **po-static/crv series**: the read presentation pointerization (A5-E) detail legs.
+- **LM-05** (lint-manifest, M1-3 registration): this card's constant/function names (missionSpoolDir/unreadDirOf/readEventFile/consumeEventFile/countUnreadSafe/DETAILS_MAX_CHARS etc.) grep-visible in mcp/server-stores.mjs + the card exists and is non-empty.
 
-## 7. 维护规则
+## 7. Maintenance rules
 
-- 信封字段演进：`v` 递增+本表 §3 补行+落箱函数同步；与 `card-board.md` §4（信封↔board 接缝）同波改（该节维护规则已约定）。
-- 目录族/文件名协议变更：先改本卡 §1 口径（含「N 文件」口径勘误），再动消费面；`.bad`/`.json` 后缀过滤语义是消费面隐式契约，变更需全读方盘点。
-- 新增读方（如未来组包/哨兵直读 spool）：必须走 readEventFile 面（自动获得 V6-49 隔离），**禁止**裸 JSON.parse 直读事件文件——那是 V6-49 的病根。
+- Envelope field evolution: increment `v` + add §3 table rows + sync the boxing function; changed in the same wave as `card-board.md` §4 (the envelope<->board seam, as that section's maintenance rules already stipulate).
+- Directory family / filename protocol changes: change this card's §1 accounting first (including the "N files" accounting erratum), then touch the consumption face; the `.bad`/`.json` suffix-filter semantics are an implicit consumption-face contract - a change requires an inventory of all readers.
+- New readers (future pack/sentinel direct spool reads, say): must go through the readEventFile face (which automatically gains V6-49 quarantine); **raw JSON.parse direct reads of event files are forbidden** - that is the root cause of V6-49.

@@ -145,8 +145,9 @@ export async function scenGlean05() {
     const srvSrc52 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
     ck.ok(
       "GLEAN-05k §9.4 逐字稿落 schema（v1.6.1 P-W1 英文化改判）：stage 描述行首尾片段逐字在案 + action 枚举含 stage/promote_batch",
-      srvSrc52.includes("stage: Coordinator-side staging (ORCHTEMP): writes source=") &&
-        srvSrc52.includes("/candidate/confidence=0; no merge no injection; consumed by the gleaner (retired+view-layer write-back). trigger/fix required.") &&
+      srvSrc52.includes("stage: coordinator-side staging (write-only staging area; writes source=") &&
+        srvSrc52.includes("candidate/confidence=0): no merge, no injection; consumed by the memory-gleaning agent") &&
+        srvSrc52.includes("(gleaner). trigger/fix required.") &&
         srvSrc52.includes('["list", "add", "promote", "promote_batch", "retire", "stage"]'),
       null,
     );

@@ -18,7 +18,7 @@ export async function runDispatchRuntime(cur) {
     const wGate = await cur.call("dispatch", { mission_id: "mDispW" });
     ck.ok(
       "W4-DISPATCH-07a yolo 闸：worker 类 scope_paths 空 → isError（headless=--mode yolo 全放行，引导登记写集）",
-      wGate.isError === true && /yolo 闸/.test(wGate.text) && /scope_paths/.test(wGate.text),
+      wGate.isError === true && /yolo gate/.test(wGate.text) && /scope_paths/.test(wGate.text), // W5 re-pin English error face
       wGate.text.slice(0, 200),
     );
     await cur.call("board", {
@@ -28,7 +28,7 @@ export async function runDispatchRuntime(cur) {
     const sGate = await cur.call("dispatch", { mission_id: "mDispS" });
     ck.ok(
       "W4-DISPATCH-07b scout 豁免 yolo 闸：越过闸门后按包解析失败（错误非 yolo，闸门语义正向可证）",
-      sGate.isError === true && !/yolo 闸/.test(sGate.text) && /任务包/.test(sGate.text),
+      sGate.isError === true && !/yolo gate/.test(sGate.text) && /task pack/.test(sGate.text), // W5 re-pin English
       sGate.text.slice(0, 200),
     );
     // v1.6 W-p 改写（预判外显形）：headless busy 闸随 -p 迁 parked 后，原「mode=headless
@@ -48,13 +48,13 @@ export async function runDispatchRuntime(cur) {
     ck.ok(
       "W4-DISPATCH-08 mode enum 收窄负向腿（v1.6 W-p）：显式 mode:\"headless\" → isError mode 非法" +
         "（enum: nested——headless 通道 parked at v1.6 W-p；板记录保留面不涉派发）",
-      bGate.isError === true && /mode 非法/.test(bGate.text) && /parked/.test(bGate.text),
+      bGate.isError === true && /invalid dispatch mode/.test(bGate.text) && /parked/.test(bGate.text), // W5 re-pin English
       bGate.text.slice(0, 200),
     );
     const noMission = await cur.call("dispatch", { mission_id: "mDispNope" });
     ck.ok(
       "W4-DISPATCH-08b 在板校验：mission 不存在 → isError（派发面前置）",
-      noMission.isError === true && /不在板/.test(noMission.text),
+      noMission.isError === true && /not on the board/.test(noMission.text), // W5 re-pin English
       noMission.text.slice(0, 160),
     );
   }

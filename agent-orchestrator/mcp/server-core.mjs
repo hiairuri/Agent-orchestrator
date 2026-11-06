@@ -8,7 +8,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.6.1";
+const SERVER_VERSION = "1.6.2";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path
@@ -415,7 +415,7 @@ function acquireRootLock() {
           /* best effort */
         }
         if (Date.now() >= deadline) {
-          throw new ToolError("存储忙，请重试（root lock 等待超时）");
+          throw new ToolError("storage busy, please retry (root lock wait timed out)");
         }
         sleepMs(backoff + Math.floor(Math.random() * 50));
         backoff = Math.min(200, backoff + 50);
@@ -464,7 +464,7 @@ function acquireRootLock() {
         continue;
       }
       if (Date.now() >= deadline) {
-        throw new ToolError("存储忙，请重试（root lock 等待超时）");
+        throw new ToolError("storage busy, please retry (root lock wait timed out)");
       }
       sleepMs(backoff + Math.floor(Math.random() * 50));
       backoff = Math.min(200, backoff + 50);

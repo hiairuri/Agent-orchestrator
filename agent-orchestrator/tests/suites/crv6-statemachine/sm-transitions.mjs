@@ -93,7 +93,7 @@ export async function run(ctx) {
       const m = await getMission(id);
       ck.ok(
         `SM-03c 表外迁移 ${tag}（无 reopen）→ ToolError 且 board 零变更`,
-        r.isError === true && r.text.includes("非法状态迁移") && m.status === from,
+        r.isError === true && r.text.includes("illegal state transition") && m.status === from,
         { err: r.text?.slice(0, 100), status: m.status },
       );
     }

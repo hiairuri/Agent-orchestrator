@@ -294,7 +294,7 @@ export function buildWakeCond(rootDir, events, fsImpl = fs) {
   const batch = events.slice(-WAKE_BATCH_MAX); // 文件名字典序=时序；取最新
   const primary = batch[batch.length - 1];
   const n = events.length - 1;
-  const suffix = n > 0 ? `｜另有 ${n} 项待处理，详見板` : "";
+  const suffix = n > 0 ? ` +${n} more pending - see the board` : "";
   const board = readBoardSafe(rootDir, fsImpl);
   const bm = board && Array.isArray(board.missions)
     ? board.missions.find((m) => m && m.id === primary.ev.mission_id)

@@ -23,7 +23,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_DIR = path.resolve(HARNESS_DIR, "..", "..");
-const HEAD_MARK = "## 全角色通用编排纪律（已随你的角色预设载入，此刻生效）";
+// v1.6.2 W5 重订（design §5.1 账 #26；与 po-static N1① DISC_HEAD 同值）：W2 英文节头后，
+//   HEAD_MARK 换新英文节头，--check drift=0 转绿（impl-plan §8 步 5）。
+const HEAD_MARK = "## All-role orchestration disciplines (loaded with your role preset; in effect now)";
 const PERSONAS = ["orch-worker", "orch-scout", "orch-reviewer", "orch-planner", "orch-plan"];
 const CANONICAL = "orch-worker";
 const TARGETS = PERSONAS.filter((p) => p !== CANONICAL);

@@ -60,7 +60,7 @@ export async function run(ctx) {
       },
     ]);
     const r = await Promise.race([bg.done, sleep(10000).then(() => null)]);
-    ck.ok("T2b 复活后告警照旧 exit 1", Boolean(r) && r.code === 1 && r.stdout.includes("唤醒失败告警"), r && { code: r.code, out: r.stdout.slice(0, 100) });
+    ck.ok("T2b 复活后告警照旧 exit 1", Boolean(r) && r.code === 1 && r.stdout.includes("wake failure alert"), r && { code: r.code, out: r.stdout.slice(0, 100) });
     ck.ok("T2c 本地回声落盘（unclaimed_terminal）", readText(ECHO).includes("unclaimed_terminal"), readText(ECHO).slice(0, 120));
     let firedNames = [];
     try {

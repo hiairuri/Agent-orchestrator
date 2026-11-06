@@ -603,7 +603,7 @@ function lessonsHashedList(token) {
     return {
       ok: true,
       mode: "short",
-      message: `无新增教训（基线 ${now}，在册 ${total} 条）`,
+      message: `no new lessons (baseline ${now}, ${total} on record)`,
       total_active: total,
     };
   }
@@ -612,7 +612,7 @@ function lessonsHashedList(token) {
     return {
       ok: true,
       mode: "short",
-      message: `无新增教训（基线 ${prev.base_ts ?? now}，在册 ${total} 条）`,
+      message: `no new lessons (baseline ${prev.base_ts ?? now}, ${total} on record)`,
       total_active: total,
     };
   }
@@ -629,7 +629,7 @@ function lessonsHashedList(token) {
   return {
     ok: true,
     mode: "increment",
-    message: fresh.length ? `新增教训 ${fresh.length} 条` : "库有迁移但无新增条目（合并/退役面）",
+    message: fresh.length ? `${fresh.length} new lessons` : "library migrated but no new entries (merge/retire face)",
     total_active: total,
     new_lessons: fresh,
   };
@@ -647,8 +647,8 @@ function toolLessonsInner(args) {
   const token = args.token == null ? null : String(args.token).trim() || null;
   if (token && LESSONS_WRITE_ACTIONS.includes(action)) {
     throw new ToolError(
-      "lessons 携 token 只读：写 action（add/stage/promote/promote_batch/retire）一律拒" +
-        "（worker 写闸，v1.6 W4——禁裸解禁窗口；写面=主控无 token 通道全功能不变）",
+      "lessons with a token is read-only: write actions (add/stage/promote/promote_batch/retire) are always rejected" +
+        " (worker write gate - no bare-unlock window; the coordinator's token-free channel keeps full write function)",
     );
   }
   const list = loadLessons();

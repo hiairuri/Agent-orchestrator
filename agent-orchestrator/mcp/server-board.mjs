@@ -59,9 +59,9 @@ function wakeFailureInfo(m) {
 
 function fmtAge(min) {
   if (min == null || !Number.isFinite(min)) return "";
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟前`;
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  return `${Math.floor(min / 60)}h ${min % 60}m ago`;
 }
 
 /**
@@ -404,26 +404,26 @@ function upsertMission(patch, opts = {}) {
       // drafted→closed is banned even with close_confirmed.
       if (merged.status === "closed" && from === "drafted") {
         throw new ToolError(
-          "drafted → closed 禁止直达：未派发即归档应走删除/废弃语义，或先 dispatched 再 closed（board 未改动）",
+          "drafted -> closed is forbidden directly: archiving without dispatch should use delete/void semantics, or go dispatched first then closed (board unchanged)",
         );
       }
       const leg = (ALLOWED_TRANSITIONS[from] || {})[merged.status];
       if (!leg) {
         const hint =
           from === "closed"
-            ? "closed 无离开路径：重开请新建 mission"
+            ? "closed has no exit path: create a new mission to reopen"
             : from === "done" || from === "failed" || from === "skipped"
-              ? "终态复活腿仅 failed/skipped → drafted（需 reopen:true+note）；归档走 closed"
-              : "→running 仅 board claim 可达；在飞回收/解锁由 sweep 内部执行";
+              ? "the terminal-revival leg is only failed/skipped -> drafted (requires reopen:true + note); archiving goes through closed"
+              : "->running is reachable only via board claim; in-flight reclaim/unlock runs inside the sweep";
         throw new ToolError(
-          `非法状态迁移：${from} → ${merged.status} 不在白名单（ALLOWED_TRANSITIONS；board 未改动）。${hint}`,
+          `illegal state transition: ${from} -> ${merged.status} not in the allowlist (ALLOWED_TRANSITIONS; board unchanged). ${hint}`,
         );
       }
       // V6-11 门 B (half 2): closing from the outside requires the explicit
       // one-shot confirmation (transient key: consumed here, never stored).
       if (merged.status === "closed" && opts.closeConfirmed !== true) {
         throw new ToolError(
-          '直写 status:"closed" 需显式 close_confirmed:true（一次性确认，防手滑假归档；board 未改动）',
+          'writing status:"closed" directly requires explicit close_confirmed:true (one-shot confirmation against accidental fake archiving; board unchanged)',
         );
       }
       // v0.6 (V6-20): terminal revival — the leg demands reopen:true + note,
@@ -433,7 +433,7 @@ function upsertMission(patch, opts = {}) {
         const reason = String(opts.reopenReason ?? "").trim();
         if (opts.reopen !== true || !reason) {
           throw new ToolError(
-            `终态离开（${from} → ${merged.status}）需显式 reopen:true 且 note 说明原因（board 未改动）`,
+            `leaving a terminal state (${from} -> ${merged.status}) requires explicit reopen:true and a note stating why (board unchanged)`,
           );
         }
         reopenEvent = { at: merged.updated_at, event: "reopen", summary: truncateStr(reason, 200) };
@@ -553,15 +553,15 @@ function sweepGraph(board, at) {
                   at,
                   event: "lease_invalid",
                   summary: backToReady
-                    ? "leaseUntil 畸形不可解析 → 兜底龄期强制回收，回 ready 可再领取"
-                    : `leaseUntil 畸形不可解析 → 兜底龄期强制回收（状态 ${m.status} 保持）`,
+                    ? "leaseUntil malformed/unparsable -> force-reclaimed by the fallback age, back to ready for re-claim"
+                    : `leaseUntil malformed/unparsable -> force-reclaimed by the fallback age (status ${m.status} kept)`,
                 }
               : {
                   at,
                   event: "lease_expired",
                   summary: backToReady
-                    ? "租约超时未续 → 回 ready 可再领取"
-                    : `租约超时未续 → 回收租约（状态 ${m.status} 保持，answer 到达时解锁）`,
+                    ? "lease expired without renewal -> back to ready for re-claim"
+                    : `lease expired without renewal -> lease reclaimed (status ${m.status} kept; unlocks when an answer arrives)`,
                 },
           );
           (invalid ? leaseInvalid : leaseExpired).push(m.id);
@@ -590,8 +590,8 @@ function sweepGraph(board, at) {
             at,
             event: "dangling_dropped",
             summary:
-              `清理悬挂依赖引用 ${before - m.blockedBy.length} 项（${droppedIds.join(", ")} 不存在）。` +
-              "前向引用允许跨一次写事务落地；若为误写请修订 blockedBy",
+              `cleaned ${before - m.blockedBy.length} dangling dependency references (${droppedIds.join(", ")} do not exist). ` +
+              "forward references may land across one write transaction; if miswritten, fix blockedBy",
           });
           changed = true;
         }
@@ -610,7 +610,7 @@ function sweepGraph(board, at) {
         m.timeline.push({
           at,
           event: "skip:upstream_failed",
-          summary: "上游 " + failedDeps.map((d) => d.id).join(","),
+          summary: "upstream " + failedDeps.map((d) => d.id).join(","),
         });
         skipped.push(m.id);
         changed = true;
@@ -623,7 +623,7 @@ function sweepGraph(board, at) {
       ) {
         m.status = "ready";
         m.timeline = Array.isArray(m.timeline) ? m.timeline : [];
-        m.timeline.push({ at, event: "unlock", summary: "blockedBy 全绿 → ready 可领取" });
+        m.timeline.push({ at, event: "unlock", summary: "blockedBy all green -> ready for claim" });
         unlocked.push(m.id);
         changed = true;
       }

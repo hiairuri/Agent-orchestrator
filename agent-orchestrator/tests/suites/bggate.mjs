@@ -71,15 +71,15 @@ try {
   {
     const r = run(["--policy", "remind"], disp(`[token] ${TOK_OK}\n` + LONG, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("M-08 提醒句逐字在", ctx(r).includes(`该 token 属 mission ${MID}——若这是新 mission 请先 context_pack 建 mission 记新 token`), ctx(r));
+    ck.ok("M-08 remind sentence verbatim (W5 re-pin English)", ctx(r).includes(`this token belongs to mission ${MID} - if this is a new mission, run context_pack first to create it and record a new token`), ctx(r));
     ck.ok("M-08 allow", decision(r) === "allow" && r.code === 0);
   }
   // ---- M-09：background_gate=off 时契约 remind 仍生效；dispatch_contract=off 才静默
   {
     const r = run(["--policy", "off"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("M-09a gate=off 契约 remind 存活", decision(r) === "allow" && ctx(r).includes("未匹配任何在册 mission"), r.raw);
-    ck.ok("M-09a 无闸门文案无哨兵句", !ctx(r).includes("疑似长任务") && !ctx(r).includes("哨兵"));
+    ck.ok("M-09a gate=off contract remind survives (W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("matched no registered mission"), r.raw);
+    ck.ok("M-09a no gate copy no sentinel nudge (W5 re-pin English bans)", !ctx(r).includes("looks like a long task") && !ctx(r).includes("launch the wake sentinel"));
   }
   {
     const r = run(["--policy", "off", "--contract", "off"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
@@ -89,13 +89,13 @@ try {
   {
     const r = run(["--policy", "remind", "--contract", "off"], disp(LONG + "\n[channel] " + MID + "\n[token] " + TOK_BAD + "\n"));
     allOutputs.push(r.raw);
-    ck.ok("M-09c contract=off 闸门照常", decision(r) === "allow" && ctx(r).includes("疑似长任务") && !ctx(r).includes("未匹配任何在册 mission"), r.raw);
+    ck.ok("M-09c contract=off gate unaffected (W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("looks like a long task") && !ctx(r).includes("matched no registered mission"), r.raw);
   }
   // ---- M-10：strict=ask
   {
     const r = run(["--policy", "remind", "--contract", "ask"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`));
     allOutputs.push(r.raw);
-    ck.ok("M-10a 高置信形状失败 → ask", decision(r) === "ask" && reason(r).includes("派发契约校验未通过"), r.raw);
+    ck.ok("M-10a high-confidence shape fail -> ask (W5 re-pin English)", decision(r) === "ask" && reason(r).includes("dispatch contract check failed"), r.raw);
   }
   {
     const r = run(["--policy", "remind", "--contract", "ask"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
@@ -105,7 +105,7 @@ try {
   {
     const r = run(["--policy", "remind", "--contract", "ask"], disp(`[channel] <mission_id>\n[token] ${TOK_BAD}\n` + LONG));
     allOutputs.push(r.raw);
-    ck.ok("M-10b 占位符不升级", decision(r) === "allow" && ctx(r).includes("未匹配任何在册 mission"), r.raw);
+    ck.ok("M-10b placeholder no escalation (W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("matched no registered mission"), r.raw);
   }
   {
     const r = run(["--policy", "off", "--contract", "ask"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`));
@@ -119,7 +119,7 @@ try {
   {
     const r = run(["--policy", "remind"], disp(LONG));
     allOutputs.push(r.raw);
-    ck.ok("B01 allow+长任务提醒", decision(r) === "allow" && ctx(r).includes("疑似长任务") && ctx(r).includes("run_in_background=true"), r.raw);
+    ck.ok("B01 allow + long-task remind (W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("looks like a long task") && ctx(r).includes("run_in_background=true"), r.raw);
   }
   {
     cool();
@@ -130,7 +130,7 @@ try {
   {
     const r = run(["--policy", "ask"], disp(LONG));
     allOutputs.push(r.raw);
-    ck.ok("B03 ask 疑似长任务", decision(r) === "ask" && reason(r).includes("疑似长任务"), r.raw);
+    ck.ok("B03 ask long task (W5 re-pin English)", decision(r) === "ask" && reason(r).includes("looks like a long task"), r.raw);
   }
   {
     const r = run(["--policy", "remind", "--exempt", "judge"], disp(LONG, { subagent_type: "x-judge" }));
@@ -138,7 +138,7 @@ try {
     ck.ok("B04 豁免静默", silent(r), r.raw);
     const r2 = run(["--policy", "remind"], disp(LONG, { subagent_type: "x-judge" }));
     allOutputs.push(r2.raw);
-    ck.ok("B04 清豁免出提醒", decision(r2) === "allow" && ctx(r2).includes("疑似长任务"), r2.raw);
+    ck.ok("B04 exempt cleared remind returns (W5 re-pin English)", decision(r2) === "allow" && ctx(r2).includes("looks like a long task"), r2.raw);
   }
   {
     const r = run(["--policy", "off"], disp(LONG));
@@ -146,10 +146,10 @@ try {
     ck.ok("B05 off 静默", silent(r), r.raw);
     const r2 = run(["--policy", "${user_config.background_gate}"], disp(LONG));
     allOutputs.push(r2.raw);
-    ck.ok("B05 policy 模板字面量按 remind 降级", decision(r2) === "allow" && ctx(r2).includes("疑似长任务"), r2.raw);
+    ck.ok("B05 policy template literal degrades to remind (W5 re-pin English)", decision(r2) === "allow" && ctx(r2).includes("looks like a long task"), r2.raw);
     const r3 = run(["--contract", "${user_config.dispatch_contract}"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r3.raw);
-    ck.ok("B05 contract 模板字面量按 remind 降级", decision(r3) === "allow" && ctx(r3).includes("未匹配任何在册 mission"), r3.raw);
+    ck.ok("B05 contract template literal degrades to remind (W5 re-pin English)", decision(r3) === "allow" && ctx(r3).includes("matched no registered mission"), r3.raw);
   }
   {
     const r = run(["--policy", "remind"], disp("hi"));
@@ -169,7 +169,7 @@ try {
   {
     const r = run(["--policy", "remind"], disp(LONG, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("S09 allow+哨兵句", decision(r) === "allow" && ctx(r).includes("拉起哨兵"), r.raw);
+    ck.ok("S09 allow + sentinel nudge (W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("raise a background sentinel"), r.raw);
   }
   {
     cool();
@@ -192,7 +192,7 @@ try {
   {
     const r = run(["--policy", "remind"], disp(LONG + `\n[token] ${TOK_BAD}\n`));
     allOutputs.push(r.raw);
-    ck.ok("S09 前台叠加句", ctx(r).includes("疑似长任务") && ctx(r).includes("派发契约头未匹配"), r.raw);
+    ck.ok("S09 foreground stacked sentence (W5 re-pin English)", ctx(r).includes("looks like a long task") && ctx(r).includes("matched no registered mission"), r.raw);
   }
   {
     const r = run(["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_OK}\n`, { run_in_background: true }));
@@ -206,14 +206,14 @@ try {
     //   长任务理由是统一正则的真实命中「含派发契约头 [channel]」（修前窄正则漏配 → 只剩 fallback 文案）。
     const r = run(["--policy", "ask"], disp(`\n  [channel] <mission_id>\n[token] ${TOK_BAD}\n`));
     allOutputs.push(r.raw);
-    ck.ok("V6-53a 前导空白契约头命中统一正则", decision(r) === "ask" && reason(r).includes("含派发契约头 [channel]"), r.raw);
+    ck.ok("V6-53a leading-whitespace contract head hits the unified regex (W5 re-pin English)", decision(r) === "ask" && reason(r).includes("carrying a dispatch contract head ([channel])"), r.raw);
   }
   {
     // V6-53b：≥600 前导空白契约头（token 合法、契约无扰）→ 理由含「含派发契约头」
     //   而非字符数理由（修前 /^\[channel\]\s?/m 对前导空白漏配 → 落 "prompt N 字符 ≥ 600"）。
     const r = run(["--policy", "ask"], disp(" ".repeat(600) + `\n[channel] ${MID}\n[token] ${TOK_OK}\n`));
     allOutputs.push(r.raw);
-    ck.ok("V6-53b 长任务理由含派发契约头", decision(r) === "ask" && reason(r).includes("疑似长任务（含派发契约头 [channel]）") && !reason(r).includes("字符 ≥"), r.raw);
+    ck.ok("V6-53b long-task reason carries the contract-head clause (W5 re-pin English)", decision(r) === "ask" && reason(r).includes("looks like a long task (carrying a dispatch contract head") && !reason(r).includes("chars >="), r.raw);
   }
 
   // ---- v0.6 B4 / V6-52：板不可读明示放行（fail-open 保留 + 提示一句；永不升级 ask）
@@ -225,14 +225,14 @@ try {
     cool();
     const r = run(["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("V6-52a 板不可读明示放行（allow + 契约校验跳过句）", decision(r) === "allow" && ctx(r).includes("契约校验跳过") && ctx(r).includes("板不可读") && ctx(r).includes("fail-open"), r.raw);
+    ck.ok("V6-52a board-unreadable explicit allow (allow + contract-skip sentence; W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("contract check skipped") && ctx(r).includes("board unreadable") && ctx(r).includes("fail-open"), r.raw);
   }
   {
     // V6-52b：板不可读时 strict=ask 也不升级（contractAsk 与跳过提示互斥）——
     //   高置信 MID + 坏 token，修前本例是静默 allow；修后 allow + 跳过句，绝不是 ask。
     const r = run(["--policy", "remind", "--contract", "ask"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("V6-52b 板不可读不升级 ask（fail-open 不变量）", decision(r) === "allow" && ctx(r).includes("契约校验跳过"), r.raw);
+    ck.ok("V6-52b board-unreadable never escalates to ask (fail-open invariant; W5 re-pin English)", decision(r) === "allow" && ctx(r).includes("contract check skipped"), r.raw);
   }
 
   // ---- v1.1.1 W22：cwd 漂移祖先回退（默认根无板无 root-id → 采用最近合法祖先根）
@@ -251,13 +251,13 @@ try {
     // 负例：祖先根板上无此 token → 报未匹配（证明读的确实是祖先根板，而非 fail-open 静默）
     const bad = runFrom(sub, ["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(bad.raw);
-    ck.ok("W22-c 子目录 cwd：token 校验在祖先根板生效（未匹配负例）", decision(bad) === "allow" && ctx(bad).includes("未匹配任何在册 mission") && !ctx(bad).includes("板不可读"), bad.raw);
+    ck.ok("W22-c subdir cwd: token check effective on the ancestor-root board (unmatched negative; W5 re-pin English)", decision(bad) === "allow" && ctx(bad).includes("matched no registered mission") && !ctx(bad).includes("board unreadable"), bad.raw);
   }
   {
     // 默认根有 board.json（正常项目）→ 不触发回退（日志/行为与现版一致）
     const r = run(["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("W22-d 默认根有板：不触发祖先回退（stderr 无定根回退，校验照常）", !r.stderr.includes("定根回退") && ctx(r).includes("未匹配任何在册 mission"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
+    ck.ok("W22-d default root has a board: no ancestor fallback (stderr no root-fallback, check runs; W5 re-pin English)", !r.stderr.includes("定根回退") && ctx(r).includes("matched no registered mission"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
   }
   {
     // 祖先链上无合法根 → 静默回默认根（现行为不变）；板不可读文案须携 <rootDir>/board.json
@@ -267,7 +267,7 @@ try {
     fs.writeFileSync(path.join(orphanRoot, "sentinel-hint-stamp"), new Date().toISOString());
     const r = runFrom(orphan, ["--policy", "remind"], disp(`[channel] ${MID}\n[token] ${TOK_BAD}\n`, { run_in_background: true }));
     allOutputs.push(r.raw);
-    ck.ok("W22-e 祖先链无合法根：静默默认根（无定根回退告警）", !r.stderr.includes("定根回退") && !r.stderr.includes("祖先根") && ctx(r).includes("契约校验跳过"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
+    ck.ok("W22-e no legal root on the ancestor chain: silent default root (no root-fallback warning; W5 re-pin English)", !r.stderr.includes("定根回退") && !r.stderr.includes("祖先根") && ctx(r).includes("contract check skipped"), { raw: r.raw, stderr: r.stderr.slice(0, 200) });
     ck.ok("W22-f 板不可读文案携 <rootDir>/board.json 路径", ctx(r).includes(path.join(orphanRoot, "board.json")), ctx(r));
   }
 
@@ -291,19 +291,20 @@ try {
     });
     const out = r.json && r.json.additionalContext ? r.json.additionalContext : "";
     ck.ok("V6-57a 教训行代理对回退（39a→59b，无孤立代理）",
-      out.includes(`[error-fix] ${"a".repeat(39)}→${"b".repeat(59)}。`) &&
+      out.includes(`[error-fix] ${"a".repeat(39)}→${"b".repeat(59)}`) && // v1.6.2 W5 重订=英文 Relevant lessons 行形（句号在包层，行内无。尾）
       !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out) && !out.includes("\uFFFD"),
       { out: out.slice(0, 160), raw: r.raw.slice(0, 160) });
   }
   {
     // V6-57b：stop-check 全文 >1500 帽、切点落在 emoji 高位代理上 → 尾部无孤立代理。
     //   依模板复刻计算切位：帽 1497 保 0..1496，emoji 连跑 20 对跨切点（左右各 ≥10 单位余量）。
-    const HEAD = "[agent-orchestrator] 收工前清点：任务板尚有 1 项未竟；其余 1 项：[";
+    // v1.6.2 W5 重订=英文 stop-check 收工清点模板复刻（W2 P0 英化后新形；切位算式不变）
+    const HEAD = "[agent-orchestrator] shutdown sweep: the board still has 1 unfinished missions";
     const TAIL =
-      "] running，邮箱 0 条未读。" +
-      "疑似唤醒失败=子代理结果已落盘但主控未被唤醒接手：先 mailbox(read) 接手，" +
-      '处置时 answer/close 自动签收；暂缓用 board(action="ack", mission_id=…, note="deferred by user")。' +
-      "能答的答、能关的关。详见 /orch。";
+      "] running, mailbox 0 unread." +
+      " Suspected wake failure = the subagent result is on disk but the coordinator was never woken to take it over: take over via mailbox(read) first," +
+      ' disposal auto-acks via answer/close; to defer use board(action="ack", mission_id=..., note="deferred by user").' +
+      " disposal rules: see /orch.";
     const cutIdx = 1500 - 3 - 1; // slice(0,1497) 保留末位下标
     const runLen = "😀".repeat(20).length; // 40 单位
     const k = cutIdx - 10 - HEAD.length; // 高位代理恰在切点（偶偏移）
@@ -319,7 +320,7 @@ try {
     const out = r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext ? r.json.hookSpecificOutput.additionalContext : "";
     const replica = HEAD + longId + TAIL;
     ck.ok("V6-57b 全文裁剪代理对回退（尾部无孤立代理）",
-      replica.length > 1500 && out.endsWith("...") && out.includes("；其余 1 项：") &&
+      replica.length > 1500 && out.endsWith("...") && out.includes("; the other 1: [") &&
       !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out) && !out.includes("\uFFFD"),
       { replicaLen: replica.length, outTail: out.slice(-40), raw: r.raw.slice(0, 120) });
   }
@@ -473,7 +474,7 @@ try {
   {
     // V6-52c（静态）：顶层 catch 具备明示放行兜底（黑盒不可达路径，源级断言看护）
     const src = fs.readFileSync(GATE, "utf8");
-    ck.ok("V6-52c 顶层 catch 明示放行兜底（静态）", src.includes("契约校验跳过：bg-gate 内部异常"), "gate source missing fail-open note");
+    ck.ok("V6-52c top-level catch explicit-allow fallback (static; W5 re-pin English)", src.includes("contract check skipped: bg-gate internal error"), "gate source missing fail-open note");
   }
   {
     const p = JSON.parse(fs.readFileSync(PLUGIN_JSON, "utf8"));

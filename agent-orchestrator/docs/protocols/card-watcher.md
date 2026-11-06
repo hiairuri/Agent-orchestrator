@@ -1,23 +1,22 @@
-# 契约卡：watcher 客户端（M8）
+# Contract card: the watcher client (M8)
 
-> **行号声明（卡头）**：本文行号系 **2026-10-28 总装时点实测**（grep+实码核对，worker v12-m71）。行号**不作跨版引用**；跨版定位以模块名/函数名锚为准（l-20261022-6a14d6）。
+> **Line-number declaration (card head)**: all line numbers in this document were measured at assembly time (grep + source verification). Line numbers are **not referenced across versions**; cross-version locating relies on module/function-name anchors (l-20261022-6a14d6).
 >
-> - **归属模块**：M8 watcher（`watcher/` 目录：入口 `watcher.mjs`＋模块 `ws/relay/relay-shim/txn/bridge/inject/verdict/poller/credentials/degrade`）；协议客户端定位（M2 表：M7/M8=协议客户端）
-> - **脆度双轴评级**：面广度=中（单守护进程＋配置面）；后果重度=中——失效终态一律降级 standby 停事务面保心跳，**唤醒由哨兵家族接管**（职责互换），无 root.txt 型全局失明后果；但凭证面（token 解密/脱敏）与平台耦合面（桌面远控、互踢边界）是历史事故高发区
-> - **历史事故回链**：EXP10-findings R4（锚缺失盲取→错工作区注入+锚劫持，G5/G10 修复）；EXP10-findings R6（sess_subagent 前缀劫持，G14 修复）；V7-05（cfg 桥接键被默认值遮蔽，numArgBridge twin 先例）；watcher 双缺陷（凭证解密/ws-scheme）已修复随版出货
-> - **常驻授权红线**：watcher 常驻运行**须用户显式授权**（W-G §5 条件 C1）；停用=进程退出＋凭证自然过期。本卡是协议记录，不构成常驻运行的授权
+> - **Home module**: M8 watcher (the `watcher/` directory: entry `watcher.mjs` + modules `ws/relay/relay-shim/txn/bridge/inject/verdict/poller/credentials/degrade`); protocol-client positioning (M2 table: M7/M8 = protocol clients)
+> - **Brittleness dual-axis rating**: surface breadth = medium (a single daemon + a configuration face); consequence severity = medium - every failure terminal degrades to standby, stopping the transaction face while keeping the heartbeat, and **wake-up is taken over by the sentinel family** (duty swap), so there is no root.txt-style global blindness; but the credential face (token decryption/redaction) and the platform-coupling faces (desktop remote control, mutual-kick boundary) are historically incident-prone
+> - **Resident-authorization red line**: resident watcher operation **requires explicit user authorization**; deactivation = process exit + credentials expiring naturally. This card is a protocol record and does not constitute authorization for resident operation
 
 ---
 
-## 0. ⚠ U3 废弃口径（本卡最优先声明，2026-10-27 用户终裁）
+## 0. The U3 deprecation ruling (this card's highest-priority declaration, user final ruling)
 
-**注入唤醒整线废弃**：实测注入唤醒较哨兵无准确率优势且维护成本更高（MOD3a-QA 误报与隔夜无唤醒双实锤入册）。据此：
+**The injection wake-up line is deprecated wholesale**: measurement showed injection wake-up has no accuracy advantage over the sentinel and higher maintenance cost (both the MOD3a-QA false alarms and the overnight-no-wake findings are on record). Accordingly:
 
-- watcher **注入通道**（bridge/inject/relay-shim 直通面）**不再作为唤醒增强对象**——v1.2 及以后的唤醒增强施工一律落 bg-sentinel 侧（哨兵可靠性强化：scoping 不为他会话开枪＋存活复活补员）；
-- **哨兵（bg-sentinel 家族）为唯一唤醒出口**；watcher 降级 standby 时唤醒接管关系见 §4；
-- 本卡只记**现状协议面**（模块/降级树/锚钉/心跳/signals 消费），零增强立项；watcher-shim 套件列入断言不变清单（不增强）；旧「唤醒分流三分类/锚模式标记/inject 前置校验」设计已作废销项，考古走 designs/ 设计链。
+- the watcher **injection channel** (the bridge/inject/relay-shim passthrough faces) is **no longer a wake-up enhancement target** - wake-up enhancement work lands on the bg-sentinel side (sentinel reliability hardening: scoping that does not fire for other sessions + liveness revival/replenishment);
+- **the sentinel (the bg-sentinel family) is the sole wake-up exit**; the standby takeover relation is in §4;
+- this card records the **current protocol face** (modules / degrade tree / anchor pins / heartbeat / signals consumption) with zero enhancement initiatives; the watcher-shim suite is on the assertion-invariance list (no enhancement); the old "wake routing three-way / anchor mode marking / inject precondition validation" designs are void and closed out - archaeology goes through the designs/ design chain.
 
-## 1. 模块面（入口＋十模块组合根）
+## 1. Module face (entry + ten-module composition root)
 
 | 文件 | 职责一句话 | 关键锚 |
 |---|---|---|
@@ -33,7 +32,7 @@
 | `degrade.mjs` | 降级树：分类/终态集/告警文案/signals 记录 | `CLASSES`、`TERMINAL_CLASSES`、`D1_GUIDANCE`、`LOOPBACK_ENV_RELAY_WS_URL`、`LOOPBACK_ENV_ENDPOINT_ORIGIN`、`record` |
 | `ws.mjs` | websocket 层（套件内全 mock） | ws |
 
-## 2. 进程生命周期与状态机
+## 2. Process lifecycle and the state machine
 
 - **常驻进程**：永不因失败退出（任何异常降级 standby 继续，进程退出仅限用户停用）。
 - **事务形态**：对中继**永短事务**（连-发-断，持有 ≤40s，`--hold-max-sec` 默认 40）——无长连状态。
@@ -41,7 +40,7 @@
 - **频控**：`--min-interval-sec` 默认 90（EXP-2 边界实测后保守频控 ≥90s 维持：对手终端面不可观测，级联未发生但不可证明）；`--wake-cap` 默认 3（每周期通知帽）。
 - **transport 双模**：`cloud`（平台中继 ws）／`loopback`（本机回环直连，relay-shim 中转；断连/空设备表/超时归 D2 瞬时降级，恢复自愈）。
 
-## 3. 降级树（degrade.mjs，D1/D2/D3/kicked）
+## 3. The degradation tree (degrade.mjs, D1/D2/D3/kicked)
 
 | 类别 | 触发族 | 语义 |
 |---|---|---|
@@ -53,7 +52,7 @@
 
 **工作区锚钉（G10，EXP10 R4 根治）**：`sentinel/coord-workspace.txt` 与 coord-session.txt 同级，单行派生键=`workspaceIdentity.trim||workspacePath`。有锚→openBridge 携 workspaceKeyHint；**无锚/锚未命中=fail-loud**（workspace-anchor-missing / workspace-anchor-mismatch → D3），**绝不盲取 workspaces[0]**。watcher 只读锚不写锚；锚写面=互信根三触发、b2 刷新闸与防劫持语义=card-sentinel.md C2/C 组补记（互指不合并）。
 
-## 4. 与哨兵的职责互换（消费面契约）
+## 4. Duty swap with the sentinel (the consumption-face contract)
 
 | 面 | watcher 侧 | 哨兵侧（bg-sentinel） |
 |---|---|---|
@@ -62,25 +61,25 @@
 | 唤醒出口 | **非出口**（U3 废弃注入唤醒线；本行是 U3 后的唯一合法口径） | **唯一唤醒出口**（直至型错峰冗余家族） |
 | 定根 | `--root` 优先，默认 `<cwd>/.zcode/orchestrator`；**从不读 root.txt 指针**（站 server 侧惯例——hooks 盲跟指针曾致全体失明） | hooks 侧经 root.txt+root-id 分代门（card-root-txt.md） |
 
-## 5. 安全面
+## 5. Security face
 
-- **凭证五禁＋日志脱敏闸**：一切出口经 `credentials.redact`（token 形态/Bearer 归零；token 值零持久化）；凭证读取/解密失败走降级树 D1，不重试无限。
-- **零网络旁路**：网络面仅 relay/relay-shim 两模块；ws 层在套件内全 mock（任何 suite 不连生产中继）。
-- **常驻授权**：C1 红线（卡头）；watcher.cfg.json 落盘不含凭证明文。
+- **Credential prohibitions + the log redaction gate**: every outlet goes through `credentials.redact` (token shapes/Bearer zeroed; token values never persisted); credential read/decrypt failures go to the degrade tree D1, with no unbounded retries.
+- **Zero network bypass**: the network face is only the relay/relay-shim pair; the ws layer is fully mocked inside the suite (no suite connects to the production relay).
+- **Resident authorization**: the red line (card head); watcher.cfg.json on disk contains no plaintext credentials.
 
-## 6. 实测门（历史定案，考古索引）
+## 6. Measured gates (historical rulings, archaeology index)
 
-- **EXP-1 凭证合规**：凭证获取/脱敏/日志闸实测全过；**EXP-2 互踢＋边界**：级联未发生但对手终端面不可观测——保守频控 ≥90s 维持为常设缺省；**EXP-3 长连定案**：单连超长时零异常（现形态已改永短事务，历史存档）。
+- **EXP-1 credential compliance**: credential acquisition/redaction/log gate all passed in measurement; **EXP-2 mutual kick + boundaries**: no cascade occurred but the counterpart's terminal face is unobservable - the conservative rate limit >=90s stays as the standing default; **EXP-3 long-connection ruling**: zero anomalies over a single very long connection (the current form has switched to always-short transactions; historical archive).
 
-## 7. 断言锚
+## 7. Assertion anchors
 
-- **watcher-core 套件**：降级树分类/终态集/告警文案、凭证脱敏闸、txn 闸、poller 分类、verdict 判读、心跳面——ws 全 mock。
-- **watcher-shim 套件**：shim 协议面（loopback 模式）。
-- **twin-lock**：五文件行为矩阵**不含** watcher（watcher 函数不在锁面）；watcher.mjs numArgBridge 桥接为 twin 先例引用方。
-- **函数名锚（LM-05 候选行素材）**：`watcher.mjs`：`wakeCoordSession`/`workspaceIdentity`/`workspaceKeyHint`/`redact`/`CLASSES`/`record`；`degrade.mjs`：`CLASSES`/`TERMINAL_CLASSES`/`D1_GUIDANCE`/`LOOPBACK_ENV_RELAY_WS_URL`/`LOOPBACK_ENV_ENDPOINT_ORIGIN`/`record`；`poller.mjs`：`classify`；`credentials.mjs`：`redact`（2026-10-28 grep 实证可见）。
+- **the watcher-core suite**: degrade-tree classification / terminal sets / alert copy, the credential redaction gate, the txn gate, poller classification, verdict reading, the heartbeat face - ws fully mocked.
+- **the watcher-shim suite**: the shim protocol face (loopback mode).
+- **twin-lock**: the five-file behavior matrix does **not** include watcher (watcher functions are not on the lock face); watcher.mjs numArgBridge bridging is a twin-precedent reference.
+- **Function-name anchors (LM-05 candidate-row material)**: `watcher.mjs`: `wakeCoordSession`/`workspaceIdentity`/`workspaceKeyHint`/`redact`/`CLASSES`/`record`; `degrade.mjs`: `CLASSES`/`TERMINAL_CLASSES`/`D1_GUIDANCE`/`LOOPBACK_ENV_RELAY_WS_URL`/`LOOPBACK_ENV_ENDPOINT_ORIGIN`/`record`; `poller.mjs`: `classify`; `credentials.mjs`: `redact`.
 
-## 8. 维护规则
+## 8. Maintenance rules
 
-- 降级树新增类别/触发族：degrade.mjs `CLASSES`/`TERMINAL_CLASSES`＋本卡 §3＋watcher-core 断言三处同波改。
-- transport/短事务参数缺省调整：watcher-core 断言面先盘点（l-20261022-5564ee）再动。
-- **U3 口径守恒**：任何把 inject/bridge/relay-shim 面重新立项为「唤醒增强」的提案均与用户终裁冲突——走 report(blocked) 待裁，不得借维护通道复活注入唤醒线。哨兵侧增强施工落 bg-sentinel（card-bg-sentinel-map.md）与 M9 波任务书。
+- Adding a degrade-tree class/trigger family: degrade.mjs `CLASSES`/`TERMINAL_CLASSES` + this card's §3 + watcher-core assertions, three places in the same wave.
+- Default changes to transport/short-transaction parameters: inventory the watcher-core assertion face first, then change.
+- **The U3 ruling holds**: any proposal to re-initiate the inject/bridge/relay-shim faces as "wake-up enhancement" conflicts with the user's final ruling - go report(blocked) and wait; the injection wake-up line must not be revived through the maintenance channel. Sentinel-side enhancement work lands in bg-sentinel (card-bg-sentinel-map.md) and its wave task book.
