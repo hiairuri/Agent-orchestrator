@@ -8,7 +8,7 @@ import child_process from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "agent-orchestrator-orch";
-const SERVER_VERSION = "1.6.3";
+const SERVER_VERSION = "1.6.4";
 // v0.4.1: display path of the sentinel script (server suggests the refill
 // command; forward slashes for copy-paste into Bash on Windows).
 const SENTINEL_SCRIPT_DISPLAY = path

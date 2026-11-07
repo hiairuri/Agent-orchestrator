@@ -57,7 +57,7 @@ const TOOLS = [
         action: {
           enum: ["upsert", "get", "list", "ack", "claim", "p2p_ask", "p2p_answer"],
           description:
-            "upsert=create/merge; get=fetch; list=list (closed excluded); ack=acknowledge; claim=pool CAS claim; p2p_ask/p2p_answer=peer Q&A",
+            "upsert=create/merge; get=fetch one; list=list missions (closed excluded); ack=mark the result seen; claim=take a queued pool mission (first-writer-wins, becomes running under a lease); p2p_ask/p2p_answer=peer-to-peer Q&A between missions (server-arbitrated)",
         },
         to_mission_id: {
           type: "string",
@@ -77,7 +77,7 @@ const TOOLS = [
         },
         answer: {
           type: "string",
-          description: "p2p_answer body (truncated at 4000 chars; advisory data)",
+          description: "p2p_answer body (truncated at 4000 chars); free text for the coordinator, not machine-parsed",
         },
         // v1.1.1 W20 DP hotfix: p2p_ask/p2p_answer read args.token for the
         // report-gate mirror (p2pTokenGate), but the schema never declared it —
@@ -86,7 +86,7 @@ const TOOLS = [
         // is the whole fix: the handler face is unchanged.
         token: {
           type: "string",
-          description: "worker dispatch token (pack CONTRACT [token] line); p2p auth when the mission carries one",
+          description: "worker dispatch token (the [token] line from the pack CONTRACT header); p2p auth when the mission carries one",
         },
         mission: {
           type: "object",
@@ -97,7 +97,7 @@ const TOOLS = [
               type: "string",
               description: "auto-generated as m-<YYYYMMDD-HHmmss>-<4hex> by default",
             },
-            title: { type: "string" },
+            title: { type: "string", description: "short mission title (free text)" },
             original_prompt: {
               type: "string",
               description: "verbatim dispatch prompt; the key input for cross-session resume",
@@ -106,7 +106,7 @@ const TOOLS = [
               type: "string",
               description: "e.g. agent-orchestrator:orch-worker",
             },
-            model: { type: ["string", "null"] },
+            model: { type: ["string", "null"], description: "model id recorded on the mission (string or null; surfaced by resume)" },
             status: {
               enum: [
                 "drafted",
@@ -121,16 +121,18 @@ const TOOLS = [
                 "resumed",
                 "closed",
               ],
+              description:
+                "mission lifecycle state: drafted = registered, not yet dispatched; dispatched = dispatched, awaiting start; ready = dependencies satisfied, claimable; running = claimed and in flight; blocked = worker reported a blocker; question = worker asked a question; done = finished; failed = terminal failure; skipped = skipped (upstream failure); resumed = legacy state, no current writer; closed = archived",
             },
             blockedBy: {
               type: "array",
-              items: { type: "string" },
+              items: { type: "string", description: "one upstream mission id" },
               description:
-                "upstream mission_id list (DAG): unlocks when all upstream done/skipped/closed; failed/skipped cascades skipped; cycles rejected",
+                "upstream mission ids (dependency list): the mission becomes ready only when all upstream are done/skipped/closed; if any upstream fails or is skipped, this mission is skipped automatically; cycles are rejected",
             },
             skippedReason: {
               type: ["string", "null"],
-              description: "terminal reason for skipped (currently only upstream_failed, written by the cascade)",
+              description: "terminal reason for skipped (currently only upstream_failed, written automatically when an upstream mission fails or is skipped)",
             },
             // v1.1.1 W20 DP hotfix (same class as the board top-level token):
             // toolBoard validates and stores these upsert fields, but they were
@@ -139,23 +141,23 @@ const TOOLS = [
             // never engage.
             scope_paths: {
               type: "array",
-              items: { type: "string" },
+              items: { type: "string", description: "one repo-relative path prefix" },
               description:
-                "write allowlist (max 32, F1-normalized); each upsert replaces the full list — context_pack also registers it",
+                "write allowlist, max 32 (canonical form: trimmed, forward slashes); each upsert replaces the full list — context_pack also registers it",
             },
             strict_scope: {
               type: "boolean",
               description:
-                "scope conflict tier: true = reject-before-write on any overlap with a live mission, absent = collect scope_warnings",
+                "scope conflict tier: true = reject the write on any overlap with a live mission; absent = collect scope_warnings instead",
             },
             qa: {
               type: "object",
               properties: {
-                verdict: { enum: ["pass", "fail"] },
-                by: { type: "string" },
+                verdict: { enum: ["pass", "fail"], description: "pass = review approved; fail = review rejected (sandbox_apply requires pass)" },
+                by: { type: "string", description: "who issued the verdict (reviewer identity)" },
                 mission_id: { type: "string", description: "review mission id (traceability)" },
-                at: { type: "string" },
-                note: { type: "string" },
+                at: { type: "string", description: "when the verdict was issued (timestamp)" },
+                note: { type: "string", description: "free-text review note" },
               },
               description:
                 "review verdict (the sandbox_apply gate); the coordinator copies it onto this mission after the review mission is done",
@@ -167,12 +169,16 @@ const TOOLS = [
             claim: {
               type: ["object", "null"],
               description:
-                "read-only: {worker, token, claimedAt, leaseUntil} lease; renewed by claim/report, reclaimed on timeout; ignored when passed via upsert",
+                "read-only claim state {worker, token, claimedAt, leaseUntil} (a lease: time-boxed claim); renewed by claim/report; on timeout the mission returns to ready; ignored when passed via upsert",
             },
             dispatch: {
               type: "object",
+              description: "how this mission was launched (mode and id/token bookkeeping); maintained by the dispatch and claim machinery",
               properties: {
                 // v1.2 M5-1：mode 枚举加 nested（组装出口；headless 系 W3 M3-1 在案补齐）
+                // v1.6.4 W1：mode 属 Q2 十处枚举-only 之一，但 NST-04a（crv6-resilience）以单行载体
+                //   钉死 board enum 保留面（下行字面即钉面），desc 内联即红——值面 K2 零改，
+                //   desc 走文件尾定义后赋值承载（tripwire 纪律：修句不推钉）。
                 mode: { enum: ["agent", "workflow", "headless", "nested"] },
                 agent_id: {
                   type: ["string", "null"],
@@ -186,49 +192,60 @@ const TOOLS = [
                   type: ["string", "null"],
                   description: "workflow run id",
                 },
-                run_in_background: { type: "boolean" },
+                run_in_background: { type: "boolean", description: "true = launched as a background task" },
                 session_id: {
                   type: ["string", "null"],
                   description: "dispatch session id (from the SessionStart injection)",
                 },
-                token: { type: "string", description: "8-hex dispatch token" },
+                token: { type: "string", description: "dispatch token (secret from the pack CONTRACT header; authenticates report and p2p calls)" },
                 spawned_by_session: {
                   type: ["string", "null"],
-                  description: "coordinator session id that issued the spawn (W9 scoping ownership face; null = anchor absent)",
+                  description: "coordinator session id that issued the spawn (used for ownership attribution; null = unknown)",
                 },
               },
             },
             pack: {
               type: "object",
+              description: "context pack registration for this mission (location, variants, persona)",
               properties: {
-                path: { type: "string" },
-                variants: { type: "array", items: { type: "string" } },
+                path: { type: "string", description: "pack file path (the pack.md handed to the worker)" },
+                variants: {
+                  type: "array",
+                  items: { type: "string", description: "one materialized pack file path" },
+                  description: "materialized pack file paths (one per variant)",
+                },
                 persona: {
                   type: "string",
-                  description: "persona file registered by context_pack persona_path (dispatch resolution step 2)",
+                  description: "persona file (role preset file registered for dispatch) set by context_pack persona_path",
                 },
               },
             },
             artifacts: {
               type: "array",
+              description: "deliverable file records (appended by report done)",
               items: {
                 type: "object",
-                properties: { path: { type: "string" }, note: { type: "string" } },
+                description: "one artifact record",
+                properties: {
+                  path: { type: "string", description: "artifact file path" },
+                  note: { type: "string", description: "optional one-line note" },
+                },
               },
             },
             output_files: {
               type: "array",
-              items: { type: "string" },
+              items: { type: "string", description: "one output file path" },
               description: "output file paths from the completion notice (fallback when TaskOutput is unavailable)",
             },
             blocked: {
               type: "object",
+              description: "blocked/question face: the open question and its answer lifecycle",
               properties: {
-                question: { type: ["string", "null"] },
-                asked_at: { type: ["string", "null"] },
-                answered: { type: "boolean" },
-                answer: { type: ["string", "null"] },
-                answered_at: { type: ["string", "null"] },
+                question: { type: ["string", "null"], description: "the question text (set by report blocked/question)" },
+                asked_at: { type: ["string", "null"], description: "when the question was asked (timestamp)" },
+                answered: { type: "boolean", description: "true once the coordinator answered" },
+                answer: { type: ["string", "null"], description: "the coordinator's answer text" },
+                answered_at: { type: ["string", "null"], description: "when the answer was logged (timestamp)" },
               },
             },
             ack: {
@@ -255,7 +272,7 @@ const TOOLS = [
             },
           },
         },
-        mission_id: { type: "string" },
+        mission_id: { type: "string", description: "target mission id for get/ack/claim/p2p_ask/p2p_answer (upsert takes the id from mission.id; list needs none)" },
         view: {
           enum: ["compact", "full"],
           description:
@@ -268,14 +285,18 @@ const TOOLS = [
         lease_minutes: {
           type: "number",
           description:
-            "lease minutes for action=claim (>=1, default claim_lease_min=30); report renews it; on timeout the mission returns to ready",
+            "lease (time-boxed claim) minutes for action=claim (>=1, default claim_lease_min=30); report renews it; on timeout the mission returns to ready",
         },
         note: {
           type: "string",
           maxLength: 200,
           description: 'optional note for action=ack, e.g. "deferred by user"',
         },
-        filter_status: { type: "array", items: { type: "string" } },
+        filter_status: {
+          type: "array",
+          items: { type: "string", description: "one status value to filter by" },
+          description: "action=list filter: return only missions whose status is in this list",
+        },
       },
     },
   },
@@ -298,14 +319,17 @@ const TOOLS = [
       properties: {
         mission_id: { type: "string", description: "Mission id" },
         worker: { type: "string", description: "Worker name, e.g. orch-worker#2" },
-        token: { type: "string", description: "[token] line from the pack CONTRACT header" },
-        kind: { enum: ["milestone", "blocked", "question", "done"] },
-        summary: { type: "string", maxLength: 200 },
+        token: { type: "string", description: "the [token] line from the pack CONTRACT header (the [channel]/[worker]/[token] lines)" },
+        kind: {
+          enum: ["milestone", "blocked", "question", "done"],
+          description: "milestone = progress on a running mission; blocked/question = stopped (question text required); done = finished",
+        },
+        summary: { type: "string", maxLength: 200, description: "one-line event summary (max 200 chars); long findings go to details" },
         details: { type: "string", description: "Long-form findings" },
-        artifacts: { type: "array", items: { type: "string" }, description: "Output file paths" },
+        artifacts: { type: "array", items: { type: "string", description: "one output file path" }, description: "Output file paths" },
         files_touched: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one changed file path" },
           maxItems: 50,
           description: "Changed paths; audited against the mission scope for milestone/done only",
         },
@@ -313,9 +337,10 @@ const TOOLS = [
           type: "array",
           maxItems: 12,
           description:
-            "Done only: manifest entry claims (max 12); over-cap and malformed entries are soft-handled, never an error",
+            "Done only: manifest entry claims (max 12); over-cap and malformed entries are accepted without error (warning only), never rejected",
           items: {
             type: "object",
+            description: "one manifest claim",
             required: ["layer", "type", "title", "ref"],
             properties: {
               layer: { enum: ["T0", "T1", "T2"], description: "Highest attainable layer claimed" },
@@ -327,6 +352,7 @@ const TOOLS = [
               text: { type: "string", description: "T0=verbatim / T1=summary / T2=omit" },
               ref: {
                 type: "object",
+                description: "source pointer for the claim",
                 properties: {
                   path: { type: "string", description: "Source file path" },
                   loc: { type: "string", description: "Section title / L120-L180 / assertion id" },
@@ -350,6 +376,7 @@ const TOOLS = [
             "Done only: up to 3 candidate lessons (trigger/fix) for the coordinator to distill on ack; ignored for other kinds",
           items: {
             type: "object",
+            description: "one lesson candidate",
             required: ["trigger", "fix"],
             properties: {
               type: { enum: ["error-fix", "pitfall", "preference", "env-fact"], description: "Defaults to pitfall" },
@@ -365,10 +392,10 @@ const TOOLS = [
         },
         lesson_refs: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one pack lesson id" },
           description:
             "Optional for kind=blocked/question: pack lesson ids ([type·id] prefixes in the pack LESSONS section) that proved wrong; " +
-            "the server demotes them and may auto-retire them at the floor",
+            "the server demotes them (drops them from automatic injection) and may auto-retire them at the floor (when active entries fall below the minimum)",
         },
       },
     },
@@ -388,10 +415,14 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { enum: ["peek", "read", "answer", "gc"] },
-        mission_id: { type: "string" },
-        kind: { enum: ["milestone", "blocked", "question", "done"] },
-        limit: { type: "number", default: 20 },
+        action: {
+          enum: ["peek", "read", "answer", "gc"],
+          description:
+            "peek = survey unread events without consuming them; read = consume them atomically (takes over subagent results); answer = log the coordinator reply and return the recommended SendMessage call; gc = archive events older than keep_days",
+        },
+        mission_id: { type: "string", description: "filter events to one mission (peek/read)" },
+        kind: { enum: ["milestone", "blocked", "question", "done"], description: "event kind filter: milestone/blocked/question/done" },
+        limit: { type: "number", default: 20, description: "max events returned (default 20)" },
         answer: { type: "string", description: "Required for action=answer" },
         keep_days: { type: "number", default: 14, description: "gc threshold in days" },
       },
@@ -412,21 +443,40 @@ const TOOLS = [
       type: "object",
       required: ["name", "description"],
       properties: {
-        name: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
-        description: { type: "string", minLength: 10 },
-        archetype: { enum: ["worker", "scout", "reviewer"], default: "worker" },
+        name: {
+          type: "string",
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$",
+          description: "agent file name (becomes .zcode/agents/<name>.md; lowercase letters, digits, hyphens; starts with a letter or digit)",
+        },
+        description: {
+          type: "string",
+          minLength: 10,
+          description: "what this agent is for (min length 10); written into the persona frontmatter",
+        },
+        archetype: {
+          enum: ["worker", "scout", "reviewer"],
+          default: "worker",
+          description: "persona template: worker = hands-on execution (full toolset); scout = read-only research; reviewer = review (reads and commands, no file writes). Default worker",
+        },
         model: {
           type: "string",
           description: "providerId/modelId; defaults to the session model",
         },
-        max_turns: { type: "number" },
+        max_turns: {
+          type: "number",
+          description: "Maximum agent turns; written to the persona frontmatter when set (positive integer); omit for the host default",
+        },
         tools: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one tool name" },
           description: "overrides the archetype toolset",
         },
         system_prompt: { type: "string", description: "appended after the archetype body" },
-        overwrite: { type: "boolean", default: false },
+        overwrite: {
+          type: "boolean",
+          default: false,
+          description: "true = replace an existing persona file of the same name; default false (the call fails when the file exists)",
+        },
       },
     },
   },
@@ -451,17 +501,23 @@ const TOOLS = [
         mission_id: { type: "string", description: "Mission id" },
         title: { type: "string", description: "Pack title" },
         task: { type: "string", description: "Task for the subagent" },
-        read_first: { type: "array", items: { type: "string" }, description: "Files to read first" },
-        rules: { type: "array", items: { type: "string" }, description: "Pack rules" },
+        read_first: { type: "array", items: { type: "string", description: "one file path to read first" }, description: "Files to read first" },
+        rules: { type: "array", items: { type: "string", description: "one pack rule" }, description: "Pack rules" },
         return_format: { type: "string", description: "Return template" },
         upstream_context: {
           type: "string",
           description: "Upstream content, injected verbatim",
         },
-        variants: { type: "number", minimum: 1, maximum: 8, default: 1 },
+        variants: {
+          type: "number",
+          minimum: 1,
+          maximum: 8,
+          default: 1,
+          description: "how many pack variants to materialize (1-8, default 1); each variant diverges along variant_axes",
+        },
         variant_axes: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one divergence axis label" },
           description: "One divergence axis per variant (same length as variants)",
         },
         isolation: {
@@ -470,12 +526,12 @@ const TOOLS = [
         },
         oob_allowlist: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one repo-relative path prefix" },
           description: "legacy alias of scope_paths (repo-relative prefixes; empty = all paths)",
         },
         scope_paths: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one repo-relative path prefix" },
           description: "write allowlist: repo-relative path prefixes, max 32 (empty = all paths)",
         },
         budget: {
@@ -484,12 +540,12 @@ const TOOLS = [
         },
         inputs: {
           type: "array",
-          items: { type: "string" },
+          items: { type: "string", description: "one upstream mission id" },
           description: "upstream mission ids (max 4), pulled into the pack SUMMARY/READ FIRST",
         },
         share_node_modules: {
           type: "boolean",
-          description: "true = auto-share the project node_modules into the sandbox via junction",
+          description: "true = share the project node_modules into the sandbox via a directory link (Windows junction)",
         },
         extra: {
           type: "string",
@@ -501,7 +557,7 @@ const TOOLS = [
         },
         persona_path: {
           type: "string",
-          description: "register the persona file for dispatch (mission.pack.persona); absent = no byte change",
+          description: "register a persona file (role preset file) for dispatch (lands in mission.pack.persona); absent = no byte change",
         },
         mirror_digest: {
           type: "boolean",
@@ -549,32 +605,37 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { enum: ["list", "add", "promote", "promote_batch", "retire", "stage"] },
+        action: {
+          enum: ["list", "add", "promote", "promote_batch", "retire", "stage"],
+          description:
+            "list = read entries; add = insert directly; promote = refine a candidate to active; promote_batch = transactional batch promote (one invalid item rejects the whole batch); retire = remove with a reason; stage = coordinator-side staging (no merge, no injection)",
+        },
         // v1.6 W4 (design §2.4) + 修订轮 F-1: declare the optional token so
         // schema-validating MCP clients don't strip it (p2p token precedent,
         // DP hotfix v1.1.1 W20 — same fix shape, handler face unchanged).
         token: {
           type: "string",
           description:
-            "list-only hash-read reader key (worker=dispatch token / coordinator=coord-session id); token-bearing writes rejected (worker read-only gate)",
+            "read-only reader key for action=list (worker = its dispatch token / coordinator = its session id); a repeat list with nothing new returns a short answer; any write carrying a token is rejected",
         },
         id: { type: "string", description: "promote/retire target entry id (l-...)" },
         ids: {
           type: "array",
-          description: "promote_batch ids; all-or-nothing",
+          description: "promote_batch id list; all-or-nothing (one invalid item rejects the whole batch)",
           items: {
             oneOf: [
-              { type: "string" },
+              { type: "string", description: "one lesson id (l-...) to promote" },
               {
                 type: "object",
+                description: "one promote_batch item with optional field overrides",
                 properties: {
-                  id: { type: "string" },
-                  target: { enum: ["project", "global"] },
-                  type: { enum: ["error-fix", "pitfall", "preference", "env-fact"] },
-                  trigger: { type: "string" },
-                  lesson: { type: "string" },
-                  fix: { type: "string" },
-                  contradicts: { type: "string" },
+                  id: { type: "string", description: "lesson id (l-...) to promote" },
+                  target: { enum: ["project", "global"], description: "promote destination: project = this project's lesson store; global = fleet-wide store" },
+                  type: { enum: ["error-fix", "pitfall", "preference", "env-fact"], description: "lesson type tag: error-fix/pitfall/preference/env-fact" },
+                  trigger: { type: "string", description: "the situation that caused the lesson" },
+                  lesson: { type: "string", description: "optional one-line lesson" },
+                  fix: { type: "string", description: "what to do next time" },
+                  contradicts: { type: "string", description: "id of an entry this one disproves" },
                 },
                 required: ["id"],
               },
@@ -634,7 +695,7 @@ const TOOLS = [
       type: "object",
       required: ["mission_id"],
       properties: {
-        mission_id: { type: "string" },
+        mission_id: { type: "string", description: "mission to finalize (must be done with qa.verdict=pass)" },
         allow_dirty: {
           type: "boolean",
           default: false,
@@ -655,7 +716,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       required: ["mission_id"],
-      properties: { mission_id: { type: "string" } },
+      properties: { mission_id: { type: "string", description: "mission whose sandbox is discarded (branch and worktree removed)" } },
     },
   },
   {
@@ -680,7 +741,7 @@ const TOOLS = [
         tail: {
           type: "number",
           default: 12,
-          description: "trailing messages to render (1-100, default 12); 0 = probe mode",
+          description: "trailing messages to render (1-100, default 12); 0 = metadata only (no transcript echo)",
         },
         max_chars: {
           type: "number",
@@ -753,7 +814,7 @@ const TOOLS = [
         },
         page_token: {
           type: "string",
-          description: "pass back the previous page_token verbatim; bound to action+file",
+          description: "pass back the previous page_token verbatim (a pagination cursor; bound to action+file)",
         },
         no_cache: {
           type: "boolean",
@@ -831,15 +892,15 @@ const TOOLS = [
       properties: {
         kind: {
           enum: ["full", "short"],
-          description: "full = change turn; short = steady turn (rest inherit)",
+          description: "full = a turn where project state changed (change turn); short = an unchanged-state turn (steady turn; the rest inherit)",
         },
         project: { type: "string", description: "full only: one-sentence project status" },
         stage: { type: "string", description: "full only: current stage / wave" },
         flying: {
           type: "string",
-          description: "full: <=3 comma-separated ids; short: +id/-id deltas",
+          description: "full: ids of in-flight missions (flying), comma-separated, up to 3; short: +id/-id deltas (add/remove versus the previous list)",
         },
-        ruled: { type: "string", description: "full only: recent rulings FIFO (up to 3)" },
+        ruled: { type: "string", description: "full only: recent decisions, oldest dropped first (up to 3)" },
         next: { type: "string", description: "both kinds: one-sentence next intent" },
       },
     },
@@ -850,3 +911,11 @@ export {
   TOOL_HANDLERS,
   TOOLS,
 };
+
+// v1.6.4 W1（Q2 枚举值语义行第 1 处；grill#1 采认）：board.mission.dispatch.mode 的 value=meaning 行。
+//   NST-04a（crv6-resilience/scenarios-v120-nested）钉死上行单行字面为 board enum 保留面载体，
+//   description 无法内联同一对象（`mode: { enum: [...] }` 载体要求 enum 后紧跟 `] }`），故走定义后
+//   赋值承载：import TOOLS 消费面（MCP schema 运行时/po-static census+Q2 判据）读值一致；
+//   枚举值 K2 零改，工具级 desc 零触。
+TOOLS.find((t) => t.name === PREFIX + "board").inputSchema.properties.mission.properties.dispatch.properties.mode.description =
+  "launch form: agent = host Agent session; workflow = background workflow run (the host reports completion); headless = one-shot headless run; nested = nested in-session dispatch (no spawn)";
