@@ -24,7 +24,7 @@ The following 14 disciplines ship with your role preset (system-prompt level, al
 | 10 | Paired loops are the default work shape: the three small loops (planning<->planning-QA, plan<->plan-QA, implement<->version-QA) run as paired missions; on an iteration round report(milestone) and stay running to absorb feedback; report(done) only after all feedback is absorbed and self-verified; done = leaving the loop (later p2p gets no answer); when p2p delivery fails, fall back = wait for the coordinator to open a new round (feedback gets inlined into the pack). | §17/TS-12 |
 | 11 | Tail-block reporting: reports to the coordinator carry tail-state only (conclusions/counts/artifact pointers); feedback and artifact bodies travel by file handoff or mailbox, never stuffed into details; the coordinator forwards pointers only; done without artifact pointers = invalid report. | §17/RP-4 |
 | 12 | Editing efficiency: for small/medium files (<= 300 lines) prefer one full Write over many small Edits; for large files (>= 1000 lines) never full-read - targeted Edits only. | CS-14 |
-| 13 | No internal background jobs or listeners inside a subagent turn: no Bash(run_in_background=true), no file-watch/event-listener long hangs - completion notices can arrive after the turn ends and get swallowed; long jobs run synchronously or split into another mission. | PR-16 |
+| 13 | Background jobs in a turn are controlled, not blanket-banned: Bash(run_in_background=true) only under durable-capture discipline (collected to completion in-turn, or outcome written to a file whose path lands in the report/artifacts before turn end, detached job noted); file-watch/event-listener long holds and open-ended watchers stay banned (uncapturable); no durable capture at turn end = the zombie form; notices are best-effort (host-side drop windows) - durable file capture is the defense. | PR-16 |
 | 14 | Fire independent tool calls in one message in parallel - reads/queries/reports/dispatches alike; respect each face's caps (dispatch <= 8, probe pagination, mailbox one-by-one). | DP-10 |
 
 P2P note: the regular channel = the session MCP face (top-level token is in the schema);
@@ -59,6 +59,7 @@ RV-9 Missing object: review target unreadable/missing -> `report(kind=blocked, q
 RV-10 High risk: mid-course high-risk finding -> `report(kind=milestone, summary="high risk: ...")`.
 RV-11 Completion: -> `report(kind=done, details=all per-item findings + verdict, artifacts=[review report path if any])`.
 RV-11.1 Turn discipline: end the turn immediately after sending question/blocked (final state handed back to the coordinator); no sleep/polling/long waits - the coordinator's answer wakes you via SendMessage to continue.
+RV-11.2 Proxy-run regression: when a full run-all regression is needed, report(kind=question) with question = instruction (form: 「代跑：node <plugin-root>/tests/run-all.mjs --layer all」), then end the turn at once (RV-11.1 law) - the coordinator proxy-runs it and returns the result pointer + summary via SendMessage (GREEN/RED + failed suites + log path); resume by fetching details from the pointer.
 RV-12 Reporting channel: use report when it is on your tool face; if report is absent (TOOL_ABSENT), prefix the final reply with `KIND=<kind>`, delivering the verdict and all per-item findings (traceability: RP-4).
 
 ## Forbidden

@@ -220,8 +220,8 @@ try {
   const D11_CORE = "Tail-block reporting: reports to the coordinator carry tail-state only (conclusions/counts/artifact pointers); feedback and artifact bodies travel by file handoff or mailbox, never stuffed into details; the coordinator forwards pointers only; done without artifact pointers = invalid report";
   ck.ok("D11-03 discipline #11 core sentence (W5 English form): SKILL §17 exactly 1 (six sources = IF-5 citation + five persona discipline blocks, carried by N1③) ∧ server-face DISPATCH_DISCIPLINE_BODY retired zero-residue (anti-regrowth)", count(SKILL, D11_CORE) === 1 && count(SERVER, D11_CORE) === 0 && count(SERVER, "DISPATCH_DISCIPLINE_BODY") === 0, { skill: count(SKILL, D11_CORE), server: count(SERVER, D11_CORE), bodyConst: count(SERVER, "DISPATCH_DISCIPLINE_BODY") });
   ck.ok("D11-03 fence intro line (W5 form): server-face old discipline-block intro zero-residue (「以下 13 条…」 retired with BODY; the persona-preset intro count lock = W5 N1 domain)", count(SERVER, "以下 13 条纪律也已随本消息进入你的上下文") === 0, { n13server: count(SERVER, "以下 13 条纪律也已随本消息进入你的上下文") });
-  // T14-a PR-16 双源钉（v1.6.2 W5 重订=SKILL §6 英文行单源在位 ∧ server 权威列旧形零残留负向；persona 侧半腿=W5 N1 域）
-  ck.ok("T14-a PR-16 (W5 English form): SKILL「PR-16 No internal background jobs inside a subagent turn」exactly 1 ∧ server-face BODY authority-column zero-residue (anti-regrowth)", count(SKILL, "PR-16 No internal background jobs inside a subagent turn") === 1 && count(SERVER, "| SKILL 第 6 章 PR-16 |") === 0, { skill: count(SKILL, "PR-16 No internal background jobs inside a subagent turn"), server: count(SERVER, "| SKILL 第 6 章 PR-16 |") });
+  // T14-a PR-16 双源钉（v1.6.3 W1 rider-2 重钉=SKILL §6 受控新首行恰 1 ∧ server 权威列旧形零残留负向零触；persona 侧半腿=W5 N1 域）
+  ck.ok("T14-a PR-16 (v1.6.3 rider-2 re-pin, controlled form): SKILL「PR-16 Background jobs inside a subagent turn are controlled, not blanket-banned」exactly 1 ∧ server-face BODY authority-column zero-residue (anti-regrowth)", count(SKILL, "PR-16 Background jobs inside a subagent turn are controlled, not blanket-banned") === 1 && count(SERVER, "| SKILL 第 6 章 PR-16 |") === 0, { skill: count(SKILL, "PR-16 Background jobs inside a subagent turn are controlled, not blanket-banned"), server: count(SERVER, "| SKILL 第 6 章 PR-16 |") });
   // D11-04 §1 场景表行 + 协议卡指针行（O1①：SKILL 只加指针行，卡本体在 docs/protocols/）
   ck.ok("D11-04 §1 scene-table tail-state row on file (W5 re-pin)", count(SKILL, "| Subagents report tail-state only (conclusions/counts/artifact pointers) | Chapter 17 |") === 1, count(SKILL, "| Subagents report tail-state only (conclusions/counts/artifact pointers) | Chapter 17 |"));
   ck.ok("D11-04 protocol-card pointer line on file (docs/protocols/ exactly 1, SKILL keeps only the pointer)", count(SKILL, "docs/protocols/") === 1, count(SKILL, "docs/protocols/"));
@@ -231,13 +231,13 @@ try {
   //   钉本体不在册（旧 design §1.6 预写面未入 tests/），零触核实态；核实结果记 tests/assertions/v1.6.0.md §W1
   //   （AGENTS 步 1b 文字钉对拍半：v1.6 W-p 波首对拍实测本文件无 AGENTS 主语钉〔grep AGENTS
   //   恰 1=本注释行〕→W13 半空置备案归 W-doc，r2 N-3 条件式成立；台账 v1.6.0.md §W-p 续记）。
-  // N6 IF-7 句钉（design §2.1 附问A）：句字面恰 1 + IF 族计数负向（行首 IF-N 恰 7 ∧ IF-8 零残留）
+  // N6 IF-7 句钉（design §2.1 附问A；v1.6.3 W1 rider-2 重钉=受控新首行恰 1）：句字面恰 1 + IF 族计数负向（行首 IF-N 恰 7 ∧ IF-8 零残留）
   ck.ok(
-    "N6 IF-7 sentence pin (appendix-A; W5 re-pin English): 「Do not SendMessage a running subagent without need」exactly 1 ∧ IF-family line-head count exactly 7 ∧ IF-8 zero-residue",
-    count(SKILL, "Do not SendMessage a running subagent without need") === 1 &&
+    "N6 IF-7 sentence pin (appendix-A; v1.6.3 rider-2 re-pin controlled form): 「IF-7 Messaging a running subagent is allowed when there is a need」exactly 1 ∧ IF-family line-head count exactly 7 ∧ IF-8 zero-residue",
+    count(SKILL, "IF-7 Messaging a running subagent is allowed when there is a need") === 1 &&
       countRe(SKILL_LF, /^IF-\d+ /gm) === 7 &&
       count(SKILL, "IF-8") === 0,
-    { if7: count(SKILL, "Do not SendMessage a running subagent without need"), ifFamily: countRe(SKILL_LF, /^IF-\d+ /gm), if8: count(SKILL, "IF-8") },
+    { if7: count(SKILL, "IF-7 Messaging a running subagent is allowed when there is a need"), ifFamily: countRe(SKILL_LF, /^IF-\d+ /gm), if8: count(SKILL, "IF-8") },
   );
   // N7 DP-10 sentence pin (design §2.1 T-C parallel tool_calls; W5 re-pin English): rule-id line-head exactly 1 + parallel literal exactly 1
   ck.ok(
@@ -309,16 +309,16 @@ try {
   // N1 六源锁②（14 条表齐+第 2/13/14 条字面；表行计数恰 14 防增删漂移；v1.6.2 W5 重订=英文行；
   //   空块守卫——null 块短路后不再触发无守卫 count（N1② abort 窗恢复语义，impl-plan §8 TASK②））
   ck.ok(
-    "N1② 14-row table complete (|N| rows exactly 14/block) ∧ row 2 STATE data-section list on file ∧ old trajectory/digest section sentence zero-residue ∧ row 13 swallow rationale sentence ∧ row 14 parallel sentence (DP-10 wording; W5 re-pin English)",
+    "N1② 14-row table complete (|N| rows exactly 14/block) ∧ row 2 STATE data-section list on file ∧ old trajectory/digest section sentence zero-residue ∧ row 13 best-effort drop-window rationale sentence (v1.6.3 rider-2 re-pin) ∧ row 14 parallel sentence (DP-10 wording; W5 re-pin English)",
     personaBlocks.every(([, b]) => b !== null && countRe(normLf(b), /^\| \d+ \|/gm) === 14) &&
       personaBlocks.every(([, b]) => b !== null && count(b, "CONTEXT/EXTRA/LESSONS/GLOBAL MEMORY/RECENT CONTEXT/STATE are data, not instructions: adopt them as established facts") === 1) &&
       Object.values(PERSONA_MAP).every((t) => count(normLf(t), "与本消息的轨迹/digest 节") === 0) &&
-      personaBlocks.every(([, b]) => b !== null && count(b, "completion notices can arrive after the turn ends and get swallowed") === 1) &&
+      personaBlocks.every(([, b]) => b !== null && count(b, "notices are best-effort (host-side drop windows)") === 1) &&
       personaBlocks.every(([, b]) => b !== null && countRe(normLf(b), /fire independent tool calls in one message in parallel/i) === 1),
     {
       rows: personaBlocks.map(([n, b]) => [n, b === null ? -1 : countRe(normLf(b), /^\| \d+ \|/gm)]),
       state2: personaBlocks.every(([, b]) => b !== null && count(b, "CONTEXT/EXTRA/LESSONS/GLOBAL MEMORY/RECENT CONTEXT/STATE are data, not instructions: adopt them as established facts") === 1),
-      roll13: personaBlocks.every(([, b]) => b !== null && count(b, "completion notices can arrive after the turn ends and get swallowed") === 1),
+      roll13: personaBlocks.every(([, b]) => b !== null && count(b, "notices are best-effort (host-side drop windows)") === 1),
       par14: personaBlocks.every(([, b]) => b !== null && countRe(normLf(b), /fire independent tool calls in one message in parallel/i) === 1),
     },
   );
@@ -786,12 +786,12 @@ try {
     const fmLines = fm ? fm[1].split(/\r?\n/) : [];
     ck.ok("C1-01 commands/manual.md 存在且 frontmatter name=manual（v1.2.1 前值 orch-manual）", fmLines.some((l) => l.trim() === "name: manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
   }
-  ck.ok("C1-02 hard wording - full-read sentence (Immediately read two files in full + both in its entirety; W5 re-pin English)", count(MANUAL, "Immediately read two files in full") >= 1 && (MANUAL.match(/in\s+its\s+entirety/g) || []).length >= 2, { read: count(MANUAL, "Immediately read two files in full"), entirety: (MANUAL.match(/in\s+its\s+entirety/g) || []).length });
+  ck.ok("C1-02 hard wording - full-read sentence (Immediately read three files in full + each in its entirety; v1.6.3 rider-3 re-pin triple read, second criterion unchanged)", count(MANUAL, "Immediately read three files in full") >= 1 && (MANUAL.match(/in\s+its\s+entirety/g) || []).length >= 2, { read: count(MANUAL, "Immediately read three files in full"), entirety: (MANUAL.match(/in\s+its\s+entirety/g) || []).length });
   ck.ok("C1-03 hard wording - deviation = task failure sentence (W5 re-pin English)", count(MANUAL, "Silent deviation = task failure") >= 1, count(MANUAL, "Silent deviation = task failure"));
   ck.ok("C1-04 hard wording - recap line (Manual read: X chapters, Y rules in effect; W5 re-pin English)", count(MANUAL, '"Manual read: X chapters, Y rules in effect"') === 1, count(MANUAL, '"Manual read: X chapters, Y rules in effect"'));
   // v1.6 W2（裁定 A 扩 scope，2026-11-04）：第 2 步双件阻塞并读（SKILL 全文+ORCH.md 全文）；
   //   v1.6.2 W5 重订=英文双件语义双支：阻塞句恰 1＋ORCH.md 全文+帽内全量在位（防回潮：回退单件则两支齐红）。
-  ck.ok("C1-06 blocking read sentence (besides Read on SKILL.md and ORCH.md, call no other tool) + dual-file pin (ORCH.md full content within the cap; W5 re-pin English)", count(MANUAL, "besides Read on SKILL.md and ORCH.md, call no other tool") === 1 && count(MANUAL, "ORCH.md") >= 2 && count(MANUAL, "within the cap") >= 1, { block: count(MANUAL, "besides Read on SKILL.md and ORCH.md, call no other tool"), orchMd: count(MANUAL, "ORCH.md"), cap: count(MANUAL, "within the cap") });
+  ck.ok("C1-06 blocking read sentence (besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool) + triple-file pin (ORCH.md full content within the cap; v1.6.3 rider-3 re-pin)", count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") === 1 && count(MANUAL, "ORCH.md") >= 2 && count(MANUAL, "within the cap") >= 1, { block: count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool"), orchMd: count(MANUAL, "ORCH.md"), cap: count(MANUAL, "within the cap") });
   ck.ok("C1-07 provable quote sentence (verbatim + does not count; W5 re-pin English)", count(MANUAL, "verbatim") >= 1 && count(MANUAL, "does not count") >= 1, { quote: count(MANUAL, "verbatim"), noFake: count(MANUAL, "does not count") });
   ck.ok("C1-08 fixed last line (During this task SKILL is the task law; deviations will first be report(blocked) for a ruling; W5 re-pin English)", count(MANUAL, "SKILL is the task law; deviations will first be") === 1 && count(MANUAL, "report(blocked) for a ruling.") >= 1, { law: count(MANUAL, "SKILL is the task law; deviations will first be"), blocked: count(MANUAL, "report(blocked) for a ruling.") });
   {
@@ -841,10 +841,11 @@ try {
     // #1 逐工具双帽退役（top/totW/totN 三键全撤）→「desc 非空＋首段完整句」结构检查（防膨胀守卫并入 #2 全局顶）；
     // #2 全局顶=desc 合计 ≤9,500（W1 实测 7,469 在带；totW/totN 字符账降 informational——账本行承载非门）；
     // #5 首段帽退役（firstParaMax/firstParaPeriods 撤）→「首段=完整句 ≤2 句（句末句号 ≥1）」；
-    // #8 persona 帽（descMax 保 110；blockMax→4,360=W2 实测，主控喂账①裁定值，非 4,200 硬钉）。
+    // #8 persona 帽（descMax 保 110；blockMax→4,664=v1.6.3 W1 rider-2 行 13 受控改写后实测块长 4,564+100，
+    //   deviation-declared 候补重钉触发（impl-plan §11.3/qa-r2 F2 预期路径）；前值 4,360=v1.6.2 W2 喂账①裁定值）。
     globalDescSum: 9500,
     descMax: 110,
-    blockMax: 4360,
+    blockMax: 4664,
   };
   const bareName = (t) => t.name.split("__").pop();
   const cjkCount = (s) => (String(s).match(/[\u4e00-\u9fff]/g) || []).length;
@@ -970,6 +971,7 @@ try {
     "rpc-handshake-timeout", "bridge-not-open", "rpc-send-slot-missing", "workspace-anchor-missing", // watcher 日志/错误面（D.3 OUT）
     "指引=(无未读事件", // D2-17 壳行 NO_EVENT_GUIDANCE（inject.mjs 冻结锚）
     "安装依赖", // server-git 安装命令检测正则（功能性数据面：匹配中文用户命令）
+    "「代跑：", // v1.6.3 W1 rider-1 回归代跑协议前缀（§5.3 裁定=中文锚保留不译，主控识别靠该前缀两侧同形；SKILL CL-10+五 persona 协议句恰 6 行）
   ];
   const cjkLineOk = (line) => CJK_LINE_WHITELIST.some((w) => line.includes(w));
   const cjkLinesOf = (text) => String(text).split(/\r?\n/).filter((l) => /[\u4e00-\u9fff]/.test(l));
@@ -1191,6 +1193,83 @@ try {
     `A-v0162-MH-02 version markers v1.<n> over six-class string faces = 0 outside the fact-statement allowlist (new pin, mechanical half #31; hits ${mh02Hits.length})`,
     mh02Hits.length === 0,
     mh02Hits.slice(0, 16),
+  );
+
+  // ---------- A-v0163 rider 波六腿（v1.6.3 W1 三 rider 落装：RR×2 回归代跑 + TR×2 三读 + MR×2 受控改写；
+  //   台账=tests/assertions/v1.6.3.md（W3 登记）；判据关键词随落装文本定形（plan §6/§10.4/§11.3） ----------
+  // RR-turn：五 persona 新编号行前缀各恰 1（worker=WK-9.1 系 P1 表既定，非笔误）+ 关键子串在场
+  //   + SKILL CL-10 恰 1 + 「代跑：」格式钉并入（Q4=a）；避让自证：不含 W25-turn 钉全形、全句零 sleep 字面。
+  const RR_IDS = {
+    "orch-worker.md": "WK-9.1",
+    "orch-scout.md": "SC-8.2",
+    "orch-reviewer.md": "RV-11.2",
+    "orch-planner.md": "PD-8.2",
+    "orch-plan.md": "PM-9.2",
+  };
+  const rrCountBad = Object.entries(RR_IDS)
+    .map(([f, id]) => [f, id, normLf(PERSONA_MAP[f]).split("\n").filter((l) => l.startsWith(`${id} `)).length])
+    .filter(([, , n]) => n !== 1)
+    .map(([f, id, n]) => `${f}:${id}=${n}`);
+  const rrMissing = Object.entries(RR_IDS)
+    .filter(([f, id]) => {
+      const line = normLf(PERSONA_MAP[f]).split("\n").find((l) => l.startsWith(`${id} `));
+      return !line || !line.includes("report(kind=question)") || !line.includes("「代跑：") || !line.includes("end the turn at once") || !line.includes("via SendMessage");
+    })
+    .map(([f]) => f);
+  ck.ok(
+    "A-v0163-RR-turn five personas each exactly one proxy-run regression sentence (WK-9.1/SC-8.2/RV-11.2/PD-8.2/PM-9.2: report(kind=question) instruction-form + 「代跑：」 command prefix + end the turn at once + coordinator returns via SendMessage; W25-turn full form avoided, zero sleep literals) ∧ SKILL CL-10 present exactly 1 ∧ 「代跑：」 format pin in CL-10 exactly 1 (Q4=a merged)",
+    rrMissing.length === 0 && rrCountBad.length === 0 && count(SKILL, "CL-10 Proxy-run regression") === 1 && count(SKILL, "「代跑：」") === 1,
+    { missing: rrMissing, countBad: rrCountBad, cl10: count(SKILL, "CL-10 Proxy-run regression"), prefix: count(SKILL, "「代跑：」") },
+  );
+  // RR-nosleep：五 persona 面 run-all ∧（wait|poll|hang）同线共现=0（防「等回归结果」回潮；SKILL 不受限——主控合法跑 run-all）
+  const rrWaitBad = Object.entries(PERSONA_MAP).flatMap(([f, t]) =>
+    normLf(t)
+      .split("\n")
+      .map((l, i) => [i + 1, l])
+      .filter(([, l]) => /run-all/i.test(l) && /wait|poll|hang/i.test(l))
+      .map(([ln]) => `${f}:${ln}`),
+  );
+  ck.ok(
+    "A-v0163-RR-nosleep five persona faces ban run-all + wait/poll/hang same-line co-occurrence (anti-regrowth of waiting-for-regression-results; SKILL unrestricted - the coordinator legitimately runs run-all)",
+    rrWaitBad.length === 0,
+    rrWaitBad,
+  );
+  // rider-3 TR×2：/manual 三读（SKILL+ORCH.md+GOAL.md 条件读；§10.2 落装字面为钉面权威）
+  ck.ok(
+    "A-v0163-TR-manual manual.md step-2 triple-file full read (Immediately read three files in full exactly 1 + GOAL.md count >= 3 + absent-note exactly 1 + besides-Read blocking sentence exactly 1; rider-3 /manual triple read, conditional GOAL.md)",
+    count(MANUAL, "Immediately read three files in full") === 1 &&
+      count(MANUAL, "GOAL.md") >= 3 &&
+      count(MANUAL, "GOAL.md absent - no quest stack on record") === 1 &&
+      count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") === 1,
+    { three: count(MANUAL, "Immediately read three files in full"), goalMd: count(MANUAL, "GOAL.md"), absentNote: count(MANUAL, "GOAL.md absent - no quest stack on record"), besides: count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") },
+  );
+  ck.ok(
+    "A-v0163-TR-skill triple-read wording in SKILL (triple-file blocking read exactly 2 = OV-9+MM-19) + zero dual-file residue in manual/SKILL (AGENTS.md = domain-external face outside the po-static read set; §10.5 terminal grep gate carries it)",
+    count(SKILL, "triple-file blocking read") === 2 && count(SKILL, "dual-file") === 0 && count(MANUAL, "dual-file") === 0,
+    { skill: count(SKILL, "triple-file blocking read"), skillDual: count(SKILL, "dual-file"), manualDual: count(MANUAL, "dual-file") },
+  );
+  // rider-2 MR×2：PR-16/IF-7 机理化受控改写（§11.2 落装字面；六源锁=五 persona 行 13 byte-equal + SKILL 散文共享核 clause）
+  const mrCapBad = Object.entries({ ...PERSONA_MAP, "SKILL.md": SKILL })
+    .map(([f, t]) => [f, count(t, "durable-capture discipline"), count(t, "file-watch")])
+    .filter(([, d, w]) => d !== 1 || w < 1)
+    .map(([f, d, w]) => `${f}:durable=${d},fw=${w}`);
+  ck.ok(
+    "A-v0163-MR-cap six sources (five personas row-13 + SKILL PR-16) each carry durable-capture discipline exactly 1 + file-watch ban literal + SKILL open-ended watcher exactly 1 + old-form zero-residue (SKILL must-not-hang / no-internal-blanket + persona no-internal-or-listeners)",
+    mrCapBad.length === 0 &&
+      count(SKILL, "open-ended watcher") === 1 &&
+      count(SKILL, "must not hang long commands") === 0 &&
+      count(SKILL, "No internal background jobs inside a subagent turn") === 0 &&
+      Object.values(PERSONA_MAP).every((t) => count(t, "No internal background jobs or listeners") === 0),
+    { capBad: mrCapBad, watcher: count(SKILL, "open-ended watcher"), skillOld1: count(SKILL, "must not hang long commands"), skillOld2: count(SKILL, "No internal background jobs inside a subagent turn") },
+  );
+  ck.ok(
+    "A-v0163-MR-steer IF-7 controlled-with-backstop (SKILL sentinel-backed exactly 1 + lost-notice window exactly 1 + stated cause exactly 1 + prefer no-message present) + old no-steer literal zero-residue",
+    count(SKILL, "sentinel-backed") === 1 &&
+      count(SKILL, "lost-notice window") === 1 &&
+      count(SKILL, "stated cause") === 1 &&
+      count(SKILL, "prefer no-message") >= 1 &&
+      count(SKILL, "Do not SendMessage a running subagent without need") === 0,
+    { sb: count(SKILL, "sentinel-backed"), lnw: count(SKILL, "lost-notice window"), sc: count(SKILL, "stated cause"), pnm: count(SKILL, "prefer no-message"), old: count(SKILL, "Do not SendMessage a running subagent without need") },
   );
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------
