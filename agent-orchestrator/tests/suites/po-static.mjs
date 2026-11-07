@@ -839,11 +839,15 @@ try {
   const CAPS = {
     // v1.6.2 W5 重订（design §5.1 账 #1/#2/#5/#8；台账=tests/assertions/v1.6.2.md）：
     // #1 逐工具双帽退役（top/totW/totN 三键全撤）→「desc 非空＋首段完整句」结构检查（防膨胀守卫并入 #2 全局顶）；
-    // #2 全局顶=desc 合计 ≤9,500（W1 实测 7,469 在带；totW/totN 字符账降 informational——账本行承载非门）；
+    // #2 全局顶=desc 合计 ≤12,500（v1.6.4 W1 重钉 9,500→12,500，Q4② deviation-declared：param 面通用语化
+    //   填充波的设计性增重；门账户维持工具级 sumTop 不扩——工具级 desc 零触→恒 ~7.5K，12,500=纯余量守卫
+    //   〔O-3 机械证实：N2-top 判据=sumTop≤CAPS，param 增量走 totN/totW informational 账〕；
+    //   v1.6.2 W5 原值 9,500=当时 W1 实测 7,469 在带；totW/totN 字符账降 informational——账本行承载非门）；
     // #5 首段帽退役（firstParaMax/firstParaPeriods 撤）→「首段=完整句 ≤2 句（句末句号 ≥1）」；
     // #8 persona 帽（descMax 保 110；blockMax→4,664=v1.6.3 W1 rider-2 行 13 受控改写后实测块长 4,564+100，
     //   deviation-declared 候补重钉触发（impl-plan §11.3/qa-r2 F2 预期路径）；前值 4,360=v1.6.2 W2 喂账①裁定值）。
-    globalDescSum: 9500,
+    // v1.6.4 W1 重钉（Q4②）：9,500→12,500（P5 腿=常量字面钉）
+    globalDescSum: 12500,
     descMax: 110,
     blockMax: 4664,
   };
@@ -893,14 +897,15 @@ try {
       { top: m.top, fpLen: m.fp.length },
     );
   }
-  // N2 全局顶 ×1 门（v1.6.2 W5 #2 改钉：desc 合计 ≤9,500）+ 字符账 informational（原 N2-total 门退役→账本行）
+  // N2 全局顶 ×1 门（v1.6.2 W5 #2 改钉：desc 合计 ≤12,500=v1.6.4 W1 重钉，消息模板 ${CAPS.globalDescSum} 插值自动随值）
+  //   + 字符账 informational（原 N2-total 门退役→账本行）
   ck.ok(
     `A-v0161-N2-top 13-tool desc sum ${sumTop}<=${CAPS.globalDescSum} (W5 re-pin; anti-bloat guard)`,
     sumTop <= CAPS.globalDescSum,
     { sum: [sumTop, CAPS.globalDescSum] },
   );
   console.log(
-    `[ledger] informational char account (v1.6.2 W5 #2 demoted from gate, R2): descSumTop=${sumTop} totWide=${sumTotW} totNarrow=${sumTotN} cjk=${sumCjk}（门=globalDescSum 9,500；宽/窄口径仅记账）`,
+    `[ledger] informational char account (v1.6.2 W5 #2 demoted from gate, R2; v1.6.4 W1 re-pin): descSumTop=${sumTop} (gate CAPS.globalDescSum=${CAPS.globalDescSum}, tool-level account only) totWide=${sumTotW} totNarrow=${sumTotN} paramDescAccount=${sumTotN - sumTop} cjk=${sumCjk}（v1.6.4 W1 P5 post-verify 双账户读数：门账户=工具级 sumTop 不扩；宽/窄/param 账仅记账）`,
   );
   // N3 CJK 守卫（v1.6.2 W5 #3 重订并扩围：扫描域=六类文本面；白名单注册制保留——
   //   ①D2 冻结锚（w0-inventory D.2，K2 零改面）②OUT 终端/日志面（w0-inventory D.3：
@@ -1270,6 +1275,136 @@ try {
       count(SKILL, "prefer no-message") >= 1 &&
       count(SKILL, "Do not SendMessage a running subagent without need") === 0,
     { sb: count(SKILL, "sentinel-backed"), lnw: count(SKILL, "lost-notice window"), sc: count(SKILL, "stated cause"), pnm: count(SKILL, "prefer no-message"), old: count(SKILL, "Do not SendMessage a running subagent without need") },
+  );
+
+  // ---------- A-v0164-P1..P5：v1.6.4 W1 参数面通用语化组（5 腿；impl-plan §6；台账=tests/assertions/
+  //   v1.6.4.md（W3 登记））。AO-param-walk v1 walker（proposal §1.1 伪码转写；扫描面=import TOOLS
+  //   运行时计量，:64 先例零新耦合）：
+  //     walk(node): yield node;
+  //       if node.properties: for each key -> walk(child)            // 对象字段
+  //       if node.items:
+  //         if node.items.oneOf: for each branch -> walk(branch)     // oneOf 逐分支（lessons.ids 实例）
+  //         else: walk(node.items)                                   // 数组 items 为独立节点
+  //     leaf(n) = !n.properties && !n.items && !n.oneOf              // 码面语义为准：含 items 的数组=容器
+  //       （r2 算法注记〔plan-qa F-1〕：proposal §1.1 旧注「标量数组=叶」与代码 leaf 行自相矛盾，即日作废
+  //        ——本转写即按码面语义修注；filter_status 含 items=容器非叶）
+  //     top-level = inputSchema.properties 每个 key
+  //     no-desc(n) = typeof n.description !== "string"
+  //     三无(n) = leaf(n) ∧ no-desc ∧ 无 enum ∧ 无约束
+  //     约束集 = {maxLength,minLength,pattern,minimum,maximum,maxItems,minItems,default}
+  //       （default 计约束侧：default 是调用方可感知的指引；排除它会把 mailbox.limit/
+  //        spawn_agent.overwrite 误判为零指引——plan-qa 码面复核维持此钉法）
+  //   工具级 desc=零触域：不入 P3 扫面（collectDescs(t.inputSchema) 只收 param descs，:852 先例同法）。 ----------
+  const CONSTRAINT_KEYS = ["maxLength", "minLength", "pattern", "minimum", "maximum", "maxItems", "minItems", "default"];
+  const isLeafNode = (n) => !n.properties && !n.items && !n.oneOf;
+  const lacksDesc = (n) => typeof n.description !== "string";
+  const hasConstraint = (n) => CONSTRAINT_KEYS.some((k) => n[k] !== undefined);
+  const isThreeNothing = (n) => isLeafNode(n) && lacksDesc(n) && n.enum === undefined && !hasConstraint(n);
+  function* paramWalk(node) {
+    yield node;
+    if (node && node.properties) for (const k of Object.keys(node.properties)) yield* paramWalk(node.properties[k]);
+    if (node && node.items) {
+      if (node.items.oneOf) {
+        for (const b of node.items.oneOf) yield* paramWalk(b);
+      } else {
+        yield* paramWalk(node.items);
+      }
+    }
+  }
+  const census = { tools: TOOLS.length, top: 0, topNoDesc: 0, walkTotal: 0, noDesc: 0, threeNothing: 0 };
+  const paramDescs = [];
+  for (const t of TOOLS) {
+    const schema = t.inputSchema ?? {};
+    for (const k of Object.keys(schema.properties ?? {})) {
+      const p = schema.properties[k];
+      census.top++;
+      if (lacksDesc(p)) census.topNoDesc++;
+      for (const n of paramWalk(p)) {
+        census.walkTotal++;
+        if (lacksDesc(n)) {
+          census.noDesc++;
+          if (isThreeNothing(n)) census.threeNothing++;
+        }
+      }
+    }
+    paramDescs.push(...collectDescs(schema));
+  }
+  // P1 no-desc=0（白名单=空：容器/oneOf 分支/items 一并补齐，语义统一免裁量——impl-plan §6）
+  ck.ok(
+    `A-v0164-P1-nodesc param walk no-desc count = 0 (empty whitelist; containers/oneOf branches/items all filled; walkTotal=${census.walkTotal})`,
+    census.noDesc === 0,
+    { noDesc: census.noDesc, walkTotal: census.walkTotal },
+  );
+  // P2 叶节点三无=0（P1 的叶桶独立腿；约束集钉死防裁量）
+  ck.ok(
+    "A-v0164-P2-bare leaf three-nothing count = 0 (leaf ∧ no-desc ∧ no enum ∧ no constraint key of the pinned set)",
+    census.threeNothing === 0,
+    { threeNothing: census.threeNothing },
+  );
+  // P3 术语单源字面清单（Q4①/Q1：22 行=proposal §2 表逐字转录，行内多词行拆 needle；清单即穷举、
+  //   清单即单源；词表增删走台账留痕）。W1 波首钉面收紧三处（done 台账注记在案）：
+  //   「W9 scoping ownership face」→needle "W9 scoping"（jargon 核心）；「cascade（动词用法）」→词干
+  //   "cascad"（覆盖 cascade/cascades/cascading）；「CAS claim」→"CAS"（缩写本体=R2 禁令面）。
+  //   「junction」行按落装文案（「via a directory link (Windows junction)」）归 gloss（括注内出场）。
+  //   判据：plain=术语全 param desc 零残留；gloss=含术语的 desc 必含 "(...)" 括注（R3 首现同位括注）；
+  //   whitelist=零检。扫描面=param descs（工具级 desc 排除=零触域）。
+  const TERMS = [
+    /* §2 行 1 */ { term: "W9 scoping", policy: "plain" },
+    /* §2 行 2 */ { term: "F1-normalized", policy: "plain" },
+    /* §2 行 3 */ { term: "DAG", policy: "plain" },
+    /* §2 行 4 */ { term: "cascad", policy: "plain" },
+    /* §2 行 5 */ { term: "CAS", policy: "plain" },
+    /* §2 行 6 */ { term: "lease", policy: "gloss" },
+    /* §2 行 7 */ { term: "p2p", policy: "gloss" },
+    /* §2 行 8 */ { term: "CONTRACT", policy: "gloss" },
+    /* §2 行 9 */ { term: "token", policy: "gloss" },
+    /* §2 行 10 */ { term: "persona", policy: "gloss" },
+    /* §2 行 11 */ { term: "junction", policy: "gloss" },
+    /* §2 行 12 */ { term: "OOB", policy: "plain" },
+    /* §2 行 13a */ { term: "hash-read reader key", policy: "plain" },
+    /* §2 行 13b */ { term: "hash baseline", policy: "plain" },
+    /* §2 行 14a */ { term: "demote", policy: "gloss" },
+    /* §2 行 14b */ { term: "auto-retire", policy: "gloss" },
+    /* §2 行 15 */ { term: "soft-handled", policy: "plain" },
+    /* §2 行 16 */ { term: "advisory data", policy: "plain" },
+    /* §2 行 17 */ { term: "gleaner", policy: "gloss" },
+    /* §2 行 18 */ { term: "flying", policy: "gloss" },
+    /* §2 行 19a */ { term: "change turn", policy: "gloss" },
+    /* §2 行 19b */ { term: "steady turn", policy: "gloss" },
+    /* §2 行 20 */ { term: "FIFO", policy: "plain" },
+    /* §2 行 21a */ { term: "probe mode", policy: "plain" },
+    /* §2 行 21b */ { term: "log-tail", policy: "plain" },
+    /* §2 行 22（self-explanatory 类：gate/sandbox/worktree/ack/allowlist/verbatim/manifest/rollback） */
+    { term: "gate/sandbox/worktree/ack/allowlist/verbatim/manifest/rollback (self-explanatory class row)", policy: "whitelist" },
+  ];
+  const p3Bad = [];
+  for (const { term, policy } of TERMS) {
+    if (policy === "whitelist") continue;
+    for (const d of paramDescs) {
+      if (!String(d).includes(term)) continue;
+      if (policy === "plain") p3Bad.push(`plain residue: "${term}" in "${String(d).slice(0, 70)}"`);
+      else if (!/\([^)]*\)/.test(String(d))) p3Bad.push(`gloss missing: "${term}" in "${String(d).slice(0, 70)}"`);
+    }
+  }
+  ck.ok(
+    `A-v0164-P3-jargon TERMS lexicon literal list (22-row single source from proposal §2, term+policy; plain rows zero residue ∧ gloss rows always carry an (...) gloss) over all param descs (${paramDescs.length} descs; tool-level descs excluded = zero-touch domain)`,
+    p3Bad.length === 0,
+    p3Bad.slice(0, 12),
+  );
+  // P4 census 钉（计数法防漂移；A-02 陷阱制度化防疫——换口径必先动本腿=显式留痕）：
+  //   walkTotal 钉值=W1 波首 walker 实测 188（与 plan-qa §2 机械预载逐格全等，零偏差注记）；
+  //   no-desc/三无=0-目标（填充后终值）。
+  ck.ok(
+    "A-v0164-P4-census census pin: TOOLS.length===13 ∧ top-level===105 ∧ walkTotal===188 (W1 wave-start walker measured, equal to the plan-qa §2 preload) ∧ no-desc===0 ∧ three-nothing===0",
+    census.tools === 13 && census.top === 105 && census.walkTotal === 188 && census.noDesc === 0 && census.threeNothing === 0,
+    { tools: census.tools, top: census.top, walkTotal: census.walkTotal, noDesc: census.noDesc, threeNothing: census.threeNothing, topNoDesc: census.topNoDesc },
+  );
+  // P5 全局帽重钉常量字面钉（Q4② deviation-declared：9,500→12,500；门账户=工具级 sumTop 不扩——O-3
+  //   机械证实；param 账走 informational，双账户读数见上方 ledger 行 post-verify 注记）
+  ck.ok(
+    `A-v0164-P5-cap CAPS.globalDescSum === 12500 (v1.6.4 W1 re-pin from 9,500, deviation-declared; gate account stays tool-level sumTop = pure headroom guard; post-verify dual-account reading descSumTop/paramDescAccount in the ledger line)`,
+    CAPS.globalDescSum === 12500,
+    { cap: CAPS.globalDescSum },
   );
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------

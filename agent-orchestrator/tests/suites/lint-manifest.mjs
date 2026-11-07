@@ -702,6 +702,12 @@ const LM06_CAP_EXEMPT = [
   //   （W-p 预注「帽域登记值随实态漂移由 W3a 对拍」兑现；触发器随登记值走=+200）。
   { rel: "mcp/tool-dispatch/dispatch-core.mjs", lines: 349, wcSource: "v1.6-W3a 实测", note: "dispatch IO/主流程模块（组装链退役后=编号出口+哨兵探活+下沉残余承载件；再下切=主流程手术另案，零行为变更 doctrine 红线）；≥549 即红=再评估入口（LM-06-CAP 同源判则）；沿革=v1.3 S1 单件 1428→v1.4 W3 1646→v1.5 W2-A 拆分 1108 接册→v1.6 W-p 429→v1.6 W3a 组装退役 349 重基（旧单件登记同批注销，沿革由本注记承载）" },
   { rel: "mcp/server-lessons.mjs", lines: 932, wcSource: "F-1.1", note: "lessons 域写意图跨三模块（F-4.2）；≥1132 即红同上" },
+  // v1.6.4 W1（O-1 豁免登记，Q4③；impl-plan §7 O-1/§2.1 步 7）：server-registry.mjs param desc 填充波
+  //   （零描述 67 条 R4 三-way 补齐+存量重写+10 处枚举值语义行）852→921 越 900 软帽——desc 与 schema
+  //   同址可读正是本课题目的（调用点自包含、反幻觉），预拆分否决（proposal §6 OPEN-5/grill#1 Q4③）；
+  //   登记值=落装后 mechLines 实测（机械口径=split("\n").length-1，F-3 口径；w1-review 修正轮：
+  //   首登 914 系 NST-04a 载体修复轮前的实测，终态实测 921 校正）。
+  { rel: "mcp/server-registry.mjs", lines: 921, wcSource: "v1.6.4-W1 实测", note: "param desc 唯一域（13 工具 schema 面；工具级 desc 逐字零触）；≥1121 即红=再评估入口（LM-06-CAP 同源判则）；沿革=852（v1.6.3 基线，不在帽域两域任一）→921（v1.6.4 W1 param 面通用语化填充+dispatch.mode 载体修复轮终态，越 900 软帽触发登记；w1-review 修正 914→921）" },
   // v1.4 W3 主控裁决①（m-20261102-043942-9c1a）：glean-launch 硬帽域恰线观察件转豁免登记（与 tool-dispatch 同构），
   //   随豁免域出硬帽域（腿 B 跳过豁免 rel）；登记值=990（wc -l 沙箱实测）。
   // v1.5 W2-A T8 评估回写（impl-plan §5.1 步 3；只评估不实施，零代码零断言改动——腿 A 只读 e.lines 不读 note，
