@@ -1,5 +1,4 @@
-// agent-orchestrator orch server — tool registry：TOOL_HANDLERS + TOOLS 12 工具 schema（机械拆分自 server.mjs L9658-10430）
-import { PREFIX } from "./server-core.mjs";
+// agent-orchestrator orch server — tool registry：TOOL_HANDLERS + TOOLS 13 工具 schema（机械拆分自 server.mjs L9658-10430）
 import { toolBoard } from "./tool-board.mjs";
 import { toolReport } from "./tool-report.mjs";
 import { toolMailbox } from "./tool-mailbox.mjs";
@@ -17,25 +16,25 @@ import { toolTrajectory } from "./server-trajectory.mjs";
 /* ------------------------------------------------------------------ */
 
 const TOOL_HANDLERS = {
-  [PREFIX + "board"]: toolBoard,
-  [PREFIX + "report"]: toolReport,
-  [PREFIX + "mailbox"]: toolMailbox,
-  [PREFIX + "spawn_agent"]: toolSpawnAgent,
-  [PREFIX + "context_pack"]: toolContextPack,
-  [PREFIX + "dispatch"]: toolDispatch,
-  [PREFIX + "resume"]: toolResume,
-  [PREFIX + "lessons"]: toolLessons,
-  [PREFIX + "sandbox_apply"]: toolSandboxApply,
-  [PREFIX + "sandbox_discard"]: toolSandboxDiscard,
-  [PREFIX + "agent_harvest"]: toolAgentHarvest,
-  [PREFIX + "probe"]: toolProbe,
+  ["board"]: toolBoard,
+  ["report"]: toolReport,
+  ["mailbox"]: toolMailbox,
+  ["spawn_agent"]: toolSpawnAgent,
+  ["context_pack"]: toolContextPack,
+  ["dispatch"]: toolDispatch,
+  ["resume"]: toolResume,
+  ["lessons"]: toolLessons,
+  ["sandbox_apply"]: toolSandboxApply,
+  ["sandbox_discard"]: toolSandboxDiscard,
+  ["agent_harvest"]: toolAgentHarvest,
+  ["probe"]: toolProbe,
   // v1.6 W-t: the 13th tool (appended last — probe=11/dispatch=12 zero-drift precedent).
-  [PREFIX + "trajectory"]: toolTrajectory,
+  ["trajectory"]: toolTrajectory,
 };
 
 const TOOLS = [
   {
-    name: PREFIX + "board",
+    name: "board",
     description:
       "Persistent mission board for orchestrating subagents: create and update missions, query state\n" +
       "with derived health fields, acknowledge results, claim pool tasks, and run server-arbitrated\n" +
@@ -301,7 +300,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "report",
+    name: "report",
     description:
       "Report a mission event to the coordinator mailbox and record it on the mission board.\n" +
       "\n" +
@@ -401,7 +400,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "mailbox",
+    name: "mailbox",
     description:
       "Coordinator mailbox over the mission event spool.\n" +
       "\n" +
@@ -429,7 +428,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "spawn_agent",
+    name: "spawn_agent",
     description:
       "Create a custom subagent persona file at <project>/.zcode/agents/<name>.md from an archetype\n" +
       "template; it registers in new sessions.\n" +
@@ -481,7 +480,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "context_pack",
+    name: "context_pack",
     description:
       "Materialize a self-contained context pack (1-8 variants) and return the dispatch header and\n" +
       "worker token.\n" +
@@ -568,7 +567,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "resume",
+    name: "resume",
     description:
       "Session-start briefing: for every unclosed mission return a recommended_action - same-session\n" +
       "chat, workflow resume, or cross-session re-dispatch.\n" +
@@ -586,7 +585,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "lessons",
+    name: "lessons",
     description:
       "Orchestration lessons memory: list/add/promote/promote_batch/retire/stage.\n" +
       "\n" +
@@ -680,7 +679,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "sandbox_apply",
+    name: "sandbox_apply",
     description:
       "Sandbox finalize (gate tool): merge the sandbox branch back into the main repo and remove\n" +
       "the worktree.\n" +
@@ -705,7 +704,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "sandbox_discard",
+    name: "sandbox_discard",
     description:
       "Discard a sandbox: delete the sandbox branch and worktree with zero main-repo changes;\n" +
       "mission status untouched.\n" +
@@ -720,7 +719,7 @@ const TOOLS = [
     },
   },
   {
-    name: PREFIX + "agent_harvest",
+    name: "agent_harvest",
     description:
       "Read-only harvest of a subagent rollout transcript tail, rendered as role-labeled text.\n" +
       "\n" +
@@ -760,7 +759,7 @@ const TOOLS = [
     // v0.6 (V6-01, A6): server-enforced SKILL §15.4 probe caps — the context-
     // economy pillar #2. Dual-side usable (coordinator + subagents), so it is
     // deliberately NOT in MCP_DISALLOWED.
-    name: PREFIX + "probe",
+    name: "probe",
     description:
       "Structured read-only probe with server-enforced caps: max 50 rows and 10KB per response;\n" +
       "paginate with page_token.\n" +
@@ -826,7 +825,7 @@ const TOOLS = [
   {
     // v1.1.1 W20: the 12th tool (appended last so the legacy 0.4.1 ten stay a
     // prefix and probe keeps its 11th position — zero drift for old readers).
-    name: PREFIX + "dispatch",
+    name: "dispatch",
     description:
       "Dispatch launcher (coordinator-only): mints the dispatch credential set (numbered receipt)\n" +
       "for one mission in the nested form - the only dispatch form.\n" +
@@ -872,7 +871,7 @@ const TOOLS = [
     // and probe/dispatch keep their 11th/12th positions — zero drift for old readers).
     // Coordinator-only trajectory write face (design §2.2): replaces the retired
     // stop-check tail-block extraction (R7) as the writer of the coord-tail log.
-    name: PREFIX + "trajectory",
+    name: "trajectory",
     description:
       "Trajectory writer (coordinator-only): appends one ORT v3 block (the fixed block format) to\n" +
       "<storage-root>/context/coord-tail-log.md, the cross-session project memory log.\n" +
@@ -917,5 +916,5 @@ export {
 //   description 无法内联同一对象（`mode: { enum: [...] }` 载体要求 enum 后紧跟 `] }`），故走定义后
 //   赋值承载：import TOOLS 消费面（MCP schema 运行时/po-static census+Q2 判据）读值一致；
 //   枚举值 K2 零改，工具级 desc 零触。
-TOOLS.find((t) => t.name === PREFIX + "board").inputSchema.properties.mission.properties.dispatch.properties.mode.description =
+TOOLS.find((t) => t.name === "board").inputSchema.properties.mission.properties.dispatch.properties.mode.description =
   "launch form: agent = host Agent session; workflow = background workflow run (the host reports completion); headless = one-shot headless run; nested = nested in-session dispatch (no spawn)";

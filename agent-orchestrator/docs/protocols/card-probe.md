@@ -10,7 +10,7 @@
 
 | Item | Content | Anchor |
 |---|---|---|
-| Tool name | `probe` (full name `mcp__plugin_agent-orchestrator_orch__probe`, 11th of the 12-tool sequence - dispatch appended at the end; the first ten tools' prefix zero-drift) | mcp/server-registry.mjs tool roster; mcp/tool-probe.mjs probeDispatchAction comment |
+| Tool name | `probe` (full name `mcp__plugin_agent-orchestrator_orch__probe`, 11th of the 13-tool sequence - dispatch 12th and trajectory 13th appended last) | mcp/server-registry.mjs tool roster; mcp/tool-probe.mjs probeDispatchAction comment |
 | Available to both ends | **not in MCP_DISALLOWED**: coordinator and subagents share the same face (read-only, so no permission differential) | mcp/server-registry.mjs MCP_DISALLOWED |
 | Read-face boundary | path = any readable file (absolute or project-relative) - **probe is caps, not a sandbox**; zero board/lock interaction | `probeResolvePath` (mcp/tool-probe.mjs) |
 | Binary defense | a text action's head sample (<=4096B) containing a NUL byte is rejected and pointed to bin.inspect (probeLooksBinary/probeBinaryHint) | `probeLooksBinary`/`probeBinaryHint` (mcp/tool-probe.mjs) |

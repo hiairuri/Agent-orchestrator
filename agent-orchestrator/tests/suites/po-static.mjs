@@ -563,16 +563,17 @@ try {
     },
   );
   ck.ok(
-    "W4-05b dispatch 工具注册锚（server）+ buildDispatchPrompt 零残留（v1.6 W3a 改写：组装链退役 R1——buildDispatchPrompt 组装纯区随 dispatch-prompt.mjs 整文件退役，SERVER 面定义恰 0 负向防回潮；注册锚/工具名锚保留不变。W21 预写沿革+v1.6 W-p runner clause 退役沿革由本注记承载）",
-    count(SERVER, '[PREFIX + "dispatch"]: toolDispatch') === 1 &&
-      count(SERVER, 'name: PREFIX + "dispatch"') === 1 &&
+    "W4-05b dispatch 工具注册锚（server）+ buildDispatchPrompt 零残留（v1.6 W3a 改写：组装链退役 R1——buildDispatchPrompt 组装纯区随 dispatch-prompt.mjs 整文件退役，SERVER 面定义恰 0 负向防回潮；注册锚/工具名锚保留不变。W21 预写沿革+v1.6 W-p runner clause 退役沿革由本注记承载。v1.6.5 fork (a) needles 随形重钉=裸名字面）",
+    count(SERVER, '["dispatch"]: toolDispatch') === 1 &&
+      count(SERVER, 'name: "dispatch"') === 1 &&
       count(SERVER, "function buildDispatchPrompt(") === 0,
     {
-      handler: count(SERVER, '[PREFIX + "dispatch"]: toolDispatch'),
-      def: count(SERVER, 'name: PREFIX + "dispatch"'),
+      handler: count(SERVER, '["dispatch"]: toolDispatch'),
+      def: count(SERVER, 'name: "dispatch"'),
       build: count(SERVER, "function buildDispatchPrompt("),
       runnerParkedAt: "v1.6 W-p (parked/agent-orchestrator/)",
       assemblyRetiredAt: "v1.6 W3a",
+      needlesRePinnedAt: "v1.6.5 fork (a) bare-name flip",
     },
   );
   ck.ok(
@@ -1177,6 +1178,10 @@ try {
     "measured at assembly time (v1.", // 卡锚点声明行 source 标注（13 卡处置行 mandated 保留，W4 核项 6 采认）
     "v1.2 M3-1", // timeout-min-guide crv6-resilience DSP 断言组事实标注（W4 核项 6 同类）
     "Branch final ruling", // card-sentinel 判别面三证终裁事实注记（区外事实陈述，W4 核项 6 同类）
+    // v1.6.5 W1 登记（RP-6/PT-8 双腿归因行+RP-7 canonical 重申行——impl-plan §2.1 scope 8 mandated
+    // 字面「leg 2 = v1.6.5 server-side embedded-prefix removal」；归因记录=事实陈述本体，登记制同步）：
+    "leg 2 = v1.6.5 server-side embedded-prefix removal", // SKILL RP-6/PT-8 双腿归因 mandated 字面
+    "Canonical face form restated (v1.6.5)", // SKILL RP-7 canonical 形重申句（版本字面=事实陈述）
   ];
   const mh02Hits = [];
   const mh02ScanLines = (face, text) =>
@@ -1201,7 +1206,9 @@ try {
   );
 
   // ---------- A-v0163 rider 波六腿（v1.6.3 W1 三 rider 落装：RR×2 回归代跑 + TR×2 三读 + MR×2 受控改写；
-  //   台账=tests/assertions/v1.6.3.md（W3 登记）；判据关键词随落装文本定形（plan §6/§10.4/§11.3） ----------
+  //   台账=designs 侧主控面记录（designs/agent-orchestrator-v1.6.3-planning/v1.6.3.md；tests/assertions/
+  //   在册止于 v1.6.2，v1.6.3 未在该目录落盘——r2 F7 台账沿革注释订正）；判据关键词随落装文本定形
+  //   （plan §6/§10.4/§11.3） ----------
   // RR-turn：五 persona 新编号行前缀各恰 1（worker=WK-9.1 系 P1 表既定，非笔误）+ 关键子串在场
   //   + SKILL CL-10 恰 1 + 「代跑：」格式钉并入（Q4=a）；避让自证：不含 W25-turn 钉全形、全句零 sleep 字面。
   const RR_IDS = {
@@ -1277,8 +1284,9 @@ try {
     { sb: count(SKILL, "sentinel-backed"), lnw: count(SKILL, "lost-notice window"), sc: count(SKILL, "stated cause"), pnm: count(SKILL, "prefer no-message"), old: count(SKILL, "Do not SendMessage a running subagent without need") },
   );
 
-  // ---------- A-v0164-P1..P5：v1.6.4 W1 参数面通用语化组（5 腿；impl-plan §6；台账=tests/assertions/
-  //   v1.6.4.md（W3 登记））。AO-param-walk v1 walker（proposal §1.1 伪码转写；扫描面=import TOOLS
+  // ---------- A-v0164-P1..P5：v1.6.4 W1 参数面通用语化组（5 腿；impl-plan §6；台账=designs 侧主控面
+  //   记录（designs/agent-orchestrator-v1.6.4-planning/v1.6.4.md；tests/assertions/ 在册止于 v1.6.2，
+  //   v1.6.4 未在该目录落盘——r2 F7 台账沿革注释订正））。AO-param-walk v1 walker（proposal §1.1 伪码转写；扫描面=import TOOLS
   //   运行时计量，:64 先例零新耦合）：
   //     walk(node): yield node;
   //       if node.properties: for each key -> walk(child)            // 对象字段
@@ -1406,6 +1414,73 @@ try {
     CAPS.globalDescSum === 12500,
     { cap: CAPS.globalDescSum },
   );
+
+  // ---------- A-v0165 v1.6.5 W1 组（3 腿；impl-plan §6；落位=po-static 源锁；台账=designs 侧主控面
+  //   记录 + tests/assertions/v1.6.5.md（W3 新建登记，v1.6.0-2 目录先例回归）） ----------
+  // REG-bare：server-registry 源面 `PREFIX + "` 计数===0（import 同退役）∧ handler keys ≡ TOOLS
+  //   names ≡ 13 裸名 roster（正则 roster 全等；fork (a) 后面名=宿主前缀+裸名，registry 注册裸名）。
+  //   扫描面=server-registry.mjs 直读（L2 族模块单文件读面=TOOL_PACK 先例同法，非族入口语义读）。
+  {
+    const REG_SRC = read(path.join("mcp", "server-registry.mjs"));
+    const BARE_ROSTER = [
+      "board", "report", "mailbox", "spawn_agent", "context_pack", "dispatch", "resume",
+      "lessons", "sandbox_apply", "sandbox_discard", "agent_harvest", "probe", "trajectory",
+    ];
+    const mapStart = REG_SRC.indexOf("const TOOL_HANDLERS = {");
+    const mapSrc = REG_SRC.slice(mapStart, REG_SRC.indexOf("\n};", mapStart));
+    const handlerKeys = [...mapSrc.matchAll(/\[?"([a-z_]+)"\]: (tool[A-Za-z]+),/g)].map((m) => m[1]);
+    const toolNames = TOOLS.map((t) => t.name);
+    const rosterSorted = [...BARE_ROSTER].sort().join(",");
+    ck.ok(
+      "A-v0165-REG-bare server-registry source `PREFIX + \"` count = 0 (import retired) ∧ handler keys ≡ TOOLS names ≡ 13 bare-name roster exact",
+      count(REG_SRC, 'PREFIX + "') === 0 && !REG_SRC.includes("PREFIX") &&
+        handlerKeys.length === 13 && toolNames.length === 13 &&
+        [...handlerKeys].sort().join(",") === rosterSorted &&
+        [...toolNames].sort().join(",") === rosterSorted &&
+        !toolNames.some((n) => /mcp__/.test(n)),
+      { prefixCompositions: count(REG_SRC, 'PREFIX + "'), handlers: handlerKeys.length, tools: toolNames.length, roster: rosterSorted },
+    );
+  }
+  // NO-DOUBLE：全插件树双前缀 needle（orch__＋mcp_plugin 拼接构造）===0（双前缀清零自证；扫面=agents/docs/hooks/skills/
+  //   tests/mcp/commands/.zcode-plugin 全域 .mjs/.md/.json 递归）。单前缀位点（≈37 处枚举为准）
+  //   fork (a) 后 correct-by-construction=禁误改域，不在本腿判据内（由既有钉/tripwire 承载）。
+  //   needle 拼接构造（本文件自含 needle 字面会自匹配=自证假红）。
+  {
+    const DBL_NEEDLE = ["orch__", "mcp_plugin"].join("");
+    const NO_DOUBLE_EXTS = new Set([".mjs", ".md", ".json"]);
+    const hits = [];
+    const walk = (dir) => {
+      for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+        const abs = path.join(dir, f.name);
+        if (f.isDirectory()) { walk(abs); continue; }
+        if (!NO_DOUBLE_EXTS.has(path.extname(f.name))) continue;
+        try {
+          const t = fs.readFileSync(abs, "utf8");
+          if (t.includes(DBL_NEEDLE)) hits.push(path.relative(PLUGIN_DIR, abs));
+        } catch { /* binary/unreadable → skip */ }
+      }
+    };
+    walk(PLUGIN_DIR);
+    ck.ok(
+      `A-v0165-NO-DOUBLE whole-plugin-tree \`${DBL_NEEDLE}\` count = 0 (double-prefix zeroed after the fork-(a) flip; recursive over .mjs/.md/.json)`,
+      hits.length === 0,
+      hits.slice(0, 12),
+    );
+  }
+  // B01：server.mjs「13 tools total」===1 ∧ 清单行含 trajectory ∧ registry :1「13 工具」===1 ∧
+  //   card-probe「12-tool」===0 + 新形「13-tool sequence」在场（三处陈旧计数真值化+card-probe rider）。
+  {
+    const CARD_PROBE = read(path.join("docs", "protocols", "card-probe.md"));
+    ck.ok(
+      "A-v0165-B01 13-tool truth: server.mjs `13 tools total` ===1 ∧ tool-list line carries trajectory ∧ registry header `13 工具` ===1 ∧ card-probe `12-tool` ===0 ∧ `13-tool sequence` present",
+      count(SERVER, "13 tools total") === 1 &&
+        count(SERVER, "dispatch | trajectory") === 1 &&
+        count(read(path.join("mcp", "server-registry.mjs")), "13 工具") === 1 &&
+        count(CARD_PROBE, "12-tool") === 0 &&
+        count(CARD_PROBE, "13-tool sequence") === 1,
+      { server13: count(SERVER, "13 tools total"), traj: count(SERVER, "dispatch | trajectory"), reg13: count(read(path.join("mcp", "server-registry.mjs")), "13 工具"), card12: count(CARD_PROBE, "12-tool"), card13: count(CARD_PROBE, "13-tool sequence") },
+    );
+  }
 
   // ---------- 字节台账（informational，非门禁；W4-05 收编展示） ----------
   const bytesOf = (rel) => Buffer.byteLength(read(rel), "utf8");

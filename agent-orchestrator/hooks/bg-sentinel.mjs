@@ -22,10 +22,11 @@
  *   - 错峰：槽位 k 首个 tick 前 sleep k×stagger_sec；此后 poll 周期加 k×5% 抖动。
  *   - 心跳：每 tick 改写自己的槽位文件；接管判定 = pid 死或心跳龄 >90s（B3 沿用）。
  *   - 状态分级条件（每 mission 至多一条，C3 > C1 > C2）：
- *       C1-T done/failed 未签收    宽限 wake_grace_min(5)    refire 5  cap 3
+ *       C1-T done/failed 未签收    宽限 wake_grace_min(2)    refire 5  cap 3
  *       C1-A blocked/question 未签收 宽限 answer_grace_min(3)  refire 5  cap 3
  *       C2  在飞失联（timeline 龄期） 宽限 stall_grace_min(30)  refire 5  cap 3
- *       C3  崩溃实锤（rollout model-io 停更 + tool_usage 佐证/无佐证 ×3 保守档）
+ *       C3  崩溃实锤（rollout model-io 停更 ≥ crashGrace ∧ tool_usage 实锤无 running 行——
+ *             fire-on-dead 双信号合取；佐证缺失/有行（长工具在跑）→ 本 tick 无 C3 落 C2 链）
  *                                   宽限 crash_grace_min(10)  绕过双空闲门  cap 3
  *       C0  board 连续 3 tick 不可读 立即 → V7-04：转观测隔离（聚合告警一条 + quarantined 值守，不退出）
  *   - 双空闲门（C1/C2）：子代理等待中 ∧ 主控信号停滞（tool_usage 主 / rollout 副 /
@@ -173,7 +174,7 @@ function main() {
         numArg(argv, "--standby-poll-sec", c, "standby_poll_sec", Math.max(pollMs / 1000, 300), 1, 3600) * 1000,
       lifetimeMs:
         numArg(argv, "--max-lifetime-min", c, "max_lifetime_min", 1440, 0.01, 43200) * 60000,
-      wakeGraceMs: numArgBridge(argv, "--wake-grace-min", c, "wake_grace_min", null, 5, 0.01, 1440) * 60000,
+      wakeGraceMs: numArgBridge(argv, "--wake-grace-min", c, "wake_grace_min", null, 2, 0.01, 1440) * 60000,
       answerGraceMs: numArgBridge(argv, "--answer-grace-min", c, "answer_grace_min", null, 3, 0.01, 1440) * 60000,
       stallGraceMs: numArgBridge(argv, "--stall-grace-min", c, "stall_grace_min", null, 30, 0.01, 1440) * 60000,
       crashGraceMs: numArgBridge(argv, "--crash-grace-min", c, "crash_grace_min", null, 10, 0.01, 1440) * 60000,

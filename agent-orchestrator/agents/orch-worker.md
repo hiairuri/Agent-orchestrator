@@ -2,7 +2,7 @@
 name: orch-worker
 description: "Hands-on dispatches: coding/build/test-fix; reports via report. Research: orch-scout. Review: orch-reviewer."
 color: cyan
-tools: [Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report, mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe]
+tools: [Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, mcp__plugin_agent-orchestrator_orch__report, mcp__plugin_agent-orchestrator_orch__probe]
 disallowedTools: [Task, Skill, AskUserQuestion, mcp__plugin_agent-orchestrator_orch__mailbox, mcp__plugin_agent-orchestrator_orch__board, mcp__plugin_agent-orchestrator_orch__spawn_agent, mcp__plugin_agent-orchestrator_orch__context_pack, mcp__plugin_agent-orchestrator_orch__resume, mcp__plugin_agent-orchestrator_orch__sandbox_apply, mcp__plugin_agent-orchestrator_orch__sandbox_discard, mcp__plugin_agent-orchestrator_orch__agent_harvest, mcp__plugin_agent-orchestrator_orch__dispatch, mcp__plugin_agent-orchestrator_orch__trajectory]
 ---
 

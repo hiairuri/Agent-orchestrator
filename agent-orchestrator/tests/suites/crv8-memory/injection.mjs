@@ -403,12 +403,15 @@ export async function scenInj08() {
         .replace(/## (CONTEXT|LESSONS) 节头/g, "## $1 HEAD")
         .replace(/- Work only within this pack's scope; do not modify files outside it\.|- 只在本包范围内工作，不改包外文件/g, "RULES-SCOPE")
 .replace(/\n\s*\n/g, "\n\n");
+    // v1.6.5 fork (a) 适配：0.7.1 基线 server=内嵌前缀注册名（f0142a8），harness PRE="" 后裸名
+    // 直发被基线拒收——基线侧调用显式携带 legacy 全名（=REPORT canonical 单前缀形）。
+    const LEGACY = "mcp__plugin_agent-orchestrator_orch__";
     const s71 = startServer({ serverPath: baseline, root: T71 });
     const s80 = startServerX({ root: T80, args: ["--memory-root", MEM80] });
     try {
       // —— 子例 A：空库（无 LESSONS 节）逐字节
       const argsA = { mission_id: "m-byte", title: "字节对拍", task: "字节对拍回归任务", read_first: ["docs/a.md"], rules: ["R1"], upstream_context: "上游对拍行" };
-      await s71.call("context_pack", argsA);
+      await s71.call(LEGACY + "context_pack", argsA);
       await s80.call("context_pack", argsA);
       const pA71 = readPack(T71, "m-byte");
       const pA80 = readPack(T80, "m-byte");
@@ -416,10 +419,10 @@ export async function scenInj08() {
 
       // —— 子例 B：单条命中 lesson——唯一预期增量 = lessonLine id 段
       const addB = { action: "add", type: "pitfall", trigger: "BYTEPROBE 对拍触发词", fix: "对拍修正动作" };
-      await s71.call("lessons", addB);
+      await s71.call(LEGACY + "lessons", addB);
       await s80.call("lessons", addB);
       const argsB = { mission_id: "m-byte2", title: "字节对拍二", task: "BYTEPROBE 对拍任务" };
-      await s71.call("context_pack", argsB);
+      await s71.call(LEGACY + "context_pack", argsB);
       await s80.call("context_pack", argsB);
       const pB71 = readPack(T71, "m-byte2");
       const pB80 = readPack(T80, "m-byte2");
@@ -442,7 +445,7 @@ export async function scenInj08() {
         { memDir: fs.existsSync(memLibC), agentsMd: fs.existsSync(path.join(MEM80, "AGENTS.md")), lib: fs.existsSync(path.join(memLibC, "lessons.jsonl")) },
       );
       const argsC = { mission_id: "m-byte3", title: "字节对拍三", task: "字节对拍回归任务三" };
-      await s71.call("context_pack", argsC);
+      await s71.call(LEGACY + "context_pack", argsC);
       await s80.call("context_pack", argsC);
       const pC71 = readPack(T71, "m-byte3");
       const pC80 = readPack(T80, "m-byte3");

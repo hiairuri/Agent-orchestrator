@@ -20,7 +20,9 @@ import { fileURLToPath } from "node:url";
 export const TESTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const PLUGIN_DIR = path.resolve(TESTS_DIR, "..");
 export const DEFAULT_SERVER = path.join(PLUGIN_DIR, "mcp", "server.mjs");
-export const PRE = "mcp__plugin_agent-orchestrator_orch__";
+// v1.6.5 fork (a)：直连面=裸注册名（宿主在会话面上组合其命名空间前缀；PRE 空=组合分支随形退役，
+// tools/call 的 startsWith("mcp__") 分支保持透传任意显式全名）。六套件 PRE+name 查找点零散改。
+export const PRE = "";
 
 /**
  * 启动 server 子进程并返回按行 JSON-RPC 客户端。

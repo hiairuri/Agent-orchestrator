@@ -549,7 +549,7 @@ function startStrictServer(extraArgs, { root, env = {} }) {
   ];
   const BRIDGE_KEYS = ["wake_timeout_min", "wake_retries", "refire_gap_min", "wake_cap"];
   const V2_DEFAULTS = {
-    wake_poll_sec: 60, wake_grace_min: 5, answer_grace_min: 3, stall_grace_min: 30,
+    wake_poll_sec: 60, wake_grace_min: 2, answer_grace_min: 3, stall_grace_min: 30,
     crash_grace_min: 10, coord_idle_min: 3, cap_window_min: 120, family_size: 3,
     stagger_sec: 20, max_lifetime_min: 1440,
   };

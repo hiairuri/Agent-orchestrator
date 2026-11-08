@@ -15,20 +15,26 @@ export function freshFixture() {
   return makeRepo({ dir: PROJ, files: { "src/app.py": "print('hi')\n", "docs/a.md": "# A doc\n" } });
 }
 
-/** 场景 A（缺省回归面）：四种缺省 context_pack，返回 {packs, board 快照字段} */
+/** 场景 A（缺省回归面）：四种缺省 context_pack，返回 {packs, board 快照字段}。
+ *  v1.6.5 fork (a) 适配：本场景被三代 server 共用（0.4.1/0.8.0 基线=内嵌前缀注册名；
+ *  现行=裸名注册）——按 tools/list 首名形探测各代注册前缀，调用名随代适配
+ *  （harness PRE="" 后裸名直发，基线 server 拒收裸名=unknown tool）。 */
 export async function scenarioA(s) {
   const packs = {};
-  await s.call("lessons", { action: "add", type: "pitfall", trigger: "改 server.mjs 前先 grep 锚点", fix: "先 grep 再定点读，禁一次全文读入" });
+  const tl = await s.request("tools/list", {});
+  const firstName = ((tl.result || {}).tools || [])[0]?.name || "";
+  const P = firstName.startsWith("mcp__") ? firstName.replace(/board$/, "") : ""; // 基线代=内嵌前缀形；现行代=裸名
+  await s.call(P + "lessons", { action: "add", type: "pitfall", trigger: "改 server.mjs 前先 grep 锚点", fix: "先 grep 再定点读，禁一次全文读入" });
   const upOne = "上游结论一：入口在 handleToolsCall。\n### ENV FACTS（环境事实）\n- 全部可用";
-  await s.call("context_pack", { mission_id: "mB1", title: "默认包", task: "做默认回归验证", read_first: ["docs/a.md"], rules: ["规则一"], return_format: "markdown 列表", upstream_context: upOne });
+  await s.call(P + "context_pack", { mission_id: "mB1", title: "默认包", task: "做默认回归验证", read_first: ["docs/a.md"], rules: ["规则一"], return_format: "markdown 列表", upstream_context: upOne });
   packs["packs/mB1/pack.md"] = readPack("packs/mB1/pack.md");
-  await s.call("context_pack", { mission_id: "mB2", title: "变体包", task: "做变体回归验证", variants: 2, variant_axes: ["风格A", "风格B"], upstream_context: "上游二" });
+  await s.call(P + "context_pack", { mission_id: "mB2", title: "变体包", task: "做变体回归验证", variants: 2, variant_axes: ["风格A", "风格B"], upstream_context: "上游二" });
   packs["packs/mB2/pack-v1.md"] = readPack("packs/mB2/pack-v1.md");
   packs["packs/mB2/pack-v2.md"] = readPack("packs/mB2/pack-v2.md");
   const absDoc = path.join(PROJ, "docs", "a.md");
-  await s.call("context_pack", { mission_id: "mS1", title: "沙箱别名包", task: "沙箱回归 " + absDoc, read_first: [absDoc], rules: ["只写 src/"], upstream_context: "上游路径 " + absDoc, isolation: "worktree", oob_allowlist: ["src/", "tests/", "docs/"] });
+  await s.call(P + "context_pack", { mission_id: "mS1", title: "沙箱别名包", task: "沙箱回归 " + absDoc, read_first: [absDoc], rules: ["只写 src/"], upstream_context: "上游路径 " + absDoc, isolation: "worktree", oob_allowlist: ["src/", "tests/", "docs/"] });
   packs["packs/mS1/pack.md"] = readPack("packs/mS1/pack.md");
-  await s.call("context_pack", { mission_id: "mB3", title: "镜像包", task: "镜像回归", mirror_digest: true });
+  await s.call(P + "context_pack", { mission_id: "mB3", title: "镜像包", task: "镜像回归", mirror_digest: true });
   packs["packs/mB3/pack.md"] = readPack("packs/mB3/pack.md");
   return packs;
 }

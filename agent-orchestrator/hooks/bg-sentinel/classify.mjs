@@ -14,7 +14,13 @@ import {
   resultTimeMs,
   wakeFailureInfo,
 } from "./core.mjs";
-import { coordBusy, coordSessionId, rolloutHeartbeatMs, toolUsageHasRunning } from "./signals.mjs";
+import {
+  coordBusy,
+  coordSessionId,
+  rolloutHeartbeatMs,
+  toolUsageHasRunning,
+  toolUsageLastStartedAt,
+} from "./signals.mjs";
 import { appendEcho } from "./echo.mjs";
 
 // v1.2 M9-1 scoping（W9 阶段 a）：归属判定留痕去重（每 mission×category 至多一条回声，
@@ -49,8 +55,23 @@ export function classify(board, boardMtimeMs, cfg, rootDir, signals) {
   const missions = Array.isArray(board.missions) ? board.missions : [];
   const isWorkflow = (m) => (m.dispatch && m.dispatch.mode) === "workflow";
   const now = Date.now();
-  // v1.2 M9-1 scoping：本哨兵所守会话锚（coord-session.txt），归属等值判定的本侧。
-  const ownId = coordSessionId(rootDir, signals);
+    // v1.2 M9-1 scoping：本哨兵所守会话锚（coord-session.txt），归属等值判定的本侧。
+    const ownId = coordSessionId(rootDir, signals);
+    // v1.6.5 O-1 coordinator fast path 探针（每 tick 一探，非逐 mission——O(in-flight rows) 查询
+    // 上限收敛为 O(1)）：主控死亡三证合取 = ①主控 rollout 心跳（coord-session.txt 锚对应
+    // sess_subagent 前缀拒收面同源）停更 ≥ crashGraceMs ∧ ②tool_usage 实锤无 running 行（!==false
+    // 不算——null=佐证不可用）∧ ③MAX(started_at) 停更 ≥ crashGraceMs（严格强于门的 coord_idle
+    // 停滞档）。anchor=三证时刻取最新（最后存活代理点）。三证任一缺失 → null（无 fast path，
+    // 30 分链照旧——单信号缺失永不判死；rollout 文件缺失/SQLITE 不可用天然落此）。
+    const coordFast = (() => {
+      if (ownId == null || !SQLITE) return null;
+      const hb = rolloutHeartbeatMs(signals.rolloutDir, ownId);
+      if (hb == null || Math.max(0, now - hb) < cfg.crashGraceMs) return null;
+      if (toolUsageHasRunning(signals.toolUsageDb, ownId) !== false) return null;
+      const mx = toolUsageLastStartedAt(signals.toolUsageDb, ownId);
+      if (mx == null || Math.max(0, now - mx) < cfg.crashGraceMs) return null;
+      return { anchorMs: Math.max(hb, mx), graceMs: cfg.crashGraceMs };
+    })();
   for (const m of missions) {
     if (!m || typeof m !== "object") continue;
     if (!IN_FLIGHT_STATUSES.includes(m.status) && !RESULT_STATUSES.includes(m.status)) continue; // ready/drafted/skipped/closed 不产生条件
@@ -82,22 +103,27 @@ export function classify(board, boardMtimeMs, cfg, rootDir, signals) {
     const inFlight = IN_FLIGHT_STATUSES.includes(m.status);
     const title = String(m.title || "(untitled)").replace(/\s+/g, " ").slice(0, 30);
 
-    // C3 崩溃实锤（仅 agent 模式在飞；绕过双空闲门）
+    // C3 崩溃实锤（仅 agent 模式在飞；绕过双空闲门）。v1.6.5 fire-on-dead（grill#1 ruling 3）：
+    // 旧保守档（佐证缺失/有行 → 宽限×3=30 分）整拆——开枪条件=死亡证据双信号合取
+    // （rollout 心跳停更 ≥ crashGraceMs ∧ tool_usage 实锤无 running 行）；佐证缺失（null）/
+    // 有行（可能长工具在跑）→ 本 tick 无 C3，落 C2 30 分链（降级链终端注记保持；
+    // 单信号缺失永不判死）。
     if (inFlight && agentId) {
       const hb = rolloutHeartbeatMs(signals.rolloutDir, `sess_subagent_agent_${agentId}`);
       if (hb != null) {
         const ageMs = Math.max(0, now - hb); // B7
         const running = SQLITE ? toolUsageHasRunning(signals.toolUsageDb, `sess_subagent_agent_${agentId}`) : null;
-        // 佐证无 running 行 → 实锤宽限；有行（可能长工具）或佐证不可用 → 保守档 ×3
-        const thresholdMs = running === false ? cfg.crashGraceMs : cfg.crashGraceMs * 3;
-        if (ageMs >= thresholdMs) {
+        if (running === false && ageMs >= cfg.crashGraceMs) {
           // V6-32 板面龄期反证：lastActivity 与 board mtime 双陈旧（板面全死）时
           // C3 降级 C2 受双空闲门，避免对整块陈旧板面绕门开枪；活板真崩溃照旧绕门。
           // 与 v2.1 待命制正交（待命制管全清、本条管有在飞但全陈旧）。
+          // v1.6.5 O-2 刻度再推导：降级阈值随旧保守档字面退役——laStale=max(stall, crash)、
+          // boardStale=stall（默认 30/30 与旧行为完全一致；非默认 crash 覆盖部署的降级时点
+          // 行为差=W3 台账 override 语义行承载）。
           let la = lastActivityMs(m);
           if (la == null && Number.isFinite(boardMtimeMs)) la = boardMtimeMs; // 与 C2 同备链
-          const laStale = la != null && Math.max(0, now - la) >= Math.max(cfg.stallGraceMs, cfg.crashGraceMs * 3);
-          const boardStale = Number.isFinite(boardMtimeMs) && Math.max(0, now - boardMtimeMs) >= cfg.crashGraceMs * 3;
+          const laStale = la != null && Math.max(0, now - la) >= Math.max(cfg.stallGraceMs, cfg.crashGraceMs);
+          const boardStale = Number.isFinite(boardMtimeMs) && Math.max(0, now - boardMtimeMs) >= cfg.stallGraceMs;
           if (!(laStale && boardStale)) {
             conds.push({
               key: String(m.id),
@@ -115,7 +141,7 @@ export function classify(board, boardMtimeMs, cfg, rootDir, signals) {
           // 反证成立 → 不在此开枪，落下方 C2 inflight_stall（受双空闲门）
         }
       }
-      // rollout 缺失/未到期/反证成立 → 本 mission 落 C2（降级链终端，绝不告警"找不到心跳文件"）
+      // rollout 缺失/佐证缺失/未到期/反证成立 → 本 mission 落 C2（降级链终端，绝不告警"找不到心跳文件"）
     }
 
     // C1 未签收终态（board 正据，沿用 wakeFailureInfo 口径）
@@ -141,20 +167,28 @@ export function classify(board, boardMtimeMs, cfg, rootDir, signals) {
       continue;
     }
 
-    // C2 在飞失联（仅 agent 模式；池工无 dispatch 的兜底是租约回收）
+    // C2 在飞失联（仅 agent 模式；池工无 dispatch 的兜底是租约回收）。
+    // v1.6.5 O-1 coordinator fast path（quest 原始构想=停止键对应 runtime 失效即开枪）：主控死亡
+    // 三证成立（每 tick 一探，见 coordFast）→ anchor 切至死亡证据时刻＋grace=crashGraceMs——
+    // 不管板面行多新鲜（主控死后在飞 mission 无人消费）；无三证 → 30 分链照旧（anchor=mission
+    // lastActivity）。gate/escape 机制零改（死亡证据臂 escape 有效时点=2×crashGrace）；覆盖率
+    // 边界：C2 本就坐在 inFlight ∧ agentId 门内=仅 agent-mode 行（nested/workflow/pool 行由
+    // scoping+C1 终态/答案档+workflow 宿主通知+租约回收+session-start brief 覆盖）。
     if (inFlight && agentId) {
       let la = lastActivityMs(m);
       if (la == null && Number.isFinite(boardMtimeMs)) la = boardMtimeMs; // 备：board mtime
-      if (la == null) continue; // 均无 → 不判（不误报）
+      if (la == null && !coordFast) continue; // 均无 → 不判（不误报）
+      const anchorMs = coordFast ? coordFast.anchorMs : la;
+      const graceMs = coordFast ? coordFast.graceMs : cfg.stallGraceMs;
       conds.push({
         key: String(m.id),
         category: "inflight_stall",
         mission: m,
         title,
         status: m.status,
-        anchorMs: la,
-        graceMs: cfg.stallGraceMs,
-        stallAgeMin: Math.floor(Math.max(0, now - la) / 60000),
+        anchorMs,
+        graceMs,
+        stallAgeMin: Math.floor(Math.max(0, now - anchorMs) / 60000),
         bypassGate: false,
       });
     }
@@ -189,26 +223,28 @@ export function buildSummary(claims, cfg) {
 
   const terminalRows = [...rowsOf("unclaimed_terminal"), ...rowsOf("unclaimed_answer")];
   if (terminalRows.length) {
+    // v1.6.5 copy 成真化：宽限值由 cfg 渲染（CLI 覆盖值如实反映；禁写死字面）
     summary +=
       "[orch-sentinel] wake failure alert: the following mission results are on disk but unacked by the coordinator" +
-      " (graded grace exceeded: done 5 min / blocked-question 3 min)." +
+      ` (graded grace exceeded: done ${Math.round(cfg.wakeGraceMs / 60000)} min / blocked-question ${Math.round(cfg.answerGraceMs / 60000)} min).` +
       " Take over via mailbox(read) immediately and answer/close (auto-acks);" +
       " replenish commands and watch rules per the orchestration manual:\n" +
       terminalRows.join("\n");
   }
 
-  const stallRows = claims
-    .filter((c) => c.category === "inflight_stall")
-    .slice(0, 5)
-    .map(
-      (c) =>
-        `- [${c.key}] ${c.title} | ${c.status} | no events for ${fmtAge(c.stallAgeMin)} | in flight`,
-    );
+  const stallClaims = claims.filter((c) => c.category === "inflight_stall").slice(0, 5);
+  const stallRows = stallClaims.map(
+    (c) =>
+      `- [${c.key}] ${c.title} | ${c.status} | no events for ${fmtAge(c.stallAgeMin)} | in flight`,
+  );
   if (stallRows.length) {
+    // v1.6.5 copy 成真化（fast path 半区真值）：grace 渲染条件实际值——常规臂=stallGrace、
+    // O-1 fast path 臂=crashGrace；混排时逐值列出（禁写死 stall_grace_min 字面）。
+    const graces = [...new Set(stallClaims.map((c) => Math.round(c.graceMs / 60000)))];
     summary +=
       (summary ? "\n\n" : "") +
       `[orch-sentinel] in-flight age alert: the following missions have had no events at all` +
-      ` (no events for >= stall_grace_min=${Math.round(cfg.stallGraceMs / 60000)} min; any worker report renews it).` +
+      ` (no events for >= grace ${graces.join("/")} min; any worker report renews it).` +
       " Check via TaskOutput(task_id)/ListWorkflowRuns; if confirmed dead, set the board to failed and re-dispatch:\n" +
       stallRows.join("\n");
   }
@@ -224,7 +260,7 @@ export function buildSummary(claims, cfg) {
     summary +=
       (summary ? "\n\n" : "") +
       `[orch-sentinel] suspected crash alert: the following in-flight missions rollout heartbeats went stale` +
-      ` (no API calls for >= ${Math.round(cfg.crashGraceMs / 60000)} min on model-io; x3 conservative tier when tool_usage corroboration is missing),` +
+      ` (no API calls for >= ${Math.round(cfg.crashGraceMs / 60000)} min on model-io; fired on death evidence: heartbeat stale + no running tool_usage row),` +
       " the subagent process is suspected dead. Check via TaskOutput(task_id)/ListWorkflowRuns; if confirmed dead, set the board to failed and re-dispatch:\n" +
       crashRows.join("\n");
   }
