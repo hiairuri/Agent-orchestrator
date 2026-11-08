@@ -98,14 +98,27 @@ try {
   const pj = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, ".zcode-plugin", "plugin.json"), "utf8"));
   ck.ok("plugin.json parse + version string", typeof pj.version === "string");
   ck.ok("plugin.json dispatch_contract default remind", pj.userConfig?.dispatch_contract?.default === "remind", pj.userConfig?.dispatch_contract);
+  // v1.6.5 A-v0165-GRACE-DEFAULT（plugin.json 解析面腿）：default 5→2（生产生效默认面=userConfig，
+  // impl-plan §0 行 4 机械发现；与 builtin/t11-t12 字面/v0.9.x.md 表行/SKILL 两行四面同批）。
+  ck.ok("plugin.json sentinel_grace_min default = 2 (v1.6.5 tight-sensitivity userConfig face; blocked/question 3, in-flight lost 30, crash 10 derived defaults independent)",
+    pj.userConfig?.sentinel_grace_min?.default === "2", pj.userConfig?.sentinel_grace_min?.default);
 
   // ---- server 黑盒：tools/list=13、board 回环、version=2、sentinel_health 形状
   const s = startServer({ root: T.root });
   const tl = await s.tools();
   const names = (tl.tools || []).map((t) => t.name);
   ck.ok("tools/list = 13（v0.6 A6 probe 转正 + v1.1.1 W20 dispatch 第 12 号 + v1.6 W-t trajectory 第 13 号）", names.length === 13, names.length);
-  ck.ok("tools all orchestrator-prefixed, no unregistered feature-track tool（probe 已于 A6 入版；condense/usage 仍未立项）",
-    names.every((n) => n.startsWith("mcp__plugin_agent-orchestrator_orch__")) && !names.some((n) => /condense|usage/i.test(n)),
+  // v1.6.5 fork (a) 名形腿重写（A-v0165-L0-ROSTER）：直连面=13 裸名 roster 全等（宿主在会话面上
+  // 组合其命名空间前缀；直连 JSON-RPC 面无前缀）——裸名判定 !/mcp__/.test(n) + roster 全等形；
+  // 未注册 feature-track 工具负向（condense/usage 未立项）随 roster 全等天然承载，保留显式负向钉。
+  const BARE_ROSTER = [
+    "board", "report", "mailbox", "spawn_agent", "context_pack", "dispatch", "resume",
+    "lessons", "sandbox_apply", "sandbox_discard", "agent_harvest", "probe", "trajectory",
+  ];
+  ck.ok("tools all bare registered names = 13-name roster exact (v1.6.5 fork (a) direct-connect face; no mcp__ prefix; no unregistered feature-track tool - condense/usage not chartered)",
+    !names.some((n) => /mcp__/.test(n)) &&
+      names.length === 13 &&
+      [...names].sort().join(",") === [...BARE_ROSTER].sort().join(","),
     names);
 
   // ---- v1.1.1 W20 DP 热修：schema 声明面 ⊇ handler 读取面（DP 双代理线活体实锤：
@@ -144,8 +157,10 @@ try {
     };
     const mapStart = srcLF.indexOf("const TOOL_HANDLERS = {");
     const mapSrc = srcLF.slice(mapStart, srcLF.indexOf("\n};", mapStart));
+    // v1.6.5 fork (a) 随形重钉：handler keys 裸名形（`["board"]: toolBoard,`）；旧 `[PREFIX + "..."]`
+    // 组合形随 import 退役零残留（解析=0 handler 即红）。
     const handlers = new Map(
-      [...mapSrc.matchAll(/\[PREFIX \+ "([a-z_]+)"\]: (tool[A-Za-z]+),/g)].map((m) => [m[1], m[2]]),
+      [...mapSrc.matchAll(/\[?"([a-z_]+)"\]: (tool[A-Za-z]+),/g)].map((m) => [m[1], m[2]]),
     );
     const readsOf = (handler) => {
       const keys = new Set();

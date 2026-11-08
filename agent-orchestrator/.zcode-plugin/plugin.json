@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "Turn the ZCode main agent into a true mission commander: dispatch, fork, resume, per-role models, subagent Q&A with resume, background parallelism with Stop-hook accountability.",
   "description_i18n": {
     "zh-CN": "把主控 agent 变成真正的任务指挥官：派发、分叉、恢复、按角色选模型、子代理提问-作答-继续、后台并行与收工清点。"
@@ -78,8 +78,8 @@
     "sentinel_grace_min": {
       "type": "string",
       "title": "哨兵首枪宽限（分钟）/ Sentinel first-shot grace",
-      "description": "done 未签收的首枪宽限分钟数（默认 5）。blocked/question 自动取 3（停车等答案最贵）、在飞失联 30、崩溃实锤 10——三类按状态分级派生默认，不受本值影响，均可 CLI/cfg 单独覆盖。/ First-shot grace for unclaimed done results (default 5). blocked/question auto-uses 3, in-flight stall 30, crash 10 — tiered defaults independent of this value, each overridable via CLI/cfg.",
-      "default": "5",
+      "description": "done 未签收的首枪宽限分钟数（默认 2）。blocked/question 自动取 3（停车等答案最贵）、在飞失联 30、崩溃实锤 10——三类按状态分级派生默认，不受本值影响，均可 CLI/cfg 单独覆盖。/ First-shot grace for unclaimed done results (default 2). blocked/question auto-uses 3, in-flight stall 30, crash 10 — tiered defaults independent of this value, each overridable via CLI/cfg.",
+      "default": "2",
       "required": false
     },
     "context_mirror": {

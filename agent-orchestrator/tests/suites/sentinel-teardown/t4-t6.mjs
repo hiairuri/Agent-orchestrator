@@ -1,8 +1,9 @@
 // @module sentinel-teardown/t4-t6
 /*!
- * suites/sentinel-teardown/t4-t6.mjs —— T4 标记/槽位容错与混跑兼容 / T5 V6-32 板面龄期反证 /
+ * suites/sentinel-teardown/t4-t6.mjs —— T4 标记/槽位容错与混跑兼容 / T5 v1.6.5 fire-on-dead
+ * （FOD-dead/-running/-uncorr 三腿+O-2 降级刻度+O-1 coordinator fast path 双臂+GRACE-COPY；db 夹具+SKIP 守卫）/
  * T6 V6-54/V6-55 claimShots 同名互斥 + touchSlot pid 归属校验（含黑盒集成幽灵让位）
- * （自 sentinel-teardown.mjs 初步切分拆出，v1.3；断言本体逐字搬运零改动）
+ * （自 sentinel-teardown.mjs 初步切分拆出，v1.3；T5 于 v1.6.5 按 grill#1 ruling 3 重写）
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -66,26 +67,58 @@ export async function run(ctx) {
     await bgD.done;
   }
 
-  // ---- T5 V6-32 板面龄期反证（stall 对照 crash，加速参数驱动）
+  // ---- T5 v1.6.5 fire-on-dead（grill#1 ruling 3：旧保守档整拆）+ O-1 coordinator fast path +
+  //      O-2 降级刻度重推导 + copy 成真化（A-v0165-FOD-dead/-uncorr/-running/-DEMOTE/-COORD-FAST/-GRACE-COPY）
   {
-    // 加速刻度：crash=0.6s（佐证缺失 → 保守档 ×3=1.8s 触发 C3 候选）、stall=6s、coord-idle=0.6s。
-    // 统一龄期 8s：≥ crash×3（C3 候选成立）、≥ max(stall, crash×3)（反证可成立）、< 2×stall=12s（C2 逃逸口关闭，
-    // T5b 能开枪只能走「双空闲门开」路径——板面陈旧 → coordBusy 兜底档判空闲）。
+    // 加速刻度（每子腿自写 cfg）：crash=0.01(0.6s) 或 0.02(1.2s)、stall=0.1(6s)、coord-idle=0.01(0.6s)。
+    // tool_usage 夹具库（node:sqlite 写夹具——哨兵侧只读红线不涉，夹具造库属测试面写；
+    // journal_mode=DELETE 防 WAL 尾巴）。SKIP 守卫：node:sqlite 缺席（Node <22.5）→ db 腿
+    // 计账 SKIP（断言名带 [SKIP] 标记容错先例=v1.6.2 四腿缺席容错）；非 db 腿照跑。
     const ROLLOUT = path.join(BASE.root, "rollout-fixture");
     fs.mkdirSync(ROLLOUT, { recursive: true });
-    fs.writeFileSync(
-      path.join(ROOT, "sentinel.cfg.json"),
-      JSON.stringify({ stall_grace_min: 0.1, crash_grace_min: 0.01, coord_idle_min: 0.01, signals: { rollout_dir: ROLLOUT } }) + "\n",
-    );
-    const AGE_MS = 8000;
-    const backdate = (f) => {
-      const t = new Date(Date.now() - AGE_MS);
+    const DB_PATH = path.join(ROOT, "toolusage-fixture.sqlite");
+    const DB_ABSENT = path.join(ROOT, "toolusage-absent.sqlite");
+    let DatabaseSync = null;
+    try {
+      DatabaseSync = (await import("node:sqlite")).DatabaseSync;
+    } catch {
+      /* node:sqlite 不可用 → db 腿 SKIP 计账 */
+    }
+    const makeDb = (rows) => {
+      try {
+        fs.rmSync(DB_PATH, { force: true });
+        const db = new DatabaseSync(DB_PATH);
+        db.exec("CREATE TABLE tool_usage (id INTEGER PRIMARY KEY, session_id TEXT, status TEXT, started_at INTEGER)");
+        db.exec("PRAGMA journal_mode = DELETE");
+        for (const r of rows) {
+          db.prepare("INSERT INTO tool_usage (session_id, status, started_at) VALUES (?, ?, ?)").run(r.sid, r.status, r.startedAt);
+        }
+        db.close();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const writeCfg5 = (over = {}) => {
+      fs.writeFileSync(
+        path.join(ROOT, "sentinel.cfg.json"),
+        JSON.stringify({
+          stall_grace_min: 0.1,
+          crash_grace_min: 0.01,
+          coord_idle_min: 0.01,
+          signals: { rollout_dir: ROLLOUT, tool_usage_db: DB_PATH },
+          ...over,
+        }) + "\n",
+      );
+    };
+    const backdate = (f, ms) => {
+      const t = new Date(Date.now() - ms);
       fs.utimesSync(f, t, t);
     };
-    const writeHeartbeat = (agentId) => {
-      const f = path.join(ROLLOUT, `model-io-sess_subagent_agent_${agentId}.jsonl`);
-      fs.writeFileSync(f, JSON.stringify({ completedAt: new Date(Date.now() - AGE_MS).toISOString() }) + "\n");
-      backdate(f); // 心跳 = max(mtime, completedAt)，两者都须陈旧
+    const writeHeartbeat = (sessionId, ageMs) => {
+      const f = path.join(ROLLOUT, `model-io-${sessionId}.jsonl`);
+      fs.writeFileSync(f, JSON.stringify({ completedAt: new Date(Date.now() - ageMs).toISOString() }) + "\n");
+      backdate(f, ageMs); // 心跳 = max(mtime, completedAt)，两者都须陈旧
     };
     const firedNames5 = (prefix) => {
       try {
@@ -94,40 +127,214 @@ export async function run(ctx) {
         return [];
       }
     };
+    const agentRow = (id, extra = {}) => ({
+      id: `m-${id.slice("agent_".length) || id}`,
+      title: "t5-fixture",
+      status: "running",
+      dispatch: { agent_id: id, mode: "agent", session_id: SID },
+      ...extra,
+    });
+    // 会话键形=classify 消费模板 `sess_subagent_agent_${agentId}`（agentId 本身带 agent_ 前缀 →
+    // 键出现双 agent 段=sentinel-teardown 既有夹具同形，旧 T5 writeHeartbeat 模板同款）。
+    const agentKey = (id) => `sess_subagent_agent_${id}`;
 
-    // T5a 活板真崩溃照旧绕门：板面/任务新鲜 + 心跳停更 ≥ crash×3 → crash 直开（bypass 双空闲门）
-    writeHeartbeat("agent_b2a");
-    writeBoard([{ id: "m-b2a", title: "live-board-crash", status: "running", dispatch: { agent_id: "agent_b2a", mode: "agent", session_id: SID } }]);
-    const bgA5 = spawnSentinel({});
-    const rA5 = await Promise.race([bgA5.done, sleep(12000).then(() => null)]);
+    // T5a A-v0165-FOD-dead 正腿（黑盒）：双信号合取成立（心跳停更 8s ≥ crash 0.6s ∧ db 实锤无
+    // running 行）→ crash 直开（bypass 双空闲门；板面新鲜反证不成立不降级；crashGrace 刻度）。
+    if (DatabaseSync && makeDb([])) {
+      writeCfg5();
+      writeHeartbeat(agentKey("agent_b2a"), 8000);
+      writeBoard([agentRow("agent_b2a")]);
+      const bgA5 = spawnSentinel({});
+      const rA5 = await Promise.race([bgA5.done, sleep(12000).then(() => null)]);
+      ck.ok(
+        "T5a A-v0165-FOD-dead fire-on-dead positive: heartbeat stale >= crashGrace AND no running row -> crash alert fires at crashGrace scale (bypasses the dual-idle gate; fresh board, no demotion)",
+        Boolean(rA5) && rA5.code === 1 && rA5.stdout.includes("suspected crash alert") && firedNames5("m-b2a--crash--").length >= 1,
+        rA5 && { code: rA5.code, hasCrash: rA5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2a--") },
+      );
+    } else {
+      ck.ok("T5a A-v0165-FOD-dead [SKIP: node:sqlite unavailable on this node (db fixture legs accounted; v1.6.2 absent-tolerance precedent)]", true);
+    }
+
+    // T5b A-v0165-FOD-running 守卫腿（黑盒）：db 有 running 行（长工具在跑）→ 无 crash
+    //（fire-on-dead 死亡证据不成立；本 tick 无 C3；板面/任务新鲜 → 零告警轮换退出）。
+    if (DatabaseSync && makeDb([{ sid: agentKey("agent_b2r"), status: "running", startedAt: Date.now() - 1000 }])) {
+      writeCfg5();
+      writeHeartbeat(agentKey("agent_b2r"), 8000);
+      writeBoard([agentRow("agent_b2r")]);
+      const bgB5r = spawnSentinel({ lifetimeMin: 0.02 });
+      const rB5r = await Promise.race([bgB5r.done, sleep(12000).then(() => null)]);
+      ck.ok(
+        "T5b A-v0165-FOD-running guard: running row present (long tool call) -> NO crash alert (death evidence requires both signals)",
+        Boolean(rB5r) && rB5r.code === 0 && !rB5r.stdout.includes("suspected crash alert") && firedNames5("m-b2r--crash--").length === 0,
+        rB5r && { code: rB5r.code, hasCrash: rB5r.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2r--") },
+      );
+    } else {
+      ck.ok("T5b A-v0165-FOD-running [SKIP: node:sqlite unavailable on this node (db fixture legs accounted; v1.6.2 absent-tolerance precedent)]", true);
+    }
+
+    // T5c A-v0165-FOD-uncorr 守卫腿（黑盒；无 db 依赖，SQLITE 缺席环境同判）：佐证不可用
+    //（db 路径不存在 → open 失败 → null）→ 无 crash（旧语义=无佐证走保守档仍开枪，本腿=语义
+    // 反转自证；落 C2 链承接，板面新鲜 → 零告警轮换退出）。
+    writeCfg5({ signals: { rollout_dir: ROLLOUT, tool_usage_db: DB_ABSENT } });
+    writeHeartbeat(agentKey("agent_b2u"), 8000);
+    writeBoard([agentRow("agent_b2u")]);
+    const bgB5u = spawnSentinel({ lifetimeMin: 0.02 });
+    const rB5u = await Promise.race([bgB5u.done, sleep(12000).then(() => null)]);
     ck.ok(
-      "T5a 活板真崩溃绕门照旧：crash 告警直开（反证不成立不降级）",
-      Boolean(rA5) && rA5.code === 1 && rA5.stdout.includes("suspected crash alert") && firedNames5("m-b2a--crash--").length >= 1,
-      rA5 && { code: rA5.code, hasCrash: rA5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2a--") },
+      "T5c A-v0165-FOD-uncorr guard: corroboration unavailable (db absent -> null) -> NO crash alert (old x3-uncorroborated tier removed; falls to the C2 chain)",
+      Boolean(rB5u) && rB5u.code === 0 && !rB5u.stdout.includes("suspected crash alert") && firedNames5("m-b2u--crash--").length === 0,
+      rB5u && { code: rB5u.code, hasCrash: rB5u.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2u--") },
     );
 
-    // T5b 双陈旧降级：lastActivity 与 board mtime 同龄期陈旧 → C3 降级 C2 inflight_stall（受双空闲门），不出 crash
-    writeHeartbeat("agent_b2b");
-    writeBoard([
-      {
-        id: "m-b2b",
-        title: "stale-board-stall",
-        status: "running",
-        dispatch: { agent_id: "agent_b2b", mode: "agent", session_id: SID },
-        updated_at: new Date(Date.now() - AGE_MS).toISOString(),
-      },
-    ]);
-    backdate(path.join(ROOT, "board.json"));
-    const bgB5 = spawnSentinel({});
-    const rB5 = await Promise.race([bgB5.done, sleep(12000).then(() => null)]);
-    ck.ok(
-      "T5b 双陈旧反证成立：C3 降级 C2 stall 受双空闲门（无 crash 告警）",
-      Boolean(rB5) && rB5.code === 1 && rB5.stdout.includes("in-flight age alert") && !rB5.stdout.includes("suspected crash alert") && firedNames5("m-b2b--inflight_stall--").length >= 1 && firedNames5("m-b2b--crash--").length === 0,
-      rB5 && { code: rB5.code, stall: rB5.stdout.includes("in-flight age alert"), crash: rB5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2b--") },
-    );
+    // T5d A-v0165-DEMOTE（黑盒）：C3 条件成立但 lastActivity 与 board mtime 双陈旧（8s ≥ 降级刻度
+    // laStale=max(stall 6s, crash 0.6s)、boardStale=stall 6s——O-2 重推导默认 30/30 行为不变的
+    // 加速投影）→ C3 降级 C2 inflight_stall 受双空闲门（板面陈旧 → 门开），不出 crash。
+    if (DatabaseSync && makeDb([])) {
+      writeCfg5();
+      writeHeartbeat(agentKey("agent_b2b"), 8000);
+      writeBoard([agentRow("agent_b2b", { updated_at: new Date(Date.now() - 8000).toISOString() })]);
+      backdate(path.join(ROOT, "board.json"), 8000);
+      const bgB5 = spawnSentinel({});
+      const rB5 = await Promise.race([bgB5.done, sleep(12000).then(() => null)]);
+      ck.ok(
+        "T5d A-v0165-DEMOTE: double-stale (lastActivity AND board mtime past the re-derived scales max(stall,crash)/stall) -> C3 demotes to C2 inflight_stall behind the dual-idle gate, no crash (O-2 behavior pin)",
+        Boolean(rB5) && rB5.code === 1 && rB5.stdout.includes("in-flight age alert") && !rB5.stdout.includes("suspected crash alert") && firedNames5("m-b2b--inflight_stall--").length >= 1 && firedNames5("m-b2b--crash--").length === 0,
+        rB5 && { code: rB5.code, stall: rB5.stdout.includes("in-flight age alert"), crash: rB5.stdout.includes("suspected crash alert"), fired: firedNames5("m-b2b--") },
+      );
+    } else {
+      ck.ok("T5d A-v0165-DEMOTE [SKIP: node:sqlite unavailable on this node (db fixture legs accounted; v1.6.2 absent-tolerance precedent)]", true);
+    }
+
+    // T5e A-v0165-COORD-FAST 正臂（黑盒；双臂核验 r2 F6）：主控死亡三证（主控心跳停更 3s ∧
+    // 无 running 行 ∧ MAX(started_at) 停更 3s，全 ≥ crash 1.2s）→ C2 以 crashGrace 刻度开枪
+    //（anchor=死亡证据时刻；板面行新鲜——「不管板面行多新鲜」）。判别式：无 fast path 时该
+    // 配置最早开枪时点 = stall(6s)−0 ≈ 6s+，4s 竞速界把两臂分开；worker 心跳缺席 → 无 C3。
+    if (DatabaseSync && makeDb([{ sid: "sess_coord", status: "done", startedAt: Date.now() - 3000 }])) {
+      writeCfg5({ crash_grace_min: 0.02 });
+      writeHeartbeat("sess_coord", 3000);
+      writeBoard([agentRow("agent_cf", { title: "coord-fast-fresh-board" })]);
+      const bgC5 = spawnSentinel({});
+      const rC5 = await Promise.race([bgC5.done, sleep(4000).then(() => null)]);
+      ck.ok(
+        "T5e A-v0165-COORD-FAST death-evidence arm: coordinator three-evidence -> inflight_stall fires at crashGrace scale (anchor=death evidence; escape effective at 2x10=20 min equivalent) even with a fresh board row, no crash leg",
+        Boolean(rC5) && rC5.code === 1 && rC5.stdout.includes("in-flight age alert") && !rC5.stdout.includes("suspected crash alert") && firedNames5("m-cf--inflight_stall--").length >= 1,
+        rC5 && { code: rC5.code, stall: rC5.stdout.includes("in-flight age alert"), crash: rC5.stdout.includes("suspected crash alert"), fired: firedNames5("m-cf--") },
+      );
+    } else {
+      ck.ok("T5e A-v0165-COORD-FAST [SKIP: node:sqlite unavailable on this node (db fixture legs accounted; v1.6.2 absent-tolerance precedent)]", true);
+    }
+
+    // T5f A-v0165-COORD-FAST 单元双臂 + A-v0165-GRACE-COPY（镜像直导入=T6-pre 同法；
+    // buildSummary 直跑腿）：正臂=三证 → cond.graceMs===crashGraceMs ∧ anchorMs===max(心跳,started_at)
+    // （死亡证据 anchor）；负臂=started_at 新鲜（三证缺一）→ graceMs===stallGraceMs（30 刻度照旧，
+    // r2 F6 无三证臂 2×30=60 不变）；copy=done/blocked-question 宽限渲染 cfg 值 ∧ stall grace 渲染
+    // 条件实际值（fast path 臂=crash 刻度）∧ crash copy 无 x3 句。
+    if (DatabaseSync && makeDb([])) {
+      const MODDIR = path.join(PLUGIN_DIR, "hooks", "bg-sentinel");
+      const LIBDIR = path.join(BASE.root, "lib5", "hooks", "bg-sentinel");
+      let lib5 = null;
+      try {
+        fs.mkdirSync(LIBDIR, { recursive: true });
+        for (const f of fs.readdirSync(MODDIR).sort()) {
+          if (f.endsWith(".mjs")) fs.copyFileSync(path.join(MODDIR, f), path.join(LIBDIR, f));
+        }
+        lib5 = await import(pathToFileURL(path.join(LIBDIR, "classify.mjs")).href);
+      } catch {
+        lib5 = null;
+      }
+      ck.ok("T5f-pre 哨兵族模块镜像可剥（classify 直导入，T6-pre 同法）", lib5 != null, lib5 ? "classify mirror import ok" : "classify mirror import failed");
+      if (lib5) {
+        const UROOT = path.join(BASE.root, "unit5-root");
+        const HB_MS = Date.now() - 3000;
+        const MX_MS = Date.now() - 3000;
+        const mission5 = () => ({
+          id: "m-u5",
+          title: "unit-coord-fast",
+          status: "running",
+          dispatch: { agent_id: "agent_u5", mode: "agent", session_id: SID },
+        });
+        const cfg5 = {
+          wakeGraceMs: 120000,
+          answerGraceMs: 180000,
+          stallGraceMs: 6000,
+          crashGraceMs: 1200,
+          coordIdleMs: 600,
+          cap: 3,
+        };
+        const run5 = () => {
+          try {
+            fs.mkdirSync(path.join(UROOT, "sentinel"), { recursive: true });
+            fs.writeFileSync(path.join(UROOT, "sentinel", "coord-session.txt"), SID + "\n");
+            return lib5.classify(
+              { missions: [mission5()] },
+              Date.now(), // board mtime 新鲜
+              cfg5,
+              UROOT,
+              // signals 形=sentinel-teardown 夹具惯用直构面；coordSessionFile 必载（coordSessionId
+              // 消费面硬依赖——缺键 TypeError 会整套崩，T6-pre 镜像导入惯例无此键因不触该函数）
+              { rolloutDir: ROLLOUT, toolUsageDb: DB_PATH, coordSessionFile: "sentinel/coord-session.txt" },
+            );
+          } catch (e) {
+            return [{ category: "__fixture_error__", error: String((e && e.stack) || e) }];
+          }
+        };
+        // 正臂：三证齐（心跳 3s 陈旧 + 无 running + started_at 3s 陈旧，全 ≥ crash 1.2s）
+        makeDb([{ sid: SID, status: "done", startedAt: MX_MS }]);
+        const posConds = run5();
+        const posStall = posConds.find((c) => c.category === "inflight_stall");
+        ck.ok(
+          "T5f A-v0165-COORD-FAST unit positive: three-evidence -> inflight_stall graceMs === crashGraceMs AND anchorMs === max(heartbeat, started_at) (death-evidence anchor)",
+          Boolean(posStall) && posStall.graceMs === cfg5.crashGraceMs && posStall.anchorMs === Math.max(HB_MS, MX_MS),
+          posStall ? { graceMs: posStall.graceMs, anchorDelta: posStall.anchorMs - Math.max(HB_MS, MX_MS) } : posConds.map((c) => c.category),
+        );
+        // 负臂：started_at 新鲜（三证缺一）→ fast path 关 → stallGrace 刻度照旧
+        makeDb([{ sid: SID, status: "done", startedAt: Date.now() - 100 }]);
+        const negConds = run5();
+        const negStall = negConds.find((c) => c.category === "inflight_stall");
+        ck.ok(
+          "T5f A-v0165-COORD-FAST unit negative: three-evidence incomplete (fresh started_at) -> graceMs === stallGraceMs (30-min chain unchanged; escape stays 2x30 equivalent)",
+          Boolean(negStall) && negStall.graceMs === cfg5.stallGraceMs,
+          negStall ? { graceMs: negStall.graceMs } : negConds.map((c) => c.category),
+        );
+        // A-v0165-GRACE-COPY：buildSummary 直跑（copy 成真化四面）
+        const sumCfg = { wakeGraceMs: 120000, answerGraceMs: 180000, stallGraceMs: 1800000, crashGraceMs: 600000, cap: 3 };
+        const sumDone = lib5.buildSummary(
+          [{ category: "unclaimed_terminal", key: "m1", title: "t", status: "done", resultAt: "2026-11-08T00:00:00Z", resultAgeMin: 5, anchorMs: 0, graceMs: 120000, bypassGate: false }],
+          sumCfg,
+        );
+        const sumStallFast = lib5.buildSummary(
+          [{ category: "inflight_stall", key: "m2", title: "t", status: "running", stallAgeMin: 12, anchorMs: 0, graceMs: 600000, bypassGate: false }],
+          sumCfg,
+        );
+        const sumStallNorm = lib5.buildSummary(
+          [{ category: "inflight_stall", key: "m3", title: "t", status: "running", stallAgeMin: 31, anchorMs: 0, graceMs: 1800000, bypassGate: false }],
+          sumCfg,
+        );
+        const sumCrash = lib5.buildSummary(
+          [{ category: "crash", key: "m4", title: "t", status: "running", ageMs: 700000, anchorMs: 0, graceMs: 600000, bypassGate: true }],
+          sumCfg,
+        );
+        const sumDoneOverride = lib5.buildSummary(
+          [{ category: "unclaimed_terminal", key: "m1", title: "t", status: "done", resultAt: "2026-11-08T00:00:00Z", resultAgeMin: 5, anchorMs: 0, graceMs: 300000, bypassGate: false }],
+          { ...sumCfg, wakeGraceMs: 300000 },
+        );
+        ck.ok(
+          "A-v0165-GRACE-COPY summary truthing: done/blocked-question graces rendered from cfg (default 2/3) ∧ CLI override reflected (5) ∧ stall grace renders the conditional actual grace (fast-path arm 10, normal arm 30) ∧ crash copy carries no x3-conservative phrase",
+          sumDone.includes("done 2 min / blocked-question 3 min") &&
+            sumDoneOverride.includes("done 5 min") &&
+            sumStallFast.includes("grace 10 min") &&
+            sumStallNorm.includes("grace 30 min") &&
+            !sumCrash.includes("x3 conservative"),
+          { done: sumDone.includes("done 2 min / blocked-question 3 min"), ovr: sumDoneOverride.includes("done 5 min"), fast: sumStallFast.includes("grace 10 min"), norm: sumStallNorm.includes("grace 30 min"), x3: sumCrash.includes("x3 conservative") },
+        );
+      }
+    } else {
+      ck.ok("T5f A-v0165-COORD-FAST unit + A-v0165-GRACE-COPY [SKIP: node:sqlite unavailable on this node (db fixture legs accounted; v1.6.2 absent-tolerance precedent)]", true);
+    }
 
     try {
       fs.rmSync(path.join(ROOT, "sentinel.cfg.json"), { force: true }); // 卫生：不污染后续（本块为末块）
+      fs.rmSync(DB_PATH, { force: true });
     } catch {
       /* best effort */
     }

@@ -6,7 +6,8 @@
  * 如实声明：纯 Node 断言测不了宿主 typed 派发行为；本 suite 只测文档/配置在位，防回退。
  * 覆盖 27 组断言（W-C §2 表 + v0.8 W4 增例 + v0.9 P2-① HOST-01；v1.4 W1 增 A1-06/07+B3-01/02+C2-03 五腿，
  *   权威 designs/agent-orchestrator-v1.4-planning/design.md §2.1；A-COMPAT-1/A-V080-DOC-01 随 ba92054
- *   双前缀实名基线复位改锚；v1.6 W3b 增 A-V0160-W9-01）：
+ *   双前缀实名基线复位改锚；v1.6 W3b 增 A-V0160-W9-01；v1.6.5 增 A-v0165-PERSONA-FACE
+ *   （fork (a) R2 活化看护：单前缀 face 形+roster 在册+disallowed∩tools=∅））：
  *   A-AGENTS-1 / A-SKILL-1..5 / A-DOC-V4P11/V4P12/V4P21/V4P23·24/V4P31/
  *   SIGNALS/FAILOPEN/V4P25 / A-COMPAT-1 / A-ROLE-DISALLOWED / A-PLUGIN-STUB / A-RECYCLE-1 /
  *   A-V080-DOC-01（v1.6 W3b 换血：orch-gleaner persona 件已删除——在册腿退役转缺席负向）/
@@ -46,6 +47,9 @@ import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// v1.6.5 A-v0165-PERSONA-FACE：roster 在册判定走 import TOOLS 运行时计量（po-static W0 复测门同法；
+// 非源码语义单文件读——registry 裸名翻面后 TOOLS names 即 13 裸名 roster）。
+import { TOOLS } from "../../mcp/server-registry.mjs";
 
 const SUITE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_DIR = path.resolve(SUITE_DIR, "..", "..");
@@ -68,9 +72,13 @@ const REPORT = "mcp__plugin_agent-orchestrator_orch__report";
 // v1.4 W1 基线复位（计划外发现；ba92054 残留）：ba92054（v1.3.0）把 agents/*.md frontmatter
 // tools 白名单改宿主注册双前缀实名（单前缀名≠注册名=typed 拒收根因）——frontmatter 面两腿
 // （A-COMPAT-1/A-V080-DOC-01）随之改锚双前缀实名；SKILL 正文钉仍用 REPORT 单形不受影响。
-const REPORT_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_report";
-const PROBE_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_probe";
-const LESSONS_TYPED = "mcp__plugin_agent-orchestrator_orch__mcp_plugin_agent-orchestrator_orch_lessons";
+// v1.6.5 fork (a) 再翻沿革（leg 2）：server 端内嵌前缀退役（server-registry 裸名注册，宿主在其
+// 命名空间前缀上组合短名，面名=mcp__plugin_agent-orchestrator_orch__<short>）——*_TYPED 三常量
+// 翻回单前缀 face 形（=REPORT canonical 形）；归因双腿记录落 SKILL RP-6/PT-8；R2 活化面
+// （disallowedTools 单前缀条目自本版起开始匹配）由 A-v0165-PERSONA-FACE 新腿看护。
+const REPORT_TYPED = "mcp__plugin_agent-orchestrator_orch__report";
+const PROBE_TYPED = "mcp__plugin_agent-orchestrator_orch__probe";
+const LESSONS_TYPED = "mcp__plugin_agent-orchestrator_orch__lessons";
 const SNAPSHOT_ERR = "Required MCP tool is not available in the parent startup snapshot";
 const POINTER = "designs/agent-orchestrator-v0.6-W-C-findings.md";
 const V08_POINTER = "designs/agent-orchestrator-v0.8-DESIGN.md";
@@ -247,11 +255,11 @@ function main() {
     ck.ok("A-DOC-V4P25 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
   }
 
-  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名（ba92054 后=宿主注册双前缀实名，v1.4 W1 基线复位）+ SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
+  { // A-COMPAT-1：角色模板 tools: 行均含 report 全名（v1.6.5 fork (a) 再翻=单前缀 face 形；v1.4 W1 基线复位→v1.6.5 leg 2 沿革见 consts 注记）+ SKILL §8「保留不删」永久条款（V6-68 不变量守护；v1.1.2 I1 起扫五文件=四角色+planner/plan）
     const bad = [];
     for (const [name, text] of agentTexts) {
       const line = frontmatterLine(text, "tools");
-      if (!line.includes(REPORT_TYPED)) bad.push(`${name} tools 行缺 report 全名（双前缀实名）`);
+      if (!line.includes(REPORT_TYPED)) bad.push(`${name} tools 行缺 report 全名（单前缀 face 形）`);
     }
     if (!skill8.includes("Keep, do not delete")) bad.push("SKILL.md §8 missing Keep, do not delete (RP-7)"); // v1.6.2 W5 重订=英文 RP-7
     ck.ok("A-COMPAT-1 @ agents/*.md tools 行 + SKILL §8 保留不删", bad.length === 0,
@@ -268,6 +276,42 @@ function main() {
     }
     ck.ok("A-ROLE-DISALLOWED @ agents/*.md disallowedTools ×5", bad.length === 0,
       bad.length ? `A-ROLE-DISALLOWED 缺失子串: ${bad.join("; ")} —— 回写指针: 见 ${POINTER} §1 E-16` : "");
+  }
+
+  { // A-v0165-PERSONA-FACE（v1.6.5 fork (a) R2 活化看护腿）：五 persona tools:/disallowedTools:
+    // MCP 条目全 ≡ mcp__plugin_agent-orchestrator_orch__<short> 且 <short> ∈ registry 裸名 roster
+    // （import TOOLS 运行时计量）∧ per-persona disallowed ∩ tools = ∅。双前缀残形（宿主折叠
+    // 伪影 mcp_plugin_agent...）不匹配 roster → 红；本腿=disallowedTools 单前缀条目自 v1.6.5
+    // 起开始匹配（R2）后的机械护栏。
+    const FACE_RE = /^mcp__plugin_agent-orchestrator_orch__([a-z_]+)$/;
+    const roster = new Set(TOOLS.map((t) => t.name));
+    const mcpEntries = (line) =>
+      (line.match(/\[[^\]]*\]/)?.[0] || "")
+        .split(",")
+        .map((s) => s.trim().replace(/\]+$/, ""))
+        .filter((s) => s.startsWith("mcp__"));
+    const bad = [];
+    for (const [name, text] of agentTexts) {
+      const toolsLine = frontmatterLine(text, "tools");
+      const disLine = frontmatterLine(text, "disallowedTools");
+      const shortsOf = (line, label) => {
+        const shorts = [];
+        for (const entry of mcpEntries(line)) {
+          const m = FACE_RE.exec(entry);
+          if (!m) { bad.push(`${name} ${label} MCP 条目非单前缀 face 形: ${entry}`); continue; }
+          if (!roster.has(m[1])) bad.push(`${name} ${label} short 不在 registry roster: ${m[1]}`);
+          shorts.push(m[1]);
+        }
+        return shorts;
+      };
+      const toolShorts = shortsOf(toolsLine, "tools");
+      const disShorts = shortsOf(disLine, "disallowedTools");
+      const overlap = disShorts.filter((s) => toolShorts.includes(s));
+      if (overlap.length) bad.push(`${name} disallowed ∩ tools = [${overlap.join(", ")}]（须空，R2 活化面）`);
+    }
+    ck.ok("A-v0165-PERSONA-FACE @ agents/*.md tools:/disallowedTools: ×5（单前缀 face 形 + roster 在册 + 交集空）",
+      bad.length === 0,
+      bad.length ? `A-v0165-PERSONA-FACE 受损: ${bad.join("; ")} —— 回写指针: impl-plan v1.6.5 §2.1 scope 3-7/§6` : "");
   }
 
   { // A-PLUGIN-STUB：E-18 方案乙开关已执行（2026-10-21，V7-05 实现侧先行落地）——两键 description 断言乙稿桥接语义在位，方案甲存根短语改列 ban（防复发回退）

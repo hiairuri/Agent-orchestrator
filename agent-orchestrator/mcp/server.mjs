@@ -14,11 +14,13 @@
  * the headless dispatch primitive (no shell, args array straight to CreateProcess).
  * Network: this process performs no network I/O of any kind; storage is local files.
  *
- * Session tool full names are prefixed with: mcp__plugin_agent-orchestrator_orch__
+ * Session tool face names: the host composes the mcp__plugin_agent-orchestrator_orch__
+ *   prefix over the bare registered names (v1.6.5 fork (a): the server registers bare
+ *   short names; the embedded-prefix composition is retired - face name = host prefix + short):
  *   board | report | mailbox | spawn_agent | context_pack | resume | lessons |
- *   sandbox_apply | sandbox_discard | agent_harvest | probe | dispatch
- *   (v1.1.1 W20: 12 tools total; dispatch is appended last so the legacy ten stay
- *    a prefix and probe keeps its 11th position)
+ *   sandbox_apply | sandbox_discard | agent_harvest | probe | dispatch | trajectory
+ *   (13 tools total; dispatch appended 12th and trajectory appended last as the 13th tool,
+ *    v1.1.1 W20 / v1.6 W-t order preserved)
  *
  * Storage layout (under the resolved root, default <project>/.zcode/orchestrator):
  *   board.json

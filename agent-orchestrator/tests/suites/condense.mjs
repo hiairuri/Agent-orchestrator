@@ -58,7 +58,10 @@ fs.writeFileSync(path.join(T2, "board.json"), seed);
 const board1Before = fs.readFileSync(path.join(T1, "board.json"));
 
 // ---- 双进程：现行 + 0.4.1（git d00f94c）
+// v1.6.5 fork (a) 适配：现行 server=裸名注册（harness PRE="" 直发裸名）；0.4.1 基线 server=
+// 内嵌前缀注册名，拒收裸名——基线侧调用显式携带 legacy 全名（=REPORT canonical 单前缀形）。
 const H = "agent_harvest";
+const H_LEGACY = "mcp__plugin_agent-orchestrator_orch__agent_harvest";
 let cur = null, old = null;
 const strip = (r) => { const c = { ...r }; delete c.usage; delete c.file_bytes; delete c.messages_kind; return c; };
 const last2k = (f) => {
@@ -124,11 +127,11 @@ try {
   // ---------- CR-V16② 双进程逐字节对拍（剥离 v0.5 三新键后比较） ----------
   if (old) {
     for (const args of [{ session_id: "sess_probe" }, { session_id: "sess_probe", tail: 1 }, { session_id: "sess_probe", tail: 3, include_tools: false }]) {
-      const a = (await old.call(H, args)).json;
+      const a = (await old.call(H_LEGACY, args)).json;
       const b = strip((await cur.call(H, args)).json);
       ck.ok("V16b 剥离新键后与 0.4.1 逐字节 " + JSON.stringify(args), JSON.stringify(b) === JSON.stringify(a), JSON.stringify(b).slice(0, 100) + " VS " + JSON.stringify(a).slice(0, 100));
     }
-    const ge = await old.call(H, { session_id: "sess_ghost", tail: 0 });
+    const ge = await old.call(H_LEGACY, { session_id: "sess_ghost", tail: 0 });
     const gc = await cur.call(H, { session_id: "sess_ghost", tail: 0 });
     ck.ok("V16b 缺失文件错误文案形状一致（v1.6.2 W5 重订：W2 错误文案英化=登记增量，字节等值改形状等值：isError 同态∧同为 not found 转录错误）", gc.isError === true && ge.isError === true && gc.text.includes("not found") && typeof ge.text === "string" && ge.text.length > 0, gc.text.slice(0, 120));
   }
@@ -140,14 +143,17 @@ try {
   if (old) {
     const tlOld = await old.tools();
     const legacy = tlOld.tools.map((t) => t.name);
-    // v0.6 A6 + v1.1.1 W20 + v1.6 W-t：兼容不变量同步——0.4.1 旧十名依序保留为前缀，probe 第 11、
-    // dispatch 第 12、trajectory 第 13 依次尾接（既有工具名与顺序零漂移的语义不变）。
-    ck.ok("工具名集合与 0.4.1 兼容：旧十名依序为前缀 + probe/dispatch/trajectory 依次尾接",
+    // v0.6 A6 + v1.1.1 W20 + v1.6 W-t：兼容不变量同步——旧十名依序保留，probe 第 11、dispatch 第 12、
+    // trajectory 第 13 依次尾接（既有工具名与顺序零漂移的语义不变）。v1.6.5 fork (a) 随形重钉：
+    // 现行面=裸名（宿主在会话面上组合其命名空间前缀），基线面=内嵌前缀实名——比对基名
+    // （legacy 名尾段=注册短名）与现行裸名逐位全等 + 尾接三名裸形。
+    const legacyShorts = legacy.map((n) => n.split("__").pop());
+    ck.ok("工具名集合与 0.4.1 兼容：旧十名依序保留（基名比对）+ probe/dispatch/trajectory 裸名依次尾接（v1.6.5 fork (a) 直连面=裸注册名）",
       names.length === legacy.length + 3 &&
-      JSON.stringify(names.slice(0, legacy.length)) === JSON.stringify(legacy) &&
-      names[legacy.length].endsWith("__probe") &&
-      names[legacy.length + 1].endsWith("__dispatch") &&
-      names[names.length - 1].endsWith("__trajectory"),
+      JSON.stringify(names.slice(0, legacy.length)) === JSON.stringify(legacyShorts) &&
+      names[legacy.length] === "probe" &&
+      names[legacy.length + 1] === "dispatch" &&
+      names[names.length - 1] === "trajectory",
       { probe: names[legacy.length], mid: names[legacy.length + 1], last: names[names.length - 1] });
   }
 } catch (e) {

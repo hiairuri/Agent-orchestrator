@@ -94,7 +94,7 @@ export async function run(ctx) {
     // 哨兵侧内建默认字面量表（逐键=转正前 server 默认，bg-sentinel 源码行转录）
     const sentDefaults = [
       '"wake_poll_sec", 60, 1, 3600', '"max_lifetime_min", 1440, 0.01, 43200',
-      '"wake_grace_min", null, 5, 0.01, 1440', '"answer_grace_min", null, 3, 0.01, 1440',
+      '"wake_grace_min", null, 2, 0.01, 1440', '"answer_grace_min", null, 3, 0.01, 1440',
       '"stall_grace_min", null, 30, 0.01, 1440', '"crash_grace_min", null, 10, 0.01, 1440',
       '"coord_idle_min", null, 3, 0.01, 1440', '"cap_window_min", null, 120, 1, 10080',
       '"family_size", null, 3, 1, 5', '"stagger_sec", null, 20, 0, 600',
