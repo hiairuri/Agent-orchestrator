@@ -117,12 +117,12 @@ export async function scenGlean05() {
     const ret52 = await s12.call("lessons", {
       action: "retire",
       id: st51j.id,
-      reason: "glean: → ORCH.md §常驻 #3",
+      reason: "glean: → 项目视图 ORCH.md §常驻 #3", // v1.7.0 W1 场景注记：双视图域词汇（消费落点=项目视图）
     });
     const st51After = readLessons(R12).find((l) => l.id === st51j.id);
     ck.ok(
       "GLEAN-05i retire 消费=置状态：status=retired + note=视图指针，trigger/fix/lesson/type 逐字节不变（红线①不删内容）",
-      ret52.isError !== true && st51After.status === "retired" && st51After.note === "glean: → ORCH.md §常驻 #3" && st51After.trigger === st51Before.trigger && st51After.fix === st51Before.fix && st51After.lesson === st51Before.lesson && st51After.type === st51Before.type,
+      ret52.isError !== true && st51After.status === "retired" && st51After.note === "glean: → 项目视图 ORCH.md §常驻 #3" && st51After.trigger === st51Before.trigger && st51After.fix === st51Before.fix && st51After.lesson === st51Before.lesson && st51After.type === st51Before.type,
       { before: st51Before && { trigger: st51Before.trigger, fix: st51Before.fix }, after: st51After && { status: st51After.status, note: st51After.note } },
     );
     r52 = await rawCall("lessons", { action: "list" });

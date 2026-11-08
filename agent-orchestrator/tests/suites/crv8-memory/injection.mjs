@@ -354,8 +354,9 @@ export async function scenInj08() {
     ck.ok("INJ-08a 0.7.1 基线导出（git f0142a8）", false, String(e));
   }
   if (baseline) {
-    // 前置（W2 重跑口径）：0.8 侧随 --memory-root 注入空全端目录环境（无全端库、
-    // 无 ORCH.md 临时根）；0.7.1 基线不识别该旗标（parseArgValue 只寻 --root，忽略）。
+    // 前置（W2 重跑口径；v1.7.0 W1 注记同步——双视图落点：项目视图=项目根、全端视图=fleet 根）：
+    // 0.8 侧随 --memory-root 注入空全端目录环境（无全端库、无任一视图 ORCH.md）；
+    // 0.7.1 基线不识别该旗标（parseArgValue 只寻 --root，忽略）。
     const T71 = subRoot("t71");
     const T80 = subRoot("t80");
     const MEM80 = subRoot("mem80-empty");
@@ -432,17 +433,18 @@ export async function scenInj08() {
       );
       ck.ok("INJ-08d 命中场景归一化 id 段后与 0.7.1 逐字节一致（CR-04 性质锁）", Boolean(pB71) && Boolean(pB80) && norm(pB71) === norm(pB80));
 
-      // —— 子例 C（v1.3 W3 INJ-08 负判据新验证腿）：无全端库 + gate due 物化（views 块+
-      //    mkdir 兜底）之后——①mkdir 只建目录不建文件（无 AGENTS.md 空壳/无全端
-      //    lessons.jsonl：空壳 mtime 入 digest 指纹=假信号，design §3.3 不建空壳机理）；
-      //    ②注入面仍与 0.7.1 基线字节等价（mkdir/views 不入注入面）。
+      // —— 子例 C（v1.3 W3 INJ-08 负判据新验证腿；v1.7.0 W1 扩双视图负向）：
+      //    无全端库 + gate due 物化（views 块+mkdir 兜底）之后——①mkdir 只建目录
+      //    不建文件（无全端视图 ORCH.md 空壳〔v1.7.0 W1 注入源切换面〕/无全端
+      //    lessons.jsonl/无旧全端 AGENTS.md 空壳：空壳 mtime 入 digest 指纹=假信号，
+      //    design §3.3 不建空壳机理）；②注入面仍与 0.7.1 基线字节等价（mkdir/views 不入注入面）。
       fs.writeFileSync(path.join(MEM80, "glean.cfg.json"), JSON.stringify({ idle_hours: 0, new_events: 0, busy_channel_events: 0 }));
       await s80.call("lessons", { action: "list" }); // due → materializeGleanBrief（views 块 + mkdir memory/ 兜底）
       const memLibC = path.join(MEM80, "memory");
       ck.ok(
-        "INJ-08e due 物化 mkdir 兜底：只建 memory/ 目录不建文件（无全端 AGENTS.md 空壳/无全端 lessons.jsonl）",
-        fs.existsSync(memLibC) && !fs.existsSync(path.join(MEM80, "AGENTS.md")) && !fs.existsSync(path.join(memLibC, "lessons.jsonl")),
-        { memDir: fs.existsSync(memLibC), agentsMd: fs.existsSync(path.join(MEM80, "AGENTS.md")), lib: fs.existsSync(path.join(memLibC, "lessons.jsonl")) },
+        "INJ-08e due 物化 mkdir 兜底：只建 memory/ 目录不建文件（无全端视图 ORCH.md 空壳/无全端 lessons.jsonl/无旧全端 AGENTS.md 空壳）",
+        fs.existsSync(memLibC) && !fs.existsSync(path.join(MEM80, "ORCH.md")) && !fs.existsSync(path.join(MEM80, "AGENTS.md")) && !fs.existsSync(path.join(memLibC, "lessons.jsonl")),
+        { memDir: fs.existsSync(memLibC), fleetMd: fs.existsSync(path.join(MEM80, "ORCH.md")), agentsMd: fs.existsSync(path.join(MEM80, "AGENTS.md")), lib: fs.existsSync(path.join(memLibC, "lessons.jsonl")) },
       );
       const argsC = { mission_id: "m-byte3", title: "字节对拍三", task: "字节对拍回归任务三" };
       await s71.call(LEGACY + "context_pack", argsC);

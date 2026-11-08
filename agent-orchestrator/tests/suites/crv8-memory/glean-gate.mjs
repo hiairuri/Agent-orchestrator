@@ -235,42 +235,44 @@ export async function scenGlean02_04() {
       brief && { projects: brief.projects, orch_md: brief.orch_md },
     );
 
-    // ---- v1.3 W3 GLEAN-04d 扩臂：brief.views 块三态（design §3.3 信号腿，五字段全只读；
-    //      marker 字段=项目根 AGENTS.md orch-mem 标记对存在性——L-8 语义钉死）。
+    // ---- v1.3 W3 GLEAN-04d 扩臂 + v1.7.0 W1 双视图重基（Q10-03，impl-plan §2.1.I 行）：
+    //      brief.views 块三态（design §3.3 信号腿，五字段全只读）——键族 O-3 直改：
+    //      orch_md_*=项目视图（项目根 ORCH.md，存在性=功能开关 GL-21 新载体）；
+    //      fleet_orch_md_*=全端视图（fleet 根 ORCH.md，缺席=先建义务）；
+    //      退役键 global_agents_md_exists/agents_md_marker_exists（标记对机制随 W1 退役）。
     //      brief 重建走 G12-b 既有通道（删除后 board/list 同调用重物化）。
-    fs.rmSync(path.join(R8, "AGENTS.md"), { force: true }); // 态1 前置清扫：项目根标记对缺席（防夹具演进隐性翻转）
+    //      注：测试根 root==projectDir（shared startServer cwd=root），项目视图路径
+    //      join(projectDir,"ORCH.md")==join(R8,"ORCH.md")——夹具路径与 v1.6 前同位。
+    fs.rmSync(path.join(R8, "ORCH.md"), { force: true }); // 态1 前置清扫：项目视图缺席（防夹具演进隐性翻转）
+    fs.rmSync(path.join(MEM8, "ORCH.md"), { force: true }); // 态1 前置清扫：全端视图缺席
     fs.rmSync(brief8, { force: true });
     await s8.call("board", { action: "list" });
     const bv1 = fs.existsSync(brief8) ? JSON.parse(fs.readFileSync(brief8, "utf8")) : null;
     ck.ok(
-      "GLEAN-04d-1 views 全缺：orch_md_exists=false/orch_md_ver=null/global_agents_md_exists=false/global_lib_lines=0/agents_md_marker_exists=false",
-      Boolean(bv1 && bv1.views) && bv1.views.orch_md_exists === false && bv1.views.orch_md_ver === null && bv1.views.global_agents_md_exists === false && bv1.views.global_lib_lines === 0 && bv1.views.agents_md_marker_exists === false,
+      "GLEAN-04d-1 views 全缺（双视图键族）：orch_md_exists=false/orch_md_ver=null/fleet_orch_md_exists=false/fleet_orch_md_ver=null/global_lib_lines=0",
+      Boolean(bv1 && bv1.views) && bv1.views.orch_md_exists === false && bv1.views.orch_md_ver === null && bv1.views.fleet_orch_md_exists === false && bv1.views.fleet_orch_md_ver === null && bv1.views.global_lib_lines === 0,
       bv1 && bv1.views,
     );
-    // 态2 半缺：全端 AGENTS.md 在场（有 content），ORCH.md/全端库/项目根标记对仍缺
-    fs.writeFileSync(path.join(MEM8, "AGENTS.md"), "# 全端记忆（GLEAN04DPROBE）\n- GLEAN04D 全端行\n");
+    // 态2 半缺：全端视图在场（ver=3 头），项目视图/全端库仍缺
+    fs.writeFileSync(path.join(MEM8, "ORCH.md"), "<!-- orch-memory ver=3 updated=2026-11-09T00:00:00.000Z -->\n# ORCH.md — 全端视图（GLEAN04DPROBE）\n## 常驻\n- GLEAN04D 全端行\n");
     fs.rmSync(brief8, { force: true });
     await s8.call("board", { action: "list" });
     const bv2 = fs.existsSync(brief8) ? JSON.parse(fs.readFileSync(brief8, "utf8")) : null;
     ck.ok(
-      "GLEAN-04d-2 views 半缺：global_agents_md_exists=true 而 orch_md_exists=false/orch_md_ver=null/global_lib_lines=0/agents_md_marker_exists=false",
-      Boolean(bv2 && bv2.views) && bv2.views.global_agents_md_exists === true && bv2.views.orch_md_exists === false && bv2.views.orch_md_ver === null && bv2.views.global_lib_lines === 0 && bv2.views.agents_md_marker_exists === false,
+      "GLEAN-04d-2 views 半缺（双视图键族）：fleet_orch_md_exists=true∧fleet_orch_md_ver=3 而 orch_md_exists=false/orch_md_ver=null/global_lib_lines=0",
+      Boolean(bv2 && bv2.views) && bv2.views.fleet_orch_md_exists === true && bv2.views.fleet_orch_md_ver === 3 && bv2.views.orch_md_exists === false && bv2.views.orch_md_ver === null && bv2.views.global_lib_lines === 0,
       bv2 && bv2.views,
     );
-    // 态3 全在：ORCH.md（ver=7 头）+全端库 2 非空行+项目根标记对 全部在场
-    fs.writeFileSync(path.join(R8, "ORCH.md"), "<!-- orch-memory ver=7 updated=2026-11-01T00:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- GLEAN04DPROBE 行\n");
+    // 态3 全在：项目视图（ver=7 头）+全端库 2 非空行+全端视图（态2 已在场）全部到位
+    fs.writeFileSync(path.join(R8, "ORCH.md"), "<!-- orch-memory ver=7 updated=2026-11-09T00:00:00.000Z -->\n# ORCH.md — 项目视图\n## 常驻\n- GLEAN04DPROBE 行\n");
     fs.mkdirSync(path.join(MEM8, "memory"), { recursive: true });
     fs.writeFileSync(path.join(MEM8, "memory", "lessons.jsonl"), '{"id":"g04d-a"}\n\n{"id":"g04d-b"}\n'); // 2 非空行（空行不计）
-    fs.writeFileSync(
-      path.join(R8, "AGENTS.md"),
-      "# 测试项目\n\n<!-- orch-mem:begin v1（GLEAN04D 标记区） -->\n- GLEAN04D 标记区行\n<!-- orch-mem:end -->\n",
-    );
     fs.rmSync(brief8, { force: true });
     await s8.call("board", { action: "list" });
     const bv3 = fs.existsSync(brief8) ? JSON.parse(fs.readFileSync(brief8, "utf8")) : null;
     ck.ok(
-      "GLEAN-04d-3 views 全在：五字段全真且计数正确（orch_md_ver=7/global_lib_lines=2），marker 字段=项目根标记对语义钉死",
-      Boolean(bv3 && bv3.views) && bv3.views.orch_md_exists === true && bv3.views.orch_md_ver === 7 && bv3.views.global_agents_md_exists === true && bv3.views.global_lib_lines === 2 && bv3.views.agents_md_marker_exists === true,
+      "GLEAN-04d-3 views 全在（双视图键族）：五字段全真且计数正确（orch_md_ver=7/fleet_orch_md_ver=3/global_lib_lines=2）",
+      Boolean(bv3 && bv3.views) && bv3.views.orch_md_exists === true && bv3.views.orch_md_ver === 7 && bv3.views.fleet_orch_md_exists === true && bv3.views.fleet_orch_md_ver === 3 && bv3.views.global_lib_lines === 2,
       bv3 && bv3.views,
     );
 
@@ -279,13 +281,17 @@ export async function scenGlean02_04() {
     const briefRaw = fs.readFileSync(brief8, "utf8");
     const G13_PINS = [
       "fixed template direct handoff", // 固定物化定性（v1.4 W2 改6 改锚：主控零组装→固定模板直投——server-memory :612 B1 中性化）
-      "agents/orch-gleaner.md", // persona 路径（READ FIRST）
+      // v1.7.0 W1（r2 定案）：G13_PINS[1] 旧值 "agents/orch-gleaner.md"（persona READ FIRST 路径）
+      //   随 server-memory glean-pack READ FIRST 删行同波移除（悬空指针清偿 OPEN-5；
+      //   锚数 13→12；复植禁令锚=typed-dispatch-docs A-V080-DOC-01+po-static N1② 双红在位）。
       "the three-line contract is governed by the dispatch prompt tail block", // CONTRACT：server 预物化、token 不入包（v1.1 W4 Q5a）
       "glean-brief embedded verbatim", // CONTEXT 节定性
       "authoritative pointer - never hand-write it", // 锁纪律：lock 位置=brief.lock_path（模板事故① 根治口径）
       "Four-state rule", // 候选处置：晋升/合并/退役/保留
       "promote/promote_batch merge semantics via the server", // v1.1 W1 B2：GL-30 括注同步（批入口在案）
-      "View-layer boundary", // ORCH.md/标记区/全端 AGENTS.md 写面
+      "View-domain split (GL-20a fleet / GL-20b project)", // v1.7.0 W1（Q10-05）：分域判据句（GL-20a/20b 双视图域判据+晋升通道+写序）
+      "View-layer boundary", // 双视图写面（项目帽+全端帽双帽双开关句，Q10-05/06）
+      "Fourth view (meta-user brief, GL-20 family member)", // v1.7.0 W1：第四视图 RULES 句（meta-user-brief.md 写帽+格式）
       "Report discipline", // 报告=reports/<ts>-glean.md
       "-glean.md", // 报告命名形
       "<= 3-line pointer discipline", // Return 面定性
@@ -293,7 +299,21 @@ export async function scenGlean02_04() {
       "report(kind=blocked, question=what the main session must decide).", // 阻塞处置（WK-8 形；v1.4 W2 改7 改锚——server-memory :633 B1 中性化）
     ];
     const g13Misses = G13_PINS.filter((n) => !packRaw.includes(n));
-    ck.ok("G13-e 固定包模板锚齐全（persona 路径/锁权威指针/四态/视图层/日志/Return ≤3 行 13 钉）", g13Misses.length === 0, g13Misses);
+    ck.ok("G13-e 固定包模板锚齐全（锁权威指针/四态/分域判据/视图层双帽/第四视图/日志/Return ≤3 行 14 钉）", g13Misses.length === 0, g13Misses);
+    // v1.7.0 W1（Q10-05）：双帽句默认渲染——缺省 cfg → RULES 视图层边界句同句携带
+    //   项目帽（cap 120 lines/10KB）∧ 全端帽（cap 50 lines/2KB），ver 独立计数句在位。
+    ck.ok(
+      "G13-e2 双帽句默认渲染（Q10-05 GL-20a/20b）：缺省 cfg → 固定包 RULES 同句携带项目帽 cap 120 lines/10KB ∧ 全端帽 cap 50 lines/2KB ∧ 双 ver 独立计数措辞",
+      packRaw.includes("cap 120 lines/10KB") && packRaw.includes("cap 50 lines/2KB") && packRaw.includes("the two ver counters are independent"),
+      { projCap: packRaw.includes("cap 120 lines/10KB"), fleetCap: packRaw.includes("cap 50 lines/2KB"), indepVer: packRaw.includes("the two ver counters are independent") },
+    );
+    // v1.7.0 W1（Q10-06）：双开关句——项目缺席=skip+report+不重建（负向不创建空壳）∧
+    //   全端缺席=先建义务两句同句在位。
+    ck.ok(
+      "G13-e3 双开关句（Q10-06 GL-21 迁移）：项目视图缺席=skip and report, never rebuild（无空壳）∧ 全端视图缺席=create first 两语义同句在位",
+      packRaw.includes("skip and report, never rebuild") && packRaw.includes("create first") && packRaw.includes("never an empty shell"),
+      { projSkip: packRaw.includes("skip and report, never rebuild"), fleetCreate: packRaw.includes("create first"), noShell: packRaw.includes("never an empty shell") },
+    );
     ck.ok(
       "G13-f brief 逐字内嵌：brief 文件字节 ⊂ pack 字节（brief 物化后组合，read-back 保真）",
       packRaw.includes(briefRaw),

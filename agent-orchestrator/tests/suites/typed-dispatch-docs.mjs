@@ -384,15 +384,41 @@ function main() {
       bad.length ? `A-V080-DOC-01 失败: ${bad.join("; ")} —— 回写指针: v1.6 design §2.1 gleaner 移除联动+${V08_POINTER} §14 DOC-01 沿革` : "");
   }
 
-  { // A-V080-DOC-02：SKILL §10（记忆与现场）存在且标记对逐字串在案（防文档漂移）
+  { // A-V080-DOC-02（v1.7.0 W1 换血：标记对期待行退役→零标记对负向，Q10-06/Q10-10）——
+    //   标记对机制随双视图波退役（GL-21 语义迁项目根 ORCH.md 存在性开关；卡面
+    //   card-memory-views.md §3 墓碑承载）：SKILL §10 存在 ∧ 全节零 orch-mem 标记对字面
+    //   （防回潮=任何标记对教学/逐字串回流即红）∧ 仓库 AGENTS.md 零标记对（Q10-10 负向钉；
+    //   AGENTS.md=域外数据面，untracked 缺席时 SKIP 带标记容错——l-20261101-34b4e7 同族；
+    //   W2 M5 手术前活体仍携记忆区时本腿不核 AGENTS.md 子条件……注意：W1 波内活体记忆区
+    //   仍在（M5 归 W2 迁移波），故 AGENTS.md 子条件按「标记对仍在=FAIL」判——v1.7.0 W1
+    //   时点活体 AGENTS.md 的记忆区即标记对本体，仍在位。回查 impl-plan 负清单 L：
+    //   「不动 AGENTS.md」=W1 不手术 → 活体标记对 W1 波内仍在 → 本腿 AGENTS.md 子条件
+    //   若硬判即基线红。裁定（impl-plan §2.1.I 行 :390-391 期待行退役范围）：本波负向
+    //   承载面=SKILL §10 零标记对 + Q10-10 钉「仓库 AGENTS.md 不含 orch-mem:begin」的
+    //   判据落 W2 M5 后收口——W1 波内以 SKIP-tolerance 形先落（标记对在场=记 SKIP 注记
+    //   不红；M5 后自动转硬判），与 A-AGENTS-1 4low-4 容错先例同形。}
     const skill10 = section(skill, "## 10.", "## 11.");
-    const markers = [
-      "<!-- orch-mem:begin v1（agent-orchestrator 记忆区：对内内容由归敛代理维护，勿手编；删除本对=关闭本功能） -->",
-      "<!-- orch-mem:end -->",
-    ];
-    const miss = firstMissing(skill10, markers);
-    ck.ok("A-V080-DOC-02 @ SKILL.md §10 存在 + 标记对逐字串在案", skill10.length > 0 && !miss,
-      `A-V080-DOC-02 缺失: ${skill10.length === 0 ? "SKILL.md 无「## 10.」节" : `标记对子串 ${JSON.stringify(miss)}`} —— 回写指针: 见 ${V08_POINTER} §10.2/§14 DOC-02`);
+    const markerHits = ["orch-mem:begin", "orch-mem:end"].filter((m) => skill10.includes(m));
+    ck.ok("A-V080-DOC-02 @ SKILL.md §10 存在 + 零标记对负向（v1.7.0 W1 双视图换血：标记对教学零回流）", skill10.length > 0 && markerHits.length === 0,
+      `A-V080-DOC-02 失败: ${skill10.length === 0 ? "SKILL.md 无「## 10.」节" : `标记对字面回流: ${JSON.stringify(markerHits)}`} —— 回写指针: card-memory-views.md §3 墓碑 + impl-plan §2.1.I 行`);
+    // Q10-10（新腿，v1.7.0 W1 容错形）：仓库 AGENTS.md 零标记对负向钉。波界事实：
+    //   活体 AGENTS.md 记忆区标记对在 W2 迁移 M5 手术前仍在位（W1 负清单「不动 AGENTS.md」；
+    //   发版门 run-all 又先于迁移窗）→ 本波容错形：标记对在场=pass 带注记（记录转硬时点），
+    //   缺席=同形 pass（M5 后即天然绿态）；M5 波的断言同波件把本腿翻硬判（impl-plan §2.2
+    //   M5 断言面，W2 scope）。判据本体 =「orch-mem:begin 不应在仓库 AGENTS.md」的负向期待
+    //   在册（防回潮锚；硬化仅差 condition 翻转一行，M5 同波执行）。
+    if (agentsMdExists) {
+      const markerInAgents = agentsMd.includes("orch-mem:begin");
+      ck.ok(
+        markerInAgents
+          ? "Q10-10 @ AGENTS.md zero-marker negative pin [TOLERATED pre-M5: the live AGENTS.md still carries the orch-mem block until the W2 M5 surgery; the negative expectation is registered and hardens at M5 (impl-plan §2.2)]"
+          : "Q10-10 @ AGENTS.md zero-marker negative pin (post-M5 form: orch-mem:begin regrowth on the repo AGENTS.md = red)",
+        true,
+        markerInAgents ? "活体 AGENTS.md 记忆区标记对仍在位（W1 负清单不手术；负向期待已登记，M5 同波翻硬判）" : "仓库 AGENTS.md 零标记对（M5 后终态在位）",
+      );
+    } else {
+      ck.ok("Q10-10 @ AGENTS.md [SKIP: AGENTS.md untracked absent in worktree checkout]", true);
+    }
   }
 
   // ---- v0.9 P2-① 增例（静态在位断言，权威 designs/agent-orchestrator-v0.9-C6-findings.md §3/§5-2 移交语义 +

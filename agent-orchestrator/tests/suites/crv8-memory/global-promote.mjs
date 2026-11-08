@@ -44,7 +44,9 @@ export async function scenInj06bHost() {
     hotRow("l-20260101-pppp01", "pitfall", "PROBE6B 缓存损坏重建", "重建缓存目录", "project"),
     hotRow("l-20260101-pppp02", "pitfall", "OWN6B 项目独有触发", "项目独有修正", "project"),
   ]);
-  fs.writeFileSync(path.join(MEM10, "AGENTS.md"), "# GLOBAL MEMORY\n- GLOBALSEC 全端稳定事实行\n");
+  // v1.7.0 W1（J 步差集 G1，B③ 源切换涟漪）：GLOBAL MEMORY 注入源=fleet 根 ORCH.md
+  //   （FLEET_ORCH_MD_FILE；退役的全端 AGENTS.md 并入），夹具随源切换改写落点。
+  fs.writeFileSync(path.join(MEM10, "ORCH.md"), "# GLOBAL MEMORY\n- GLOBALSEC 全端稳定事实行\n");
   const s10 = startServer({ root: R10 });
   try {
     await s10.call("context_pack", {
@@ -88,18 +90,18 @@ export async function scenInj06bHost() {
   // ---- HOST-01b（v0.9 W3 C6 条件腿）：宿主用户级注入面源码复核结论=存在
   //      （designs/agent-orchestrator-v0.9-C6-findings.md：~/.zcode/AGENTS.md 默认进
   //      子代理上下文组装链，scope="user"）→ pack_global_section 缺省翻 false（v0.9
-  //      DESIGN §8 决策规则），全端节改显式 opt-in。m-6b 包即「无 cfg」环境（AGENTS.md
-  //      已在位、glean.cfg.json 尚未写出）。
+  //      DESIGN §8 决策规则），全端节改显式 opt-in。m-6b 包即「无 cfg」环境（全端视图
+  //      ORCH.md 已在位〔v1.7.0 W1 起注入源=fleet 根 ORCH.md〕、glean.cfg.json 尚未写出）。
   // v1.3 切分重基（修复轮 C）：server 读取面走族 helper（薄入口+模块族拼接——readGleanCfg 缺省
   // 字面量已迁 mcp/server-memory.mjs），断言与期望值零改动。
   const srvSrc10 = familySource(PLUGIN_DIR, path.join("mcp", "server.mjs"));
   ck.ok(
-    "HOST-01b-a 源码锁：readGleanCfg 缺省字面量 pack_global_section:false（cfg 键翻转锁；C6 复核结论=宿主用户级注入面存在，防双通道注入；v1.3 W1 尾字面随 busy_channel_events 键扩位；v1.3 W4 尾字面随 orch_md_max_lines/bytes 帽两键扩位）",
-    srvSrc10.includes("lock_stale_hours: 1.5, pack_global_section: false, busy_channel_events: 40, orch_md_max_lines: ORCH_MD_MAX_LINES, orch_md_max_bytes: ORCH_MD_MAX_BYTES }"),
+    "HOST-01b-a 源码锁：readGleanCfg 缺省字面量 pack_global_section:false（cfg 键翻转锁；C6 复核结论=宿主用户级注入面存在，防双通道注入；v1.3 W1 尾字面随 busy_channel_events 键扩位；v1.3 W4 尾字面随 orch_md_max_lines/bytes 帽两键扩位；v1.7.0 W1 尾字面随 fleet_orch_md_max_lines/bytes 全端帽两键扩位——J 步差集 G2 重钉）",
+    srvSrc10.includes("lock_stale_hours: 1.5, pack_global_section: false, busy_channel_events: 40, orch_md_max_lines: ORCH_MD_MAX_LINES, orch_md_max_bytes: ORCH_MD_MAX_BYTES, fleet_orch_md_max_lines: GLOBAL_MEM_MAX_LINES, fleet_orch_md_max_bytes: GLOBAL_MEM_MAX_BYTES }"),
     null,
   );
   ck.ok(
-    "HOST-01b-b 缺省关行为腿：无 glean.cfg.json（缺省=false）+ 全端 AGENTS.md 在位 → GLOBAL MEMORY 节整体不出现（LESSONS 命中不受累，CR-04）",
+    "HOST-01b-b 缺省关行为腿：无 glean.cfg.json（缺省=false）+ 全端视图 ORCH.md 在位 → GLOBAL MEMORY 节整体不出现（LESSONS 命中不受累，CR-04；v1.7.0 W1 注入源=fleet 根 ORCH.md）",
     Boolean(pack10) && !pack10.includes("## GLOBAL MEMORY") && pack10.includes("## LESSONS"),
     pack10 && pack10.split("\n").filter((l) => l.startsWith("## ")),
   );
@@ -108,7 +110,7 @@ export async function scenInj06bHost() {
   await s10.call("context_pack", { mission_id: "m-6bon", title: "开关开启包", task: "PROBE6B 缓存损坏重建" });
   const pack10on = readPack(R10, "m-6bon");
   ck.ok(
-    "SEC72-a pack_global_section:true 显式开 → 全端 AGENTS.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行；W5 重订=英文节头）",
+    "SEC72-a pack_global_section:true 显式开 → 全端视图 ORCH.md 注入 GLOBAL MEMORY 节（数据栅栏句 + 正文行；W5 重订=英文节头；v1.7.0 W1 源=fleet 根 ORCH.md）",
     Boolean(pack10on) && pack10on.includes("## GLOBAL MEMORY (fleet-wide subagent memory") && pack10on.includes("GLOBALSEC 全端稳定事实行"),
     pack10on && pack10on.split("\n").filter((l) => l.startsWith("## ")),
   );

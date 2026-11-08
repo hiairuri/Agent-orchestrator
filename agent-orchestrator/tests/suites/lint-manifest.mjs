@@ -233,6 +233,10 @@ const LM05_CARD_ANCHORS = [
       //   builder 删除，design §2.5；N9 负向钉防回潮）——8 ids→7 ids；parseOrchMdHeader/
       //   ORCH_MD_MAX_LINES 保留锚仍在列（ver 头解析+帽 cfg 缺省源，glean 面 consumption）。
       { rel: "mcp/server-memory.mjs", ids: ["readProjectDigest", "digestSourcesNow", "parseOrchMdHeader", "DIGEST_MAX_LINES", "ORCH_MD_MAX_LINES", "digestGradedStaleReason", "DIGEST_DRIFT_N"] },
+      // v1.7.0 W1（双视图波，impl-plan §2.1.H 行）：双视图路径面锚新增登记——server-boot
+      //   ORCH_MD_FILE（项目根项目视图）/FLEET_ORCH_MD_FILE（fleet 根全端视图，Q10-02）；
+      //   server-memory 既有标识符保留原则不破（上行 7 ids 全保留）。
+      { rel: "mcp/server-boot.mjs", ids: ["ORCH_MD_FILE", "FLEET_ORCH_MD_FILE"] },
     ],
   },
   {

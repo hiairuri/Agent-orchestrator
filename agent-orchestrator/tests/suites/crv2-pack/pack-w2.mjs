@@ -77,6 +77,9 @@ export async function runPackW2(cur) {
     const skillP3 = fs.readFileSync(path.resolve(path.dirname(DEFAULT_SERVER), "..", "skills", "agent-orchestrator", "SKILL.md"), "utf8");
     ck.ok("PACK-03f SKILL §10.3 抢锁步引 <brief.lock_path> 权威指针", skillP3.includes("location = `<brief.lock_path>`; authoritative pointer, never hand-written"), null); // W5 re-pin English MM-17（喂账③ PACK-03f 新锚）
     ck.ok("PACK-03g 手写锁路径括注（首归敛笔误串）不再现", !skillP3.includes(".zcode/orchestrator/memory/ 下"), null);
-    ck.ok("PACK-03h SKILL 标记对写法唯一注记（冒号变体视为不存在）在案", skillP3.includes("colon variants do not exist") && skillP3.includes("orch:memory:*"), null); // W5 re-pin English MM-23（喂账③ PACK-03h 新锚）
+    // v1.7.0 W1（J 步差集 G4 补录——波首反 grep 漏盘面，run-all 实测捕获）：旧 MM-23 标记对
+    //   注册唯一注记（colon variants/orch:memory:*）随标记对机制退役；新不变量=ver 头格式无变体
+    //   （缺头/坏头按 ver 0 读，card-memory-views.md §2 承载），PACK-03h 改钉新句。
+    ck.ok("PACK-03h SKILL ver-header uniqueness note (format has no variants; missing/unparsable header reads ver 0) on file", skillP3.includes("the ver-header format has no variants") && skillP3.includes("reads as ver 0"), null); // v1.7.0 W1 dual-view re-pin MM-23（旧标记对冒号变体注记随机制退役）
   }
 }

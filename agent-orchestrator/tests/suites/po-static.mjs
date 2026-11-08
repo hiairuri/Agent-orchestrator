@@ -787,12 +787,15 @@ try {
     const fmLines = fm ? fm[1].split(/\r?\n/) : [];
     ck.ok("C1-01 commands/manual.md 存在且 frontmatter name=manual（v1.2.1 前值 orch-manual）", fmLines.some((l) => l.trim() === "name: manual"), fmLines.filter((l) => /^name:/.test(l.trim())));
   }
-  ck.ok("C1-02 hard wording - full-read sentence (Immediately read three files in full + each in its entirety; v1.6.3 rider-3 re-pin triple read, second criterion unchanged)", count(MANUAL, "Immediately read three files in full") >= 1 && (MANUAL.match(/in\s+its\s+entirety/g) || []).length >= 2, { read: count(MANUAL, "Immediately read three files in full"), entirety: (MANUAL.match(/in\s+its\s+entirety/g) || []).length });
+  // v1.7.0 W1（Q10-08/Q06-05，impl-plan §2.1.I 行）：/manual 三读→四读重订——四文件全读句
+  //   +双视图路径模板+GOAL 缺席句 goal stack 形；旧 triple/three-file 字面零残留由 TR 族负向承载。
+  ck.ok("C1-02 hard wording - full-read sentence (Immediately read four files in full + each in its entirety; v1.7.0 W1 four-read re-pin, second criterion unchanged)", count(MANUAL, "Immediately read four files in full") >= 1 && (MANUAL.match(/in\s+its\s+entirety/g) || []).length >= 2, { read: count(MANUAL, "Immediately read four files in full"), entirety: (MANUAL.match(/in\s+its\s+entirety/g) || []).length });
   ck.ok("C1-03 hard wording - deviation = task failure sentence (W5 re-pin English)", count(MANUAL, "Silent deviation = task failure") >= 1, count(MANUAL, "Silent deviation = task failure"));
   ck.ok("C1-04 hard wording - recap line (Manual read: X chapters, Y rules in effect; W5 re-pin English)", count(MANUAL, '"Manual read: X chapters, Y rules in effect"') === 1, count(MANUAL, '"Manual read: X chapters, Y rules in effect"'));
   // v1.6 W2（裁定 A 扩 scope，2026-11-04）：第 2 步双件阻塞并读（SKILL 全文+ORCH.md 全文）；
   //   v1.6.2 W5 重订=英文双件语义双支：阻塞句恰 1＋ORCH.md 全文+帽内全量在位（防回潮：回退单件则两支齐红）。
-  ck.ok("C1-06 blocking read sentence (besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool) + triple-file pin (ORCH.md full content within the cap; v1.6.3 rider-3 re-pin)", count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") === 1 && count(MANUAL, "ORCH.md") >= 2 && count(MANUAL, "within the cap") >= 1, { block: count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool"), orchMd: count(MANUAL, "ORCH.md"), cap: count(MANUAL, "within the cap") });
+  //   v1.7.0 W1（Q10-08）：四读扩订——阻塞句双视图形恰 1＋双视图路径模板（fleet root/project root）在位。
+  ck.ok("C1-06 blocking read sentence (besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool) + dual-view path pins (<fleet root>/ORCH.md + <project root>/ORCH.md both on file; v1.7.0 W1 four-read re-pin)", count(MANUAL, "besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool") === 1 && count(MANUAL, "ORCH.md") >= 2 && count(MANUAL, "within the cap") >= 1 && count(MANUAL, "`<fleet root>/ORCH.md`") >= 1 && count(MANUAL, "`<project root>/ORCH.md`") >= 1, { block: count(MANUAL, "besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool"), orchMd: count(MANUAL, "ORCH.md"), cap: count(MANUAL, "within the cap"), fleetPath: count(MANUAL, "`<fleet root>/ORCH.md`"), projPath: count(MANUAL, "`<project root>/ORCH.md`") });
   ck.ok("C1-07 provable quote sentence (verbatim + does not count; W5 re-pin English)", count(MANUAL, "verbatim") >= 1 && count(MANUAL, "does not count") >= 1, { quote: count(MANUAL, "verbatim"), noFake: count(MANUAL, "does not count") });
   ck.ok("C1-08 fixed last line (During this task SKILL is the task law; deviations will first be report(blocked) for a ruling; W5 re-pin English)", count(MANUAL, "SKILL is the task law; deviations will first be") === 1 && count(MANUAL, "report(blocked) for a ruling.") >= 1, { law: count(MANUAL, "SKILL is the task law; deviations will first be"), blocked: count(MANUAL, "report(blocked) for a ruling.") });
   {
@@ -1246,19 +1249,75 @@ try {
     rrWaitBad.length === 0,
     rrWaitBad,
   );
-  // rider-3 TR×2：/manual 三读（SKILL+ORCH.md+GOAL.md 条件读；§10.2 落装字面为钉面权威）
+  // rider-3 TR×2 + v1.7.0 W1 四读重订（Q10-08/Q10-09/Q06-05；§10.2/OV-9/MM-19 落装字面为钉面权威）：
+  //   /manual 三读→四读（SKILL+全端视图+项目视图+GOAL.md 条件读），goal stack 缺席句形。
   ck.ok(
-    "A-v0163-TR-manual manual.md step-2 triple-file full read (Immediately read three files in full exactly 1 + GOAL.md count >= 3 + absent-note exactly 1 + besides-Read blocking sentence exactly 1; rider-3 /manual triple read, conditional GOAL.md)",
-    count(MANUAL, "Immediately read three files in full") === 1 &&
+    "A-v0163-TR-manual manual.md step-2 four-file full read (Immediately read four files in full exactly 1 + GOAL.md count >= 3 + absent-note exactly 1 [no goal stack on record form] + besides-Read blocking sentence exactly 1; rider-3 four-read re-pin by v1.7.0 W1, conditional GOAL.md)",
+    count(MANUAL, "Immediately read four files in full") === 1 &&
       count(MANUAL, "GOAL.md") >= 3 &&
-      count(MANUAL, "GOAL.md absent - no quest stack on record") === 1 &&
-      count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") === 1,
-    { three: count(MANUAL, "Immediately read three files in full"), goalMd: count(MANUAL, "GOAL.md"), absentNote: count(MANUAL, "GOAL.md absent - no quest stack on record"), besides: count(MANUAL, "besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool") },
+      count(MANUAL, "GOAL.md absent - no goal stack on record") === 1 &&
+      count(MANUAL, "besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool") === 1,
+    { four: count(MANUAL, "Immediately read four files in full"), goalMd: count(MANUAL, "GOAL.md"), absentNote: count(MANUAL, "GOAL.md absent - no goal stack on record"), besides: count(MANUAL, "besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool") },
   );
   ck.ok(
-    "A-v0163-TR-skill triple-read wording in SKILL (triple-file blocking read exactly 2 = OV-9+MM-19) + zero dual-file residue in manual/SKILL (AGENTS.md = domain-external face outside the po-static read set; §10.5 terminal grep gate carries it)",
-    count(SKILL, "triple-file blocking read") === 2 && count(SKILL, "dual-file") === 0 && count(MANUAL, "dual-file") === 0,
-    { skill: count(SKILL, "triple-file blocking read"), skillDual: count(SKILL, "dual-file"), manualDual: count(MANUAL, "dual-file") },
+    "A-v0163-TR-skill four-read wording in SKILL (four-file blocking read exactly 2 = OV-9+MM-19) + zero triple-file/dual-file residue in manual/SKILL (AGENTS.md = domain-external face outside the po-static read set; §10.5 terminal grep gate carries it)",
+    count(SKILL, "four-file blocking read") === 2 && count(SKILL, "triple-file") === 0 && count(SKILL, "dual-file") === 0 && count(MANUAL, "dual-file") === 0 && count(MANUAL, "Immediately read three files in full") === 0,
+    { skill: count(SKILL, "four-file blocking read"), skillTriple: count(SKILL, "triple-file"), skillDual: count(SKILL, "dual-file"), manualDual: count(MANUAL, "dual-file"), manualThree: count(MANUAL, "Immediately read three files in full") },
+  );
+  // ---- v1.7.0 W1 (Q06/Q10 legs, impl-plan §2.1.I 行; proposal §6 id 落点) ----
+  // Q06-01 OV-10 新字面钉（goal 确认+一句话 goal line 硬条款各恰 1）
+  ck.ok(
+    "Q06-01 OV-10 Goal confirmation new-literal pins (OV-10 Goal confirmation exactly 1 + one-sentence goal line exactly 1 = the one-line admissibility hard clause)",
+    count(SKILL, "OV-10 Goal confirmation") === 1 && count(SKILL, "one-sentence goal line") === 1,
+    { head: count(SKILL, "OV-10 Goal confirmation"), hardClause: count(SKILL, "one-sentence goal line") },
+  );
+  // Q06-02 PL-11 新字面钉
+  ck.ok(
+    "Q06-02 PL-11 Goal-driven loop new-literal pin (exactly 1)",
+    count(SKILL, "PL-11 Goal-driven loop") === 1,
+    count(SKILL, "PL-11 Goal-driven loop"),
+  );
+  // Q06-03 术语表行钉（| goal | 行在 ∧ | quest | 行零——旧术语防回潮）
+  ck.ok(
+    "Q06-03 glossary term-row pins (| goal | row exactly 1 + | quest | row zero = old-term anti-regrowth)",
+    countRe(SKILL_LF, /^\| goal \|/gm) === 1 && countRe(SKILL_LF, /^\| quest \|/gm) === 0,
+    { goalRow: countRe(SKILL_LF, /^\| goal \|/gm), questRow: countRe(SKILL_LF, /^\| quest \|/gm) },
+  );
+  // Q06-05/Q06-06 manual goal stack 字面钉 + quest 词零残留（反向钉；历史台账域不在 po-static 读面）
+  ck.ok(
+    "Q06-05/06 manual goal-stack pins (goal stack >= 2 + goal-card/goal-driven wording on file) + zero \\bquest\\b residue in manual/SKILL (Q06 SKILL-only scope; historical ledgers outside the read set)",
+    count(MANUAL, "goal stack") >= 2 && countRe(MANUAL, /\bquests?\b/gi) === 0 && countRe(SKILL, /\bquests?\b/gi) === 0,
+    { goalStack: count(MANUAL, "goal stack"), manualQuest: countRe(MANUAL, /\bquests?\b/gi), skillQuest: countRe(SKILL, /\bquests?\b/gi) },
+  );
+  // Q10-01/Q10-02 双视图路径 def-shape 钉（server-boot；SERVER=族拼接含 server-boot）
+  ck.ok(
+    "Q10-01/02 dual-view path def-shape pins in server-boot (ORCH_MD_FILE = path.join(projectDir, \"ORCH.md\") exactly 1 = the project-root view + const FLEET_ORCH_MD_FILE = () => path.join(memoryRoot, \"ORCH.md\") exactly 1 = the fleet-root view)",
+    count(SERVER, 'path.join(projectDir, "ORCH.md")') === 1 && count(SERVER, 'const FLEET_ORCH_MD_FILE = () => path.join(memoryRoot, "ORCH.md")') === 1,
+    { projPath: count(SERVER, 'path.join(projectDir, "ORCH.md")'), fleetConst: count(SERVER, 'const FLEET_ORCH_MD_FILE = () => path.join(memoryRoot, "ORCH.md")') },
+  );
+  // Q10-03 views 五字段族源码钉（O-3 直改：新键族在位 ∧ 退役键零残留）
+  ck.ok(
+    "Q10-03 brief.views five-key family source pins (fleet_orch_md_exists/fleet_orch_md_ver on file in server-memory + retired keys global_agents_md_exists/agents_md_marker_exists zero-residue in mcp/)",
+    count(SERVER, "fleet_orch_md_exists") >= 1 && count(SERVER, "fleet_orch_md_ver") >= 1 && count(SERVER, "global_agents_md_exists") === 0 && count(SERVER, "agents_md_marker_exists") === 0 && count(SERVER, "projectAgentsMdMarkerExists") === 0,
+    { fleetExists: count(SERVER, "fleet_orch_md_exists"), fleetVer: count(SERVER, "fleet_orch_md_ver"), oldGlobal: count(SERVER, "global_agents_md_exists"), oldMarker: count(SERVER, "agents_md_marker_exists"), oldFn: count(SERVER, "projectAgentsMdMarkerExists") },
+  );
+  // Q10-04 digest 指纹换源钉（agents_md_mtime_ms → orch_md_mtime_ms 三面：产点/判陈旧链/烘焙行）
+  ck.ok(
+    "Q10-04 digest fingerprint source-switch pins (orch_md_mtime_ms >= 3 occurrences in server-memory [production + stale chain + baked pack line] + agents_md_mtime_ms zero-residue in mcp/)",
+    count(SERVER, "orch_md_mtime_ms") >= 3 && count(SERVER, "agents_md_mtime_ms") === 0,
+    { newKey: count(SERVER, "orch_md_mtime_ms"), oldKey: count(SERVER, "agents_md_mtime_ms") },
+  );
+  // Q10-05 fleet 帽键 def-shape 钉（defaults 缺省 50/2KB + junk 回落两键在位）
+  ck.ok(
+    "Q10-05 fleet cap keys def-shape pins (fleet_orch_md_max_lines: GLOBAL_MEM_MAX_LINES + fleet_orch_md_max_bytes: GLOBAL_MEM_MAX_BYTES in the readGleanCfg defaults object, junk fallback both keys on file)",
+    count(SERVER, "fleet_orch_md_max_lines: GLOBAL_MEM_MAX_LINES") === 1 && count(SERVER, "fleet_orch_md_max_bytes: GLOBAL_MEM_MAX_BYTES") === 1 && count(SERVER, "cfg.fleet_orch_md_max_lines = defaults.fleet_orch_md_max_lines") === 1 && count(SERVER, "cfg.fleet_orch_md_max_bytes = defaults.fleet_orch_md_max_bytes") === 1,
+    { defLines: count(SERVER, "fleet_orch_md_max_lines: GLOBAL_MEM_MAX_LINES"), defBytes: count(SERVER, "fleet_orch_md_max_bytes: GLOBAL_MEM_MAX_BYTES"), fbLines: count(SERVER, "cfg.fleet_orch_md_max_lines = defaults.fleet_orch_md_max_lines"), fbBytes: count(SERVER, "cfg.fleet_orch_md_max_bytes = defaults.fleet_orch_md_max_bytes") },
+  );
+  // Q10-09 probe 双视图对账措辞钉（OV-9/MM-19 各 1）
+  ck.ok(
+    "Q10-09 dual-view probe reconciliation wording pins (OV-9 + MM-19 each carry the both-views probe sentence exactly 1)",
+    count(SKILL, "`probe file.head ORCH.md` on both views, each path as needed") === 2,
+    { bothViews: count(SKILL, "`probe file.head ORCH.md` on both views, each path as needed") },
   );
   // rider-2 MR×2：PR-16/IF-7 机理化受控改写（§11.2 落装字面；六源锁=五 persona 行 13 byte-equal + SKILL 散文共享核 clause）
   const mrCapBad = Object.entries({ ...PERSONA_MAP, "SKILL.md": SKILL })

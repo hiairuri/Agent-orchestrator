@@ -29,8 +29,16 @@ function resolveMemoryRoot() {
 }
 const memoryRoot = resolveMemoryRoot();
 
-/** §4.1: the coordinator memory view lives at <存储根>/ORCH.md. */
-const ORCH_MD_FILE = () => path.join(root, "ORCH.md");
+/** §4.1 (v1.7.0 W1): the coordinator project memory view lives at the project
+ * root <项目根>/ORCH.md (was <存储根>/ORCH.md pre-v1.7 — the view moved out of
+ * the hidden runtime directory onto the project root per the dual-view ruling:
+ * project view = project root, fleet view = fleet root). */
+const ORCH_MD_FILE = () => path.join(projectDir, "ORCH.md");
+/** v1.7.0 W1 (Q1 fleet-root ruling): the fleet-wide coordinator memory view
+ * lives at <fleet 根>/ORCH.md (= memoryRoot, the orchestrator-memory root;
+ * the retired fleet AGENTS.md merged into it). Same parse/cap contract as the
+ * project view; the sole writer is the gleaning round (GL-20a). */
+const FLEET_ORCH_MD_FILE = () => path.join(memoryRoot, "ORCH.md");
 /** v0.8 (§3.5/§6.6): the global lessons library — same row schema as the
  * project library; scope="global" is implied by the library, not stored
  * on demand. W2 wires the read side only (promotion is §6.7 / W5). */
@@ -402,6 +410,7 @@ const p2pTtlMinDefault = numArg(process.argv.slice(2), "--p2p-ttl-min", 30, 1, 1
 export {
   memoryRoot,
   ORCH_MD_FILE,
+  FLEET_ORCH_MD_FILE,
   globalLessonsFile,
   sandboxDefaultArg,
   claimLeaseMinDefault,

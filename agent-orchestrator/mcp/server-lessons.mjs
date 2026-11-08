@@ -806,8 +806,10 @@ function toolLessonsInner(args) {
     if (!trigger || !fix) throw new ToolError("lessons stage requires non-empty trigger and fix");
     const lesson = truncateStr(escapeDataLine(args.lesson ?? ""), 200);
     const missionId = args.mission_id == null ? null : String(args.mission_id);
-    // note = placement hint for the gleaner (e.g. "pin: AGENTS.md" → land it
-    // in the marker section first). Data-line discipline applies to it too.
+    // note = placement hint for the gleaner (e.g. "pin: ORCH.md" → land it
+    // in the matching view section first; v1.7.0 W1 vocabulary sync — the
+    // marker-section placement face retired with the AGENTS.md marker pair).
+    // Data-line discipline applies to it too.
     const note = args.note == null ? null : truncateStr(escapeDataLine(args.note), 200);
     const at = nowIso();
     const entry = {
