@@ -9,12 +9,41 @@ installing that host patch. The double gate still applies in full: the patcher Q
 (Q12-01..04 legs) must already have passed, and installation touches the live host
 bundle - never patch in place, every byte runs through a temp copy first.
 
+## Absolute anchors (resolved from the ZCode config at run time)
+
+All directories in this command are resolved from the ZCode configuration at run time -
+nothing is hard-coded to a machine or a drive. Workspace-independent: directories come
+from config resolution, so this command works in any workspace with zero cwd dependence.
+
+1. Plugin directory (preferred): read `installed_plugins.json` under the ZCode CLI config
+   root (`<cli-root>/plugins/installed_plugins.json`; `<cli-root>` is the per-user CLI
+   state root, typically under the home directory). Find the `agent-orchestrator` entry
+   and take its `installPath` - the active installed plugin directory, laid out as
+   `<cli-root>/plugins/cache/<marketplace-hash>/<plugin-name>/<active-version>/`.
+2. Plugin directory (fallback): read `<cli-root>/plugins/known_marketplaces.json`, find
+   the marketplace that provides this plugin, resolve that marketplace's registered local
+   source root, and use `<marketplace-root>/<plugin-name>/`.
+3. Asset root: `<plugin-directory>/patches/orch-meta-user/` - every asset this flow
+   touches lives under it: `actions.json`, `manifest.json`, `base-snapshot.md`, and the
+   patch json bundle. Address all reads through this resolved root.
+4. Live bundle: resolve the active host CLI bundle from the ZCode CLI installation
+   configuration (the CLI program path of the running install) - never inline it in this
+   command. The base identity pin (target build + sha256) is always read from
+   `manifest.json` (`base.target_build` / `base.sha256`); the `base.live_path` field
+   records the resolving machine's current value as data only, not as an anchor.
+
+Install pipeline in one line: dry-run anchor verification (zero network) -> apply to a
+temp copy -> `node --check` -> verify-before-install post-checks -> sha256 cross-check ->
+register the installed record + rollback anchor in the runtime manifest; live
+session-level verification is section 3, a separate step.
+
 ## 0. Preconditions (all must hold; abort with a report otherwise)
 
-1. Base identity: sha256 of the live bundle
-   `C:/Program Files/ZCode/resources/glm/zcode.cjs` equals the pin in
-   `patches/orch-meta-user/manifest.json` (`base.sha256`). Mismatch = stale anchors =
-   run the re-pin flow (section 5) instead, then come back for a fresh authorization.
+1. Base identity: sha256 of the live bundle - resolved from the ZCode CLI installation
+   configuration (standard install shape: `<cli-root>/resources/glm/zcode.cjs`) -
+   equals the pin in `patches/orch-meta-user/manifest.json` (`base.sha256`).
+   Mismatch = stale anchors = run the re-pin flow (section 5) instead, then come back
+   for a fresh authorization.
 2. Verify legs green: `node tests/run-all.mjs --ids patcher-q12` passes all four legs.
 3. Brief writer in place: the gleaning round's fourth-view RULES are live (server side)
    so the brief at `<storage root>/context/meta-user-brief.md` exists or will be created
