@@ -1,0 +1,119 @@
+{
+  "family": "orch-meta-user",
+  "status": "registered",
+  "registered_at": "2026-11-09T02:01:06.304Z",
+  "registered_by": "m-20261109-093749-195d (v17w3a, W3a construction wave; zero host install)",
+  "base": {
+    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
+    "sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
+    "bytes": 15408529,
+    "live_path": "C:/Program Files/ZCode/resources/glm/zcode.cjs",
+    "snapshot_copy": ".zcode/orchestrator/patches/notirc-w3/zcode.cjs.n4 (sha256 verified equal to live 2026-11-09)",
+    "provenance": "noti-rc chain: stock 3.17.2.9661 -> n0-n3 (base 7781ec10) -> n4 (patched 2f753c85); Q-12 anchors pinned on 2f753c85"
+  },
+  "patched_sha256_registered": "a936cd0ef3c92449af7ea82a93c5e81461bef14a8a747eed51fceaf928ad1cdb",
+  "patch_spans": [
+    {
+      "id": "q12-m1",
+      "kind": "insert",
+      "span": [
+        12842150,
+        12842150
+      ],
+      "anchor_len": 212,
+      "payload_len": 185,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m2",
+      "kind": "replace",
+      "span": [
+        13333830,
+        13333975
+      ],
+      "anchor_len": 145,
+      "payload_len": 194,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m3",
+      "kind": "replace",
+      "span": [
+        13145644,
+        13145717
+      ],
+      "anchor_len": 73,
+      "payload_len": 103,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m4",
+      "kind": "replace",
+      "span": [
+        13145875,
+        13146029
+      ],
+      "anchor_len": 154,
+      "payload_len": 191,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m5",
+      "kind": "replace",
+      "span": [
+        13335155,
+        13335236
+      ],
+      "anchor_len": 81,
+      "payload_len": 111,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m6",
+      "kind": "replace",
+      "span": [
+        12853996,
+        12854152
+      ],
+      "anchor_len": 156,
+      "payload_len": 209,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    },
+    {
+      "id": "q12-m7",
+      "kind": "insert",
+      "span": [
+        13335958,
+        13335958
+      ],
+      "anchor_len": 96,
+      "payload_len": 475,
+      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
+    }
+  ],
+  "verify_only": [
+    "q12-m0"
+  ],
+  "rollback": {
+    "procedure": "reverse one-shot: for each byte action in reverse span order, locate the payload (unique) and swap back to the anchor literal (insert actions: splice the payload out); byte-exact restore verified by sha256 == base.sha256",
+    "post_rollback_verify": [
+      "sha256(restored) == base.sha256",
+      "count of 'orch_meta_brief' == 0",
+      "count of 'orchMetaBrief' == 0",
+      "canary gone: meta_user returns to the native shape (no 'Orch Memory' section)"
+    ],
+    "host_upgrade_repatch": "sha256(live) != base.sha256 -> anchors stale -> re-pin flow: re-measure anchors on the new bundle, re-register spans, re-run Q12-01 dry-run expect_count=1, then wait for the explicit user authorization again"
+  },
+  "verify_before_install": [
+    "sha256(live bundle) == base.sha256 (stale-anchor gate)",
+    "Q12-01 dry-run: every anchor literal count == 1 on the live bundle",
+    "apply to a temp copy + node --check + post-checks (never patch in place)",
+    "authorization gate: the user explicitly issues commands/orch-meta-user-patch.md AND the patcher QA has passed (double gate)"
+  ],
+  "live_probes_not_in_run_all": [
+    "canary: a fresh interactive session's meta_user contains the brief first line 'orch-meta-user: v1'",
+    "mtime reread: rewrite the brief mid-session -> next request carries the new content (one-request lag)",
+    "compression survival: meta_user index block survives context compression (research-r0 §5 residual)",
+    "rollback drill: reverse -> canary gone -> meta_user native shape"
+  ]
+}

@@ -67,6 +67,12 @@ const REGISTRY = [
   //   parseEnvelope PE×6（单行通道A 回归/650B 多行通道B/噪声混布/截断优雅 miss/生产长度
   //   定型）＋miss→error 侧车链静态腿。断言主句权威 tests/assertions/v1.2.3.md §1。
   { name: "dispatch-supply", layer: "L1" },
+  // v1.7.0 W3a 新增一套（Q12-01..04，追加于表尾口径）：patcher-q12=Q-12 patcher 资产面四腿
+  //   （锚签名唯一性 dry-run〔活体腿 SKIP 容错：异机缺席/sha 漂移=重打流信号〕/apply→reverse
+  //   sha256 字节级复原幂等/brief 读面三态 fail-soft〔单测+applied-fixture 端到端〕/授权指令
+  //   存在性钉）。资产权威=patches/orch-meta-user/{actions,manifest,base-snapshot}+
+  //   commands/orch-meta-user-patch.md。断言主句权威 tests/assertions/v1.7.0.md §W3。
+  { name: "patcher-q12", layer: "L1" },
 ];
 
 function argOf(flag) {
