@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   rootId, projectDir, nowIso, atomicWriteFileSync, log, escapeDataBlock, pidAlive,
 } from "./server-core.mjs";
-import { memoryRoot, ORCH_MD_FILE, FLEET_ORCH_MD_FILE, globalLessonsFile } from "./server-boot.mjs";
+import { memoryRoot, ORCH_MD_FILE, globalLessonsFile } from "./server-boot.mjs";
 import { loadLessons, lessonsFile } from "./server-lessons.mjs";
 /* ------------------------------------------------------------------ */
 /* v0.8 §7.2: global memory pack section (cap 50 lines / 2KB)          */
@@ -21,9 +21,7 @@ function byteSliceUtf8(s, maxBytes) {
 }
 
 /** §7.2 conditional GLOBAL MEMORY section lines, or [] when absent (CR-04):
- * no fleet-root ORCH.md (FLEET_ORCH_MD_FILE — v1.7.0 W1 source switch: the
- * retired <memoryRoot>/AGENTS.md merged into the fleet ORCH.md view), an empty
- * one, or the pack_global_section switch
+ * no <memoryRoot>/AGENTS.md, an empty one, or the pack_global_section switch
  * set false in glean.cfg.json (the §17-OPEN-2 anti-double-injection switch;
  * v0.9 C6/HOST-01b: defaults to false — opt-in, see readGleanCfg). The body
  * renders line-structure-preserving control-free (escapeDataBlock —
@@ -33,9 +31,9 @@ function buildGlobalMemoryLines() {
   if (cfg.pack_global_section === false) return [];
   let raw;
   try {
-    raw = fs.readFileSync(FLEET_ORCH_MD_FILE(), "utf8");
+    raw = fs.readFileSync(path.join(memoryRoot, "AGENTS.md"), "utf8");
   } catch {
-    return []; // no fleet memory view → whole section absent (CR-04)
+    return []; // no global memory file → whole section absent (CR-04)
   }
   const body = String(raw).replace(/\r\n?/g, "\n").replace(/\n+$/, "");
   if (!body.trim()) return [];
@@ -46,7 +44,7 @@ function buildGlobalMemoryLines() {
     text = byteSliceUtf8(text, GLOBAL_MEM_MAX_BYTES);
     truncated = true;
   }
-  if (truncated) text += `\n... (truncated; full text at ${FLEET_ORCH_MD_FILE()})`;
+  if (truncated) text += `\n... (truncated; full text at ${path.join(memoryRoot, "AGENTS.md")})`;
   return text.split("\n");
 }
 
@@ -75,11 +73,8 @@ function digestJsonFile() {
 }
 
 /** Current source fingerprint for digest freshness (pack RULES: lessons.jsonl
- * mtime + non-empty line count; the project view ORCH.md mtime participates
- * when the digest sidecar recorded it — v1.7.0 W1 source switch: the
- * orch_md_mtime_ms key now fingerprints the project-root view file instead of
- * the retired memory-root AGENTS.md; the pre-v1.7 key name is retired with the
- * same wave, zero residue pinned by po-static Q10-04). */
+ * mtime + non-empty line count; AGENTS.md mtime participates when the digest
+ * sidecar recorded it). */
 function digestSourcesNow() {
   const src = { lessons_lines: lessonsLineCount(lessonsFile()), lessons_mtime_ms: null };
   try {
@@ -88,9 +83,9 @@ function digestSourcesNow() {
     /* no project lessons library → count 0 / mtime null */
   }
   try {
-    src.orch_md_mtime_ms = fs.statSync(ORCH_MD_FILE()).mtimeMs;
+    src.agents_md_mtime_ms = fs.statSync(path.join(memoryRoot, "AGENTS.md")).mtimeMs;
   } catch {
-    src.orch_md_mtime_ms = null;
+    src.agents_md_mtime_ms = null;
   }
   return src;
 }
@@ -188,10 +183,10 @@ function readProjectDigest() {
       staleReason = g.text;
       staleDetail = g.detail;
     } else if (
-      Object.prototype.hasOwnProperty.call(want, "orch_md_mtime_ms") &&
-      (want.orch_md_mtime_ms ?? null) !== now.orch_md_mtime_ms
+      Object.prototype.hasOwnProperty.call(want, "agents_md_mtime_ms") &&
+      (want.agents_md_mtime_ms ?? null) !== now.agents_md_mtime_ms
     ) {
-      const g = digestGradedStaleReason("orch_md_mtime_ms", want.orch_md_mtime_ms, now.orch_md_mtime_ms);
+      const g = digestGradedStaleReason("agents_md_mtime_ms", want.agents_md_mtime_ms, now.agents_md_mtime_ms);
       staleReason = g.text;
       staleDetail = g.detail;
     }
@@ -235,11 +230,6 @@ function readProjectDigest() {
 /* defaults keep the pre-W4 behavior byte-identical. No process-level  */
 /* cache: cfg is re-read per call (G12/cap assertions rely on hot cfg  */
 /* writes taking effect on the very next call).                        */
-/* v1.7.0 W1 (GL-20a/20b 双帽): the two orch_md_* keys are the PROJECT  */
-/* view caps (semantic shift — the view moved to the project root);    */
-/* the fleet view gains its own cfg keys fleet_orch_md_max_lines/_bytes*/
-/* (defaults 50/2KB = the GLOBAL_MEM_* constants, the retired fleet    */
-/* AGENTS.md cap family), junk fallback per-key, same contract.        */
 /* ------------------------------------------------------------------ */
 
 const ORCH_MD_MAX_LINES = 120;
@@ -312,9 +302,7 @@ function readGleanCfg() {
   // （仅 junk/负值回落 40）——零代码回滚通道=cfg 写 busy_channel_events:0。
   // v1.3 (W4, E): ORCH.md 帽两键 opt-in——ORCH_MD_MAX_LINES/_BYTES 常量降为默认值来源
   // （标识符保留，lint-manifest 钉）；缺省键=缺省帽（零行为变更），junk/负值逐键回落同法。
-  // v1.7.0 (W1, GL-20a/20b): 两 orch_md_* 键=项目视图帽（语义平移）；全端视图新增
-  // fleet_orch_md_max_lines/_bytes 键（默认 50/2KB=GLOBAL_MEM_* 常量族，junk 回落同法）。
-  const defaults = { idle_hours: 48, new_events: 10, lock_stale_hours: 1.5, pack_global_section: false, busy_channel_events: 40, orch_md_max_lines: ORCH_MD_MAX_LINES, orch_md_max_bytes: ORCH_MD_MAX_BYTES, fleet_orch_md_max_lines: GLOBAL_MEM_MAX_LINES, fleet_orch_md_max_bytes: GLOBAL_MEM_MAX_BYTES };
+  const defaults = { idle_hours: 48, new_events: 10, lock_stale_hours: 1.5, pack_global_section: false, busy_channel_events: 40, orch_md_max_lines: ORCH_MD_MAX_LINES, orch_md_max_bytes: ORCH_MD_MAX_BYTES };
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(memoryRoot, "glean.cfg.json"), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -327,15 +315,10 @@ function readGleanCfg() {
         cfg.busy_channel_events = defaults.busy_channel_events; // v1.3 W1: 0 合法关断不回落
       // v1.3 W4 (E): cap keys — junk/negative fall back per-key (same contract
       // as the gate numerics; 0 stays a legal degenerate opt-in cap).
-      // v1.7.0 W1: fleet view cap keys join the same per-key fallback family.
       if (!Number.isFinite(Number(cfg.orch_md_max_lines)) || Number(cfg.orch_md_max_lines) < 0)
         cfg.orch_md_max_lines = defaults.orch_md_max_lines;
       if (!Number.isFinite(Number(cfg.orch_md_max_bytes)) || Number(cfg.orch_md_max_bytes) < 0)
         cfg.orch_md_max_bytes = defaults.orch_md_max_bytes;
-      if (!Number.isFinite(Number(cfg.fleet_orch_md_max_lines)) || Number(cfg.fleet_orch_md_max_lines) < 0)
-        cfg.fleet_orch_md_max_lines = defaults.fleet_orch_md_max_lines;
-      if (!Number.isFinite(Number(cfg.fleet_orch_md_max_bytes)) || Number(cfg.fleet_orch_md_max_bytes) < 0)
-        cfg.fleet_orch_md_max_bytes = defaults.fleet_orch_md_max_bytes;
       if (!Number.isFinite(Number(cfg.lock_stale_hours)) || Number(cfg.lock_stale_hours) <= 0)
         cfg.lock_stale_hours = defaults.lock_stale_hours;
       // v0.8 (W3): the §7.2 switch normalizes too — boolean and boolean-like
@@ -450,12 +433,18 @@ function evaluateGleanGate(p) {
   return { due: true, idleH, events };
 }
 
-/** v1.7.0 W1 (GL-21 迁移，O-3 直改): the project-root AGENTS.md orch-mem marker
- * pair is retired — the project memory feature switch is now the EXISTENCE of
- * the project-root ORCH.md itself (orchMdStat() != null; missing = feature
- * off for that project: gleaning skips + reports, never rebuilds). The former
- * marker-pair reader function is removed with the mechanism (marker keys
- * retired from brief.views, zero write/zero rebuild semantics unchanged). */
+/** v1.3 W3 (D, L-8): 项目根 AGENTS.md 的 orch-mem 标记对存在性（只读，零写）——标记对
+ * 只在项目根存在；全端 AGENTS.md 整文件归 gleaner 管、无标记对（防施工歧义钉死路径）。
+ * 缺失=false（功能关闭语义 GL-21；本函数只读不重建）。 */
+function projectAgentsMdMarkerExists() {
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(projectDir, "AGENTS.md"), "utf8");
+  } catch {
+    return false;
+  }
+  return raw.includes("<!-- orch-mem:begin") && raw.includes("<!-- orch-mem:end -->");
+}
 
 /** §9.2 glean-brief.json — the field snapshot the gleaner pack CONTEXT is
  * built from (coordinator pastes it verbatim into the pack). */
@@ -486,18 +475,6 @@ function materializeGleanBrief(gate, cfg, lock) {
   }
   const orchStat = orchMdStat();
   const orchHead = orchStat ? parseOrchMdHeader(orchMdRead() ?? "") : null;
-  // v1.7.0 W1: fleet view snapshot (FLEET_ORCH_MD_FILE) — same read-only
-  // stat/header-parse face as the project view; fleet missing = first-creation
-  // duty (never an empty shell), project missing = feature off (skip+report).
-  let fleetStat = null;
-  let fleetHead = null;
-  try {
-    fleetStat = fs.statSync(FLEET_ORCH_MD_FILE());
-    fleetHead = parseOrchMdHeader(fs.readFileSync(FLEET_ORCH_MD_FILE(), "utf8") ?? "");
-  } catch {
-    fleetStat = null;
-    fleetHead = null;
-  }
   const brief = {
     v: 1,
     generated_at: nowIso(),
@@ -538,17 +515,14 @@ function materializeGleanBrief(gate, cfg, lock) {
       ver: orchHead ? orchHead.ver : orchStat ? 0 : null,
       bytes: orchStat ? orchStat.bytes : null,
     },
-    // v1.7.0 W1 (O-3 直改，design §1.1 信号腿): 双视图五字段只读快照——零写零重建。
-    // orch_md_* = 项目视图（项目根 ORCH.md，存在性=功能开关 GL-21 新载体）；fleet_orch_md_*
-    // = 全端视图（fleet 根 ORCH.md，缺席=先建义务）；global_lib_lines=全端库非空行数。
-    // 退役键：旧全端 AGENTS.md 存在性键（改名并入 fleet_orch_md_exists）与旧标记对存在性键
-    // （标记对机制退役，开关语义平移至 orch_md_exists）——退役键名不再出现（Q10-03 零残留钉）。
+    // v1.3 W3 (D, design §3.3 信号腿): 全端视图五字段只读快照——零写零重建；marker
+    // 字段钉死=项目根 AGENTS.md orch-mem 标记对存在性（L-8）。
     views: {
       orch_md_exists: Boolean(orchStat),
       orch_md_ver: orchHead ? orchHead.ver : orchStat ? 0 : null,
-      fleet_orch_md_exists: Boolean(fleetStat),
-      fleet_orch_md_ver: fleetHead ? fleetHead.ver : fleetStat ? 0 : null,
+      global_agents_md_exists: fs.existsSync(path.join(memoryRoot, "AGENTS.md")),
       global_lib_lines: lessonsLineCount(globalLessonsFile()),
+      agents_md_marker_exists: projectAgentsMdMarkerExists(),
     },
     cfg,
   };
@@ -587,10 +561,6 @@ function materializeGleanPack(sharedCfg) {
   const cfg = sharedCfg || readGleanCfg();
   const capLines = Number(cfg.orch_md_max_lines);
   const capBytes = Number(cfg.orch_md_max_bytes);
-  // v1.7.0 W1 (GL-20a): the fleet view renders its own cfg-driven cap into the
-  // RULES sentence (defaults 50/2KB; junk already fallen back per-key).
-  const fleetLines = Number(cfg.fleet_orch_md_max_lines);
-  const fleetBytes = Number(cfg.fleet_orch_md_max_bytes);
   const packPath = path.join(memoryRoot, "glean-pack.md");
   let briefJson = "";
   try {
@@ -608,18 +578,17 @@ function materializeGleanPack(sharedCfg) {
     "## CONTEXT (glean-brief embedded verbatim; the snapshot is authoritative; where it conflicts with live state, live state wins and the deviation is noted in the report)",
     briefJson,
     "## READ FIRST",
+    "- agents/orch-gleaner.md (persona archetype; GL-series rules follow the archetype)",
     "- always take the lock file location from the CONTEXT brief's lock_path field (authoritative pointer - never hand-write it)",
     "",
     "## TASK",
-    "One memory-gleaning round: grab the lock -> consume ORCHTEMP (brief.orchtemp_pending) -> inspect candidates with four-state dispositions -> maintain the view layer per the domain split (project ORCH.md ver+1 / fleet ORCH.md ver+1 / fleet-wide library memory/ directory - GL-20a fleet view / GL-20b project view) -> write the digest (brief.digest.path + sidecar_path, cap 12 lines/1200B + source fingerprint) -> set the lock to done + watermarks -> write the gleaning report.",
+    "One memory-gleaning round: grab the lock -> consume ORCHTEMP (brief.orchtemp_pending) -> inspect candidates with four-state dispositions -> maintain the view layer (ORCH.md ver+1 / root AGENTS.md marker zone / fleet-wide AGENTS.md / fleet-wide library memory/ directory) -> write the digest (brief.digest.path + sidecar_path, cap 12 lines/1200B + source fingerprint) -> set the lock to done + watermarks -> write the gleaning report.",
     "",
     "## RULES (server-baked fixed rules, equivalent to the persona GL series)",
-    "- Lock discipline (§9.3): grab the lock first (brief.lock_path, wx atomic write in the active state) before consuming; lock occupied (live PID and unexpired) -> report(kind=done, summary=\"lock occupied, skipping\") and wrap up immediately; on completion set done + finished_at + watermarks (global library line counts + per-scanned-project line-count baselines); on failure exit leaving active in place for forensics",
+    "- Lock discipline (§9.3): grab the lock first (brief.lock_path, wx atomic write in the active state) before consuming; lock occupied (live PID and unexpired) -> report(kind=done, summary=\"lock occupied, skipping\") and wrap up immediately; on completion set done + finished_at + watermarks (fleet-wide line counts + per-scanned-project line-count baselines); on failure exit leaving active in place for forensics",
     "- Four-state rule: exactly one disposition per candidate - promote (promote/promote_batch merge semantics via the server, evidence in the report) / merge (same trigger+fix normalized; hits/confidence merged) / retire (retire sets the state, content kept verbatim; contradictions go through add(contradicts=<old id>) marking the old entry superseded) / retain (insufficient evidence stays candidate with the reason written in the report)",
-    "- View-domain split (GL-20a fleet / GL-20b project): first judge the domain for every candidate/rewrite - content that still holds generally after the project's proper names are stripped goes to the fleet view (user preferences, coordinator discipline, cross-project lessons); content that only holds in this project's context (progress/paths/versions/project craft) goes to the project view; the standing promotion standard (cross-project recurrence >= 2 or score >= 0.7 AND hits >= 3 AND age >= 7d) materializes as the regular project-view -> fleet-view promotion channel (promoted items listed in a dedicated report section, lessons-id provenance unchanged); a candidate hitting both domains -> list it in the report OPEN section for the coordinator's ruling and land the conservative side (project view) this round; write order: read brief.views -> project view ver+1 -> fleet view ver+1 -> digest -> report",
-    `- View-layer boundary: write only the two view files + the fleet library directory (project ORCH.md rewritten ver+1, cap ${capLines} lines/${fmtCapBytes(capBytes)} - cfg orch_md_max_lines/_bytes; fleet ORCH.md rewritten ver+1, cap ${fleetLines} lines/${fmtCapBytes(fleetBytes)} - cfg fleet_orch_md_max_lines/_bytes; the two ver counters are independent; a missing project-root ORCH.md = the memory feature is off for that project, skip and report, never rebuild (no empty shell); a missing fleet ORCH.md or fleet-wide memory/ directory = create first (mkdir -p, first write only with content, never an empty shell; first-creation events listed in a dedicated report section)); lessons.jsonl event lines are never written directly (all changes go through the lessons tool); active lessons are never hard-deleted (retire is advisory only)`,
-    "- digest duty (keyed split per rootId): each round overwrites brief.digest.path in full (keyed path digest/<rootId>/..., each project reads its own key; first line generated_at: <ISO8601>, body <= 12 lines/<= 1200B: situation face = one sentence of project state + in-flight mission summary, time face = 3-5 recent rulings/key events; task-related search content forbidden) and brief.digest.sidecar_path ({generated_at, rootId, sources:{lessons_lines, lessons_mtime_ms, orch_md_mtime_ms, journal_tail_seq}, bytes}, rootId = brief.root_id verbatim); sources record measured values at production time; the pack side judges freshness from them",
-    "- Fourth view (meta-user brief, GL-20 family member): each round rewrites the meta-user brief at <storage root>/context/meta-user-brief.md (the project storage root's context/ directory; cap target 8KB; first line `orch-meta-user: v1` marker, increment v per rewrite - the mtime+ver pair is the invalidity face, the per-request consumer re-reads on mtime change; body = curated summary: fleet view digest + project view digest + goal-stack line + sentinel/in-flight one-line status); a missing brief = write it fresh this round (first write only with content, never an empty shell)",
+    `- View-layer boundary: write only the view layer (ORCH.md rewritten ver+1, cap ${capLines} lines/${fmtCapBytes(capBytes)}; the root AGENTS.md is touched only inside the orch-mem marker pair, zero byte touches outside it; fleet-wide AGENTS.md cap 50 lines/2KB; a missing fleet-wide AGENTS.md or fleet-wide memory/ directory = create first (mkdir -p, first write only with content, never an empty shell; first-creation events listed in a dedicated report section)); lessons.jsonl event lines are never written directly (all changes go through the lessons tool); active lessons are never hard-deleted (retire is advisory only); a missing marker zone = the memory feature is off for that project, skip and report, never rebuild`,
+    "- digest duty (keyed split per rootId): each round overwrites brief.digest.path in full (keyed path digest/<rootId>/..., each project reads its own key; first line generated_at: <ISO8601>, body <= 12 lines/<= 1200B: situation face = one sentence of project state + in-flight mission summary, time face = 3-5 recent rulings/key events; task-related search content forbidden) and brief.digest.sidecar_path ({generated_at, rootId, sources:{lessons_lines, lessons_mtime_ms, agents_md_mtime_ms, journal_tail_seq}, bytes}, rootId = brief.root_id verbatim); sources record measured values at production time; the pack side judges freshness from them",
     "- Report discipline: gleaning report = reports/<YYYYMMDD-HHmmss>-glean.md (cap 150 lines; view changes/promotions/ORCHTEMP consumption each itemized with lessons-id provenance); the report is the deliverable, and the main session reads only the report and the Return pointers",
     "- Blocked / goal conflict / unwinnable gate -> immediately report(kind=blocked, question=what the main session must decide).",
     "",

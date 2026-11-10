@@ -29,9 +29,8 @@
  *   A-v080-INJ-07（§3.6 死码清理：server.mjs grep topLessonsBrief/BRIEF_TOP_K/
  *     BRIEF_MAX_CHARS 零命中；session-start lessons digest 注释无悬空「twin of
  *     server.mjs」字样且本地副本实现仍在）
- *   A-v080-INJ-08（CR-04 性质锁：无全端库+无任一视图 ORCH.md 的临时根下 context_pack
- *     输出与 0.7.1 基线（git f0142a8）逐字节一致〔v1.7.0 W1 注记同步——双视图落点：
- *     项目视图=项目根、全端视图=fleet 根〕；含 LESSONS 命中场景时唯一预期增量=id 段
+ *   A-v080-INJ-08（CR-04 性质锁：无全端库+无 ORCH.md 临时根下 context_pack 输出与
+ *     0.7.1 基线（git f0142a8）逐字节一致；含 LESSONS 命中场景时唯一预期增量=id 段
  *     （归一化后逐字节）。W2 起 0.8 侧随 --memory-root 注入空全端目录环境重跑）
  *   A-v080-SYNC-01..05（W2，§4 ver 同步捎带族：首读 initial 全文（文件不存在时不附
  *     基线=absent）/外部改写 changed+ver 递增/stat 未变零开销无键/超 120 行截断
@@ -55,12 +54,10 @@
  *     事件门·busy 三无 due 腿键整体缺省（零字节差缺省，P9-01 体例）；顶层 orch_memory
  *     附件保留不拆。设计权威 designs/agent-orchestrator-prompt-opt-20261024.md + G12
  *     双实证（主控+gleaner）；断言主句权威 tests/assertions/v0.11.x.md §1）
- *   A-v0110-GLEAN3-01（glean3 微波，m-20261025-012000-glean3；v1.7.0 W1 头注同步——
- *     固定包 READ FIRST persona 路径行已随 OPEN-5 清偿删除，G13 钉面随之移除该锚）：
- *     server 物化固定
+ *   A-v0110-GLEAN3-01（glean3 微波，m-20261025-012000-glean3：server 物化固定
  *     glean-pack.md 主控零组装——gate due 同调用点随 brief 再生（brief 物化后组合）；
  *     due 信号两 surfacing 均增 pack_path（orch_memory.glean + board/list glean_due）；
- *     固定模板锚（锁权威指针勿手写/四态口径/视图层
+ *     固定模板锚（persona 路径 agents/orch-gleaner.md/锁权威指针勿手写/四态口径/视图层
  *     边界/日志纪律 reports/<ts>-glean.md/Return ≤3 行指针纪律）+ brief 逐字内嵌
  *     （brief 文件字节 ⊂ pack 字节）；brief+pack 删除后 board/list 单调用双重建；
  *     busy 不重写 pack（零写面）；无 due 不物化 pack（零字节差缺省，P9-01 体例）。
@@ -154,18 +151,6 @@
  *   lessons 哈希读面+token 写闸（design §2.4/§3.3 N4：哈希三腿〔无新短答/有新增量/基线前滚幂等〕
  *   +写闸负向双支〔携 token 五写 action 一律拒〕+反向钉伴腿〔无 token 全功能不变/首调建基线 state
  *   落位/第二 reader 独立基线〕；断言台账 v1.6.0.md W4 节）。
- *
- * v1.7.0 W1（m-20261109-013922-9277，记忆与召回体系重构双视图波；impl-plan r2 §2.1.B+I 行）：
- *   ①sync 场景 6 N9 扩双视图（Q10-07：项目/全端两视图各三态生命周期采样）+场景 6c 增
- *   SYNC-22/23（Q10-05 全端帽键 fleet_orch_md_max_lines/_bytes cfg 渲染+junk 回落）；
- *   ②glean-gate 场景 8 GLEAN-04d 三态重基双视图键族（Q10-03，O-3 直改：orch_md_*=项目视图/
- *   fleet_orch_md_*=全端视图；退役键 global_agents_md_exists/agents_md_marker_exists）+
- *   G13 钉面重基（persona 路径钉随 server-memory READ FIRST 删行移除，13→14 钉——增分域判据句/
- *   第四视图句两钉）+G13-e2/e3 新腿（Q10-05 双帽句默认渲染+Q10-06 双开关句）；
- *   ③global-promote 场景 12 夹具/源码锁随源切换重基（GLOBAL MEMORY 注入源=全端视图 ORCH.md
- *   +readGleanCfg defaults 字面量随 fleet 帽两键扩位重钉——J 步差集 G1/G2）；
- *   ④injection 场景 5 INJ-08e 空壳负向扩全端视图（J 步差集 G3）+场景注记双视图词汇；
- *   ⑤stage 场景 11 reason 字面随场景改双视图域词汇。断言台账 tests/assertions/v1.7.0.md。
 
  */
 import { ck, BASE } from "./crv8-memory/shared.mjs";

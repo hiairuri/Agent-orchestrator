@@ -10,7 +10,7 @@
 > - 规则 3（REGISTRY ≡ suites 名单）：`tests/run-all.mjs` REGISTRY 条目名单 ≡ 同一文件集
 >   （未注册孤儿/注册悬空双向红）。
 >
-> 三条只锁集合全等与形状，套件总数字面数不作门（impl-plan M-5/O6=a：预期 25 自校、非门禁（v1.7.0 W3a 增 patcher-q12 一行，25））。
+> 三条只锁集合全等与形状，套件总数字面数不作门（impl-plan M-5/O6=a：预期 24 自校、非门禁）。
 > **新增套件四件套**（缺一即 LM-04 红）：suites/`<名>`.mjs（含文件头标签）→ 本表一行 →
 > run-all REGISTRY 一行 → 断言登记（对应版本断言档）。
 >
@@ -43,4 +43,3 @@
 | `typed-dispatch-docs` | typed-dispatch-docs.mjs | L1 | typed 派发文档在位防回退 + 到期回收机制载体 + 角色面扩域 | V6-63 / V6-64 / A-COMPAT / A-ROLE |
 | `watcher-core` | watcher-core.mjs | L1 | watcher 守护进程纯逻辑（模板/分类/降级树/频控/脱敏自检；ws 层全 mock 零生产中继） | v0.7 W1 族（W/WB/WS/WAKE） |
 | `watcher-shim` | watcher-shim.mjs | L1 | relay shim（SHIM-01..04 + W-RESP；直连面回归） | A-v0100-SHIM / W-RESP |
-| `patcher-q12` | patcher-q12.mjs | L1 | Q-12 patcher 资产面四腿（v1.7.0 W3a：锚签名唯一性 dry-run〔活体腿 SKIP 容错〕/apply→reverse sha256 幂等复原/brief 读面三态 fail-soft〔单测+applied-fixture 端到端〕/授权指令存在性钉；资产权威=patches/orch-meta-user+commands/orch-meta-user-patch.md） | Q12-01..04（权威=assertions/v1.7.0.md §W3） |

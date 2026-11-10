@@ -26,23 +26,20 @@ your context with this command, in effect now:
 | 11 | Three pair loops as the default form: planning<->planning-QA / plan<->plan-QA / execution<->release-QA paired loops polished to the final version; QA opinions go to files handed to the counterpart, the coordinator only forwards pointers; between loops the grill gate defaults to ON + exemptions stated explicitly | Ch. 1 OV-6, Ch. 17 |
 | 12 | No hot edits on the running face (hard rule): any loaded/running tree (plugin runtime, bot-loaded face, every live face) is never hot-edited - changes go through a worktree sandbox, merge after release-QA sign-off; unsigned iterations must not commit / switch branches / write files onto the running face; emergency fixes also go through sandbox fast-forward, never in-place hot patches | Ch. 1 OV-7, Ch. 12 SB-8 |
 
-## 2. Blocking four-file full read (the only action step of this command, blocking)
+## 2. Blocking triple-file full read (the only action step of this command, blocking)
 
-Immediately read four files in full: (1) `skills/agent-orchestrator/SKILL.md` in its entirety
-(if not at the plugin root, locate the plugin root first); (2a) `<fleet root>/ORCH.md` in
-its entirety (the fleet-wide coordinator memory view, the full content within the cap -
-`~/.zcode/orchestrator-memory/ORCH.md`, `--memory-root` overrides the fleet root; a missing
-fleet view = empty fleet memory, continue as usual); (2b) `<project root>/ORCH.md` in
-its entirety (the project coordinator memory view, the full content within the cap - since v1.6
-the server no longer pushes ORCH.md, so this step is the memory-load moment; a missing
-project view = empty memory, continue as usual); (3) project-root `GOAL.md` in its entirety
-(the goal stack: one entry per active/queued goal) - CONDITIONAL: present -> read it as the
-goal stack before starting work; absent -> emit the one-line note
-"GOAL.md absent - no goal stack on record" and continue (the plugin is generic; most
+Immediately read three files in full: (1) `skills/agent-orchestrator/SKILL.md` in its entirety
+(if not at the plugin root, locate the plugin root first); (2) `<storage root>/ORCH.md` in
+its entirety (coordinator memory, the full content within the cap - since v1.6 the server
+no longer pushes ORCH.md, so this step is the memory-load moment; a missing ORCH.md = empty
+memory, continue as usual); (3) project-root `GOAL.md` in its entirety (the quest stack:
+one entry per active/queued quest) - CONDITIONAL: present -> read it as the quest stack
+before starting work; absent -> emit the one-line note
+"GOAL.md absent - no quest stack on record" and continue (the plugin is generic; most
 projects have no GOAL.md).
 No excerpts, no skimming, no substituting memory for the text, no substituting a summary
 for the original.
-During this step, besides Read on SKILL.md, the two ORCH.md views, and GOAL.md (when present), call no other tool,
+During this step, besides Read on SKILL.md, ORCH.md, and GOAL.md (when present), call no other tool,
 do not continue the previous task, do not output any conclusion first - until the read
 completes and passes the step-3 confirmation, all other work is blocked.
 

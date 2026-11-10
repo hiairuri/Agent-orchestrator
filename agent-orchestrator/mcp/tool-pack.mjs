@@ -190,9 +190,7 @@ function buildPackMarkdown(opts) {
   // two legacy memory sections render again unconditionally (each conditional on
   // its own non-empty lines, CR-04), restoring the pre-digest baseline behavior.
   // v0.8 (§7.2): global (cross-project) memory section — conditional like
-  // LESSONS: no fleet-root ORCH.md (v1.7.0 W1 source switch — the retired
-  // fleet AGENTS.md merged into the fleet ORCH.md view) or pack_global_section:false
-  // (the §17-OPEN-2
+  // LESSONS: no global AGENTS.md or pack_global_section:false (the §17-OPEN-2
   // anti-double-injection switch; v0.9 C6: defaults to false — opt-in) → the
   // whole section never appears (CR-04).
   if (globalMemoryLines && globalMemoryLines.length) {

@@ -671,7 +671,7 @@ const TOOLS = [
         note: {
           type: "string",
           maxLength: 200,
-          description: 'stage placement hint, e.g. "pin: ORCH.md" (consumed by the gleaner)',
+          description: 'stage placement hint, e.g. "pin: AGENTS.md" (consumed by the gleaner)',
         },
         reason: { type: "string", maxLength: 200, description: "retire note" },
         limit: { type: "number", default: 8, description: "list return cap (default 8)" },

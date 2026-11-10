@@ -28,7 +28,7 @@ function questBriefLine() {
   } catch {
     /* 无日志/读失败 → 无课题 */
   }
-  return `[goal] current goal: ${project || "none on record - ask the user for the current goal before starting"}`;
+  return `[quest] current quest: ${project || "none on record - ask the user for the current quest before starting"}`;
 }
 
 /* ------------------------------------------------------------------ */

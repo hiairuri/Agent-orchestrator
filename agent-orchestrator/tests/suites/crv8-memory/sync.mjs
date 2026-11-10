@@ -9,30 +9,25 @@
  *   防回潮；函数名 scenSync01to05 保留=入口 crv8-memory.mjs 接线零触）；
  *   场景 6b = 退役空壳（SYNC-06..09 原域；函数保留=入口接线零触）；
  *   场景 6c = SYNC-20/21 零触保留（pack 帽值句渲染=固定包 RULES 消费面，随
- *   cfg 动态；帽 cfg 两键 readGleanCfg 保留面，r-caps）+ v1.7.0 W1 增 SYNC-22/23
- *   （Q10-05 全端帽键 fleet_orch_md_max_lines/_bytes cfg 渲染腿+junk 回落腿，GL-20a）。
+ *   cfg 动态；帽 cfg 两键 readGleanCfg 保留面，r-caps）。
  */
 import fs from "node:fs";
 import path from "node:path";
 import { ck, subRoot, writeJsonl, startServer, PRE } from "./shared.mjs";
 
-/* ============ 场景 6（v1.6 W2 起；v1.7.0 W1 扩双视图）：N9 负向钉（推送防回潮，root r-sync） ============ */
+/* ============ 场景 6（v1.6 W2 起）：N9 负向钉（ORCH 拆除防回潮，root r-sync） ============ */
 /*!
  * v1.6 W2 (N9, design §2.5/§3.3)：server 不再向任何工具成功响应推送 orch_md——
  * 顶层 `orch_memory` 附件键（v1.3 W2 前的 ver-sync 捎带壳）与 content 面 result
- * 顶层 `orch_md` 键（v1.3 W2 第三 surfacing）双 surfacing 全停。
- * v1.7.0 W1 (Q10-07, impl-plan §2.1.I 行)：N9 扩双视图——采样面从单项目视图
- * 扩至双视图全生命周期（项目视图=项目根 ORCH.md；全端视图=fleet 根 ORCH.md；
- * 各出现/改写/删除三态），任一视图任一状态回潮即红。
- * 本腿在双视图生命周期上采样成功响应（lessons list + board list 两工具），
+ * 顶层 `orch_md` 键（v1.3 W2 第三 surfacing）双 surfacing 全停。本腿在 ORCH.md
+ * 三态生命周期（出现/改写/删除）上采样成功响应（lessons list + board list 两工具），
  * 每响应同时验证双支：①JSON-RPC result 顶层无 orch_memory 键；②content[0].text
- * 解析 JSON 无 orch_md 键。1 腿双支口径：单 ck.ok，条件=双支 && ×全响应清。
+ * 解析 JSON 无 orch_md 键。任一支回潮（旧 piggyback 复活）即红。
+ * 1 腿双支口径（impl-plan §2 W2）：单 ck.ok，条件=双支 && ×四响应全清。
  */
 export async function scenSync01to05() {
   const R6 = subRoot("r-sync");
-  const MEM6 = path.join(R6, "orchestrator-memory"); // 临时根缺省重定向落点（fleet 根）
-  const orchMd = path.join(R6, "ORCH.md"); // v1.7.0 W1：项目视图=项目根 ORCH.md（ORCH_MD_FILE）
-  const fleetMd = path.join(MEM6, "ORCH.md"); // v1.7.0 W1：全端视图=fleet 根 ORCH.md（FLEET_ORCH_MD_FILE）
+  const orchMd = path.join(R6, "ORCH.md"); // §4.1：<存储根>/ORCH.md
   const s6 = startServer({ root: R6 });
   try {
     // JSON-RPC result 直取通道（双支同源：顶层附件面 + content 文本解析面）
@@ -55,39 +50,25 @@ export async function scenSync01to05() {
       return { ok: noTop && noContent, noTop, noContent };
     };
 
-    // ---- 项目视图三态生命周期采样：出现 → 改写（bytes+mtimeMs 双因子越过）→ 删除
+    // ---- 三态生命周期采样：出现 → 改写（bytes+mtimeMs 双因子越过）→ 删除
     fs.writeFileSync(
       orchMd,
-      "<!-- orch-memory ver=1 updated=2026-10-22T08:00:00.000Z -->\n# ORCH.md — 项目视图\n## 常驻\n- N9PROBE 初始装载行\n",
+      "<!-- orch-memory ver=1 updated=2026-10-22T08:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- N9PROBE 初始装载行\n",
     );
     const a1 = noPush(await rawCall("lessons", { action: "list" }));
     await new Promise((res) => setTimeout(res, 100)); // NTFS mtime 粒度余量（CACHE-06a 同族口径）
     fs.writeFileSync(
       orchMd,
-      "<!-- orch-memory ver=2 updated=2026-10-22T09:00:00.000Z -->\n# ORCH.md — 项目视图\n## 常驻\n- N9PROBE 改写后的行\n",
+      "<!-- orch-memory ver=2 updated=2026-10-22T09:00:00.000Z -->\n# ORCH.md — 主控记忆\n## 常驻\n- N9PROBE 改写后的行\n",
     );
     const a2 = noPush(await rawCall("lessons", { action: "list" }));
     fs.unlinkSync(orchMd);
     const a3 = noPush(await rawCall("lessons", { action: "list" }));
-    // ---- 全端视图三态生命周期采样（v1.7.0 W1 扩面）：出现 → 改写 → 删除
-    fs.mkdirSync(MEM6, { recursive: true });
-    fs.writeFileSync(
-      fleetMd,
-      "<!-- orch-memory ver=1 updated=2026-10-22T08:00:00.000Z -->\n# ORCH.md — 全端视图\n## 常驻\n- N9PROBE 全端初始行\n",
-    );
-    const f1 = noPush(await rawCall("lessons", { action: "list" }));
-    fs.writeFileSync(
-      fleetMd,
-      "<!-- orch-memory ver=2 updated=2026-10-22T09:00:00.000Z -->\n# ORCH.md — 全端视图\n## 常驻\n- N9PROBE 全端改写行\n",
-    );
-    const f2 = noPush(await rawCall("lessons", { action: "list" }));
-    fs.unlinkSync(fleetMd);
-    const f3 = noPush(await rawCall("lessons", { action: "list" }));
     const a4 = noPush(await rawCall("board", { action: "list" })); // 第二工具采样（旧 piggyback 对全部成功工具附着）
     ck.ok(
-      "N9 推送拆除负向钉（防回潮，v1.7.0 双视图扩面）：项目/全端两视图各出现/改写/删除三态生命周期 + lessons/board 两工具的成功响应——顶层无 orch_memory 键 ∧ content 无 orch_md 键（1 腿双支）",
-      a1.ok && a2.ok && a3.ok && f1.ok && f2.ok && f3.ok && a4.ok,
-      { projInitial: a1, projChanged: a2, projRemoved: a3, fleetInitial: f1, fleetChanged: f2, fleetRemoved: f3, boardList: a4 },
+      "N9 ORCH 拆除负向钉（防回潮）：ORCH.md 出现/改写/删除三态生命周期 + lessons/board 两工具的成功响应——顶层无 orch_memory 键 ∧ content 无 orch_md 键（1 腿双支）",
+      a1.ok && a2.ok && a3.ok && a4.ok,
+      { initial: a1, changed: a2, removed: a3, boardList: a4 },
     );
   } finally {
     s6.close();
@@ -167,33 +148,6 @@ export async function scenSyncW4Caps() {
       "SYNC-21 pack 帽值句随 cfg 渲染：cfg 上调 30 行/20480B → 重物化固定包 RULES「cap 30 lines/20KB」且缺省句消失（M-2 机械验证腿）",
       Boolean(dueB) && dueB.due === true && packRawB.includes("cap 30 lines/20KB") && !packRawB.includes("cap 120 lines/10KB"),
       { due: Boolean(dueB) && dueB.due, packLen: packRawB.length },
-    );
-
-    // ---- v1.7.0 W1（Q10-05）SYNC-22：全端帽键 cfg 渲染腿——fleet_orch_md_max_lines/_bytes
-    //      上调 → 重物化 pack RULES「cap 60 lines/4KB」且缺省全端句「cap 50 lines/2KB」消失
-    //      （项目帽句保持 SYNC-21 上调态「cap 30 lines/20KB」不回缺省——逐键独立）。
-    fs.rmSync(pack6c, { force: true });
-    fs.writeFileSync(cfg6c, JSON.stringify({ idle_hours: 0, new_events: 1, orch_md_max_lines: 30, orch_md_max_bytes: 20480, fleet_orch_md_max_lines: 60, fleet_orch_md_max_bytes: 4096 }));
-    r = await rawCall("lessons", { action: "list" });
-    const dueC = r.result && r.result.orch_memory && r.result.orch_memory.glean;
-    const packRawC = fs.existsSync(pack6c) ? fs.readFileSync(pack6c, "utf8") : "";
-    ck.ok(
-      "SYNC-22 全端帽键随 cfg 渲染（Q10-05 GL-20a）：fleet 帽 cfg 60 行/4096B → RULES「cap 60 lines/4KB」且缺省句「cap 50 lines/2KB」消失；项目帽保持上调态（双帽逐键独立）",
-      Boolean(dueC) && dueC.due === true && packRawC.includes("cap 60 lines/4KB") && !packRawC.includes("cap 50 lines/2KB") && packRawC.includes("cap 30 lines/20KB"),
-      { due: Boolean(dueC) && dueC.due, fleetCap: packRawC.includes("cap 60 lines/4KB"), projCapKept: packRawC.includes("cap 30 lines/20KB") },
-    );
-
-    // ---- v1.7.0 W1（Q10-05）SYNC-23：全端帽键 junk 回落腿——junk 值逐键回落缺省
-    //      （50/2KB 同族契约；回落句重物化在位）。
-    fs.rmSync(pack6c, { force: true });
-    fs.writeFileSync(cfg6c, JSON.stringify({ idle_hours: 0, new_events: 1, fleet_orch_md_max_lines: "junk", fleet_orch_md_max_bytes: -3 }));
-    r = await rawCall("lessons", { action: "list" });
-    const dueD = r.result && r.result.orch_memory && r.result.orch_memory.glean;
-    const packRawD = fs.existsSync(pack6c) ? fs.readFileSync(pack6c, "utf8") : "";
-    ck.ok(
-      "SYNC-23 全端帽键 junk 回落（Q10-05 同族契约）：junk 行帽/负值字节帽 → 逐键回落缺省「cap 50 lines/2KB」（项目帽缺省 120/10KB 同句在位）",
-      Boolean(dueD) && dueD.due === true && packRawD.includes("cap 50 lines/2KB") && packRawD.includes("cap 120 lines/10KB"),
-      { due: Boolean(dueD) && dueD.due, fleetCapBack: packRawD.includes("cap 50 lines/2KB"), projCapBack: packRawD.includes("cap 120 lines/10KB") },
     );
   } finally {
     s6c.close();
