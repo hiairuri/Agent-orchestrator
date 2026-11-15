@@ -1,5 +1,5 @@
 {
-  "description": "agent-orchestrator lifecycle hooks: cross-session resume notice, stop-time accountability, background-dispatch gate with sentinel hint, and context mirror journaling.",
+  "description": "agent-orchestrator lifecycle hooks: cross-session resume notice (subagent/managed-worker gated), stop-time accountability, background-dispatch gate with sentinel hint, context mirror journaling, and OHM-marked hook-memory echo on UserPromptSubmit (brief mtime-gated).",
   "hooks": {
     "SessionStart": [
       {

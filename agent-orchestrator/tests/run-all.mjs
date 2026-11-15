@@ -67,13 +67,15 @@ const REGISTRY = [
   //   parseEnvelope PE×6（单行通道A 回归/650B 多行通道B/噪声混布/截断优雅 miss/生产长度
   //   定型）＋miss→error 侧车链静态腿。断言主句权威 tests/assertions/v1.2.3.md §1。
   { name: "dispatch-supply", layer: "L1" },
-  // v1.7.0 W3a 新增一套（Q12-01..04，追加于表尾口径）：patcher-q12=Q-12 patcher 资产面四腿
-  //   （锚签名唯一性 dry-run〔活体腿 SKIP 容错：异机缺席/sha 漂移=重打流信号〕/apply→reverse
-  //   sha256 字节级复原幂等/brief 读面三态 fail-soft〔单测+applied-fixture 端到端〕/授权指令
-  //   存在性钉）。资产权威=patches/orch-meta-user/{actions,manifest,base-snapshot}+
-  //   commands/orch-meta-user-patch.md。断言登记=套件头注腿记（O3 简化裁定 2026-11-11：
-  //   v1.7.0 断言档不重建）。
-  { name: "patcher-q12", layer: "L1" },
+  // v1.7.1 Q-17 W1 改名重写一套（Q17-01..04，承接 v1.7.0 patcher-q12 位置）：patcher-q17=Q-17
+  //   hook-memory patcher 资产面四腿（锚签名唯一性 dry-run〔底本 2f753c85 快照/v1 活体 a936cd0e
+  //   装机顺序信号/v2 已装幂等态三分；SKIP 容错：异机缺席/sha 漂移=重打流信号〕/apply→reverse
+  //   sha256 字节级复原幂等+span 台账对拍+v1 存档台账链〔阶段 B 全链机械预演〕/三态行为腿〔S1
+  //   截收封堵透传+S2 挂载帽 16384+journal 回显黑盒+session-start G6 门〕/授权指令存在性钉+
+  //   trio 1.7.1+CRLF 双行尾自测）。资产权威=patches/orch-meta-user/{actions,
+  //   actions-v1-superseded,manifest,base-snapshot}+commands/orch-meta-user-patch.md。
+  //   断言登记=套件头注腿记（O3 简化裁定 2026-11-11 沿袭：v1.7.1 断言档不重建）。
+  { name: "patcher-q17", layer: "L1" },
 ];
 
 function argOf(flag) {

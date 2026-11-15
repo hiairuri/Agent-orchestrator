@@ -3,7 +3,9 @@
  * agent-orchestrator context mirror journal（UserPromptSubmit 侧）。
  * stdin : {hook_event_name, session_id, prompt, ...}；args: --mirror on|off, --max-chars "2000,4000",
  *         --max-bytes <n>（滚动阈值，默认 2000000；测试可调小）
- * stdout: 恒无输出；exit 恒 0。任何失败静默——绝不阻塞对话。
+ * stdout: 镜像面恒无输出；exit 恒 0。任何失败静默——绝不阻塞对话。
+ *         v1.7.1 (Q-17) 增记忆回显面：UserPromptSubmit 且 brief 变更时 stdout 回单行
+ *         {"additionalContext":"\u0000OHM:"+内容}（见 echoHookMemory；缺席/未变更=恒空保持现状）。
  *
  * v0.3.1 (A5): 追加式写入。旧实现整文件读→改→rename 覆盖，并发丢行且留下无文件窗口；
  * 现改为 fs.appendFileSync 单行追加（每行一个 JSON），seq 只读文件尾部 8KB 求最大值；
@@ -289,9 +291,52 @@ function record(rootDir, sid, kind, text, cap, maxBytes = DEFAULT_MAX_BYTES) {
   throw lastErr;
 }
 
+/* --- v1.7.1 (Q-17 W1) 记忆回显面（design-r2 §6.2 + §12 grill 落字）---
+   数据面=<locateRoot 检得的存储根>/context/meta-user-brief.md（写者=gleaning 轮第四视，零迁移）。
+   每条 UserPromptSubmit 消息：stat brief（G5 裁定接受每消息 +1 stat）→ mtime 与
+   <根>/context/.brief-echo-stamp 比对 → 未变更=stdout 恒空（现状契约不动：零上下文成本、零槽扰动）；
+   变更且非空=stdout 回单行 {"additionalContext":"\u0000OHM:"+内容}（截走标记=G1 裁定字符串前缀，
+   源面转义形/运行时 5 字符；帽 16384=挂载帽同值，G4 改判宽松档），并原子写 stamp（tmp+rename；
+   stamp 写失败=下条消息重回显，幂等无害）。全程 try/catch 静默、exit 0。
+   stamp 为存储根级单文件（§6.2 伪码字面；共享槽模型：__OHM 驻宿主进程 globalThis，同槽一次
+   回显即全员可挂——多 CLI 进程并行时后起进程在 brief 再变更前无回显=已知边缘，§12 注记）。
+   与镜像开关独立：--mirror off 只停盘面镜像，记忆回显非镜像职能（§12 注记）。
+   阶段间过渡：宿主未打 v2 补丁时本输出按原生 additionalContext 注入（变更后一条消息可见带
+   NUL 前缀文本），已知过渡形态，阶段 B 装机后消失（§12 注记）。 */
+const HOOK_MEM_MARK = "\u0000OHM:"; // 截走标记（源面转义形；bundle 字节面无裸控制字节）
+const HOOK_MEM_CAP = 16384; // 读面帽=挂载帽同值（grill#1 G4）；fail-soft 截断
+
+function echoHookMemory(rootDir) {
+  try {
+    const brief = path.join(rootDir, "context", "meta-user-brief.md");
+    const st = fs.statSync(brief); // 缺席/异常 → 静默返回（fail-soft）
+    if (!st.isFile()) return;
+    const stampFile = path.join(rootDir, "context", ".brief-echo-stamp");
+    const mtime = String(st.mtimeMs);
+    try {
+      if (fs.readFileSync(stampFile, "utf8") === mtime) return; // 未变更=零输出（mtime 门控）
+    } catch {
+      /* 无 stamp=首见，视为变更 */
+    }
+    let content = fs.readFileSync(brief, "utf8");
+    if (content.length > HOOK_MEM_CAP) content = content.slice(0, HOOK_MEM_CAP); // 超帽截断
+    if (!content.trim()) return; // 空/全空白=不回显、不写 stamp（下条消息重试）
+    process.stdout.write(JSON.stringify({ additionalContext: HOOK_MEM_MARK + content }));
+    try {
+      const tmp = stampFile + ".tmp-" + process.pid;
+      fs.writeFileSync(tmp, mtime);
+      fs.renameSync(tmp, stampFile);
+    } catch {
+      /* stamp 失败=下条消息重回显（幂等无害） */
+    }
+  } catch {
+    /* fail-soft：绝不阻塞对话 */
+  }
+}
+
 function main() {
   const argv = process.argv.slice(2);
-  if (!onOff(parseArg(argv, "--mirror"), true)) return; // off：零写入
+  const mirror = onOff(parseArg(argv, "--mirror"), true);
   const input = readStdinJson();
   const event = String(input.hook_event_name || "");
   const isUser = event === "UserPromptSubmit";
@@ -300,13 +345,16 @@ function main() {
   const raw = isUser
     ? input.prompt ?? input.user_prompt ?? input.message
     : input.last_assistant_message ?? input.last_message ?? input.assistant_message;
-  if (typeof raw !== "string" || !raw.trim()) return;
-  const caps = maxCharsPair(parseArg(argv, "--max-chars"), 2000, 4000);
-  const maxBytesRaw = Number(String(parseArg(argv, "--max-bytes") || "").trim());
-  const maxBytes = Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? Math.floor(maxBytesRaw) : DEFAULT_MAX_BYTES;
   const sid = String(input.session_id || "anon").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64);
   const rootDir = locateRoot(process.env.ZCODE_PROJECT_DIR || process.cwd());
-  record(rootDir, sid, isUser ? "user" : "assistant", raw, isUser ? caps.user : caps.assistant, maxBytes);
+  if (mirror && typeof raw === "string" && raw.trim()) {
+    const caps = maxCharsPair(parseArg(argv, "--max-chars"), 2000, 4000);
+    const maxBytesRaw = Number(String(parseArg(argv, "--max-bytes") || "").trim());
+    const maxBytes = Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? Math.floor(maxBytesRaw) : DEFAULT_MAX_BYTES;
+    record(rootDir, sid, isUser ? "user" : "assistant", raw, isUser ? caps.user : caps.assistant, maxBytes);
+  }
+  // v1.7.1 (Q-17)：UserPromptSubmit 记忆回显（与镜像开关独立；缺席/未变更=stdout 恒空保持现状）。
+  if (isUser) echoHookMemory(rootDir);
 }
 
 try {

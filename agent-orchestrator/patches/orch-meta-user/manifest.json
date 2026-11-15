@@ -1,129 +1,93 @@
 {
   "family": "orch-meta-user",
   "status": "registered",
-  "registered_at": "2026-11-09T02:01:06.304Z",
-  "registered_by": "m-20261109-093749-195d (v17w3a, W3a construction wave; zero host install)",
+  "schema_revision": 2,
+  "registered_at": "2026-11-15T23:30:00.000Z",
+  "registered_by": "m-20261115-220835-85ef (q17w1, Q-17 W1 registration + plugin face; zero host install)",
+  "supersedes": {
+    "revision": 1,
+    "registered_by": "m-20261109-093749-195d (v17w3a, W3a construction wave; zero host install)",
+    "patched_sha256_registered": "a936cd0ef3c92449af7ea82a93c5e81461bef14a8a747eed51fceaf928ad1cdb",
+    "actions_archive": "actions-v1-superseded.json",
+    "note": "v1 byte face (q12-m0..m7) fully retired from the active registry. The archive is the sole in-repo material for the stage-B step-0 v1 reverse; its byte ledger closes mechanically (apply v1 on base -> a936cd0e, reverse -> base, re-verified at v2 registration 2026-11-15)."
+  },
   "base": {
     "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
     "sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
     "bytes": 15408529,
     "live_path": "C:/Program Files/ZCode/resources/glm/zcode.cjs",
-    "snapshot_copy": ".zcode/orchestrator/patches/notirc-w3/zcode.cjs.n4 (sha256 verified equal to live 2026-11-09)",
-    "provenance": "noti-rc chain: stock 3.17.2.9661 -> n0-n3 (base 7781ec10) -> n4 (patched 2f753c85); Q-12 anchors pinned on 2f753c85"
+    "snapshot_copy": ".zcode/orchestrator/patches/notirc-w3/zcode.cjs.n4 (sha256 verified equal to the registered base again at v2 registration, 2026-11-15)",
+    "provenance": "noti-rc chain: stock 3.17.2.9661 -> n0-n3 (base 7781ec10) -> n4 (patched 2f753c85); Q-17 anchors pinned on 2f753c85 (base reused byte-equal from revision 1)"
   },
-  "patched_sha256_registered": "a936cd0ef3c92449af7ea82a93c5e81461bef14a8a747eed51fceaf928ad1cdb",
+  "patched_sha256_registered": "",
+  "patched_sha256_backfill_note": "install-time backfill slot (stage B): the patcher fills this with the sha measured on the live base after the v1 reverse + v2 apply, and re-pins the spans below. The registration-wave dry-run sha on the pinned snapshot is registered separately in patched_sha256_dryrun.",
+  "patched_sha256_dryrun": "9b5d8582549f7d339641a2e58f8e65a88449dd8e66c40533f04429a425ab5f7b",
   "patch_spans": [
     {
-      "id": "q12-m1",
-      "kind": "insert",
+      "id": "q17-S1",
+      "kind": "replace",
       "span": [
-        12842150,
-        12842150
+        5061548,
+        5061577
       ],
-      "anchor_len": 212,
-      "payload_len": 185,
+      "anchor_len": 29,
+      "payload_len": 373,
+      "span_unit": "string-index offsets on the utf8-decoded bundle text (engine semantics; same unit as the revision-1 ledger)",
       "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
     },
     {
-      "id": "q12-m2",
+      "id": "q17-S2",
       "kind": "replace",
       "span": [
-        13333830,
-        13333975
-      ],
-      "anchor_len": 145,
-      "payload_len": 194,
-      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
-    },
-    {
-      "id": "q12-m3",
-      "kind": "replace",
-      "span": [
-        13145644,
-        13145717
-      ],
-      "anchor_len": 73,
-      "payload_len": 103,
-      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
-    },
-    {
-      "id": "q12-m4",
-      "kind": "replace",
-      "span": [
-        13145875,
-        13146029
-      ],
-      "anchor_len": 154,
-      "payload_len": 191,
-      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
-    },
-    {
-      "id": "q12-m5",
-      "kind": "replace",
-      "span": [
-        13335155,
-        13335236
-      ],
-      "anchor_len": 81,
-      "payload_len": 111,
-      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
-    },
-    {
-      "id": "q12-m6",
-      "kind": "replace",
-      "span": [
-        12853996,
-        12854152
+        12854340,
+        12854496
       ],
       "anchor_len": 156,
-      "payload_len": 209,
-      "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
-    },
-    {
-      "id": "q12-m7",
-      "kind": "insert",
-      "span": [
-        13335958,
-        13335958
-      ],
-      "anchor_len": 96,
-      "payload_len": 475,
+      "payload_len": 509,
+      "span_unit": "string-index offsets on the utf8-decoded bundle text (engine semantics; same unit as the revision-1 ledger)",
       "original_ref": "the anchor literal in actions.json IS the original bytes (reverse = payload->anchor swap)"
     }
   ],
   "verify_only": [
-    "q12-m0"
+    "q17-V0"
   ],
   "hooks": [
     {
       "id": "meta-user-memory",
-      "exposed_by": "patch_spans q12-m1..m7 in the applied state (injected section builder Yqb + brief reader Xqb)",
-      "injection_point": "meta_user assembly (host bundle buildMetaUserAttachments collection; the 'Orch Memory' section carries the curated brief per request)",
+      "exposed_by": "patch_spans q17-S1 (capture+block at the hook runner aggregate tail) + q17-S2 (mount at the meta_user assembly Nxt push point); the plugin side is journal.mjs UserPromptSubmit echo (no bundle hook registry - plugin hooks.json registration is the only config face)",
+      "injection_point": "S1 captures additionalContext strings carrying the '\\u0000OHM:' prefix into globalThis.__OHM.UserPromptSubmit and neutralizes them downstream (capture XOR passthrough, zero double-mount); S2 mounts the slot as an eight-field 'Hook Memory' section (source orch_hook_memory, cacheHint dynamic) collected into metaUserAttachments by the native KDn filter",
       "brief_path": "<storage-root>/context/meta-user-brief.md",
-      "semantics": "fail-soft read at meta_user assembly time: absent file -> section skipped; over-cap -> 8192-byte truncate; unchanged mtime -> cached. <storage-root> is an abstract placeholder - resolve from the ZCode user configuration at runtime, never inline a machine path.",
-      "bookkeeping": "declaration-only: zero new byte mechanism beyond the registered patch_spans; hook registry/lifecycle design out of this wave (user simplification ruling 2026-11-11)"
+      "echo_face": "journal.mjs per UserPromptSubmit message: locateRoot -> stat brief -> mtime gate against <storage-root>/context/.brief-echo-stamp -> changed and non-empty: stdout {\"additionalContext\":\"\\u0000OHM:\"+content} (cap 16384); absent/unchanged/empty: stdout stays empty (current behavior preserved). Fail-soft throughout, exit 0",
+      "semantics": "sticky slot (grill G2: only a run with a captured string replaces the slot); SessionStart never feeds the slot (grill G3); mount cap 16384 chars with the '…[hook memory truncated]' tail (grill G4); unmarked outputs pass through natively (grill G7). <storage-root> is resolved at runtime from the ZCode user configuration / root.txt pointer - never inlined as a machine path",
+      "interim_note": "between the 1.7.1 plugin release and the stage-B install, an unpatched host receives the marked echo as a native additionalContext (one visible NUL-prefixed message per brief change); known transitional shape, disappears at stage B (design-r2 §12)",
+      "bookkeeping": "declaration-only: zero new byte mechanism beyond the registered patch_spans; hook registry/lifecycle design out of scope (user simplification ruling 2026-11-11)"
     }
   ],
+  "install_order": "stage B only, on explicit user authorization: (0) gate: sha256(live) == supersedes.patched_sha256_registered (a936cd0e, v1 installed) -> reverse v1 via actions-v1-superseded.json on a temp copy, verify sha256 == base.sha256; (1) apply actions.json (v2) to the temp copy -> node --check -> count gates; (2) install; (3) backfill patched_sha256_registered with the live-measured sha and re-pin the spans. A live bundle not matching either registered sha = stale anchors = re-pin flow.",
   "rollback": {
-    "procedure": "reverse one-shot: for each byte action in reverse span order, locate the payload (unique) and swap back to the anchor literal (insert actions: splice the payload out); byte-exact restore verified by sha256 == base.sha256",
+    "procedure": "reverse one-shot for the two replace spans (q17-S2 then q17-S1, reverse apply order): locate the payload (unique) and swap back to the anchor literal; byte-exact restore verified by sha256 == base.sha256. To return further to the v1 state, replay actions-v1-superseded.json on the restored base (ledger closes at a936cd0e).",
     "post_rollback_verify": [
       "sha256(restored) == base.sha256",
-      "count of 'orch_meta_brief' == 0",
-      "count of 'orchMetaBrief' == 0",
-      "canary gone: meta_user returns to the native shape (no 'Orch Memory' section)"
+      "count of '__OHM' == 0",
+      "count of 'orch_hook_memory' == 0",
+      "canary gone: meta_user returns to the native shape (no 'Hook Memory' section)"
     ],
-    "host_upgrade_repatch": "sha256(live) != base.sha256 -> anchors stale -> re-pin flow: re-measure anchors on the new bundle, re-register spans, re-run Q12-01 dry-run expect_count=1, then wait for the explicit user authorization again"
+    "host_upgrade_repatch": "sha256(live) != base.sha256 and != the v1 registered sha -> anchors stale -> re-pin flow: re-measure anchors on the new bundle, re-register spans, re-run the Q17-01 dry-run expect_count=1, then wait for the explicit user authorization again"
   },
   "verify_before_install": [
-    "sha256(live bundle) == base.sha256 (stale-anchor gate)",
-    "Q12-01 dry-run: every anchor literal count == 1 on the live bundle",
+    "live identity gate: sha256(live bundle) == supersedes.patched_sha256_registered (a936cd0e) -> reverse v1 first; a live bundle still carrying v1 payloads fails the q17-S2 anchor gate by design (install-order discipline)",
+    "Q17-01 dry-run: every anchor literal count == 1 on the restored base",
     "apply to a temp copy + node --check + post-checks (never patch in place)",
     "authorization gate: the user explicitly issues commands/orch-meta-user-patch.md AND the patcher QA has passed (double gate)"
   ],
   "live_probes_not_in_run_all": [
-    "canary: a fresh interactive session's meta_user contains the brief first line 'orch-meta-user: v1'",
-    "mtime reread: rewrite the brief mid-session -> next request carries the new content (one-request lag)",
-    "compression survival: meta_user index block survives context compression (research-r0 §5 residual)",
-    "rollback drill: reverse -> canary gone -> meta_user native shape"
+    "canary: a fresh interactive session's meta_user contains a 'Hook Memory' section whose content starts with the brief first line ('orch-meta-user: v1' marker)",
+    "mtime reread: rewrite the brief mid-session -> the next message echoes (one-message shape) and the next request carries the new content",
+    "unmarked third-party UserPromptSubmit additionalContext passes through natively (capture-XOR probe, grill G7)",
+    "plugin unload -> no marked output -> the mounted section disappears from new requests (fail-soft probe)",
+    "compression survival: the Hook Memory section survives context compression (structural; slot on globalThis, mount re-read per request)",
+    "subagent trigger face (O3): journal logs by sid shape reveal whether UserPromptSubmit fires in subagent sessions (T1 observation)",
+    "cross-plugin order (O4): deferred until a second contributor plugin exists (dual-dummy probe)",
+    "trio 1.7.1 release face: real-UI re-add test (l-20261109-221da6) - the plugin cache refresh shows 1.7.1 in the host UI after re-add"
   ]
 }

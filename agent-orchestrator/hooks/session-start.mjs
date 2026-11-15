@@ -38,6 +38,14 @@
  * headless dispatch at volume the anchor would end up pointing at the last
  * started worker.
  *
+ * v1.7.1 (Q-17 grill#1 G6): the resume briefing itself (stdout
+ * additionalContext) is now gated for subagent-shaped sessions
+ * (sess_subagent* ids) and managed workers (ORCH_MANAGED_WORKER) — they never
+ * consume a coordinator briefing, so the output stays silent for them. Anchor
+ * republish (G14) and sentinel revival (W-A0) keep their existing in-function
+ * gates. Discriminator fields and the honest residual (manual `-p` sessions
+ * match neither) are annotated in design-r2 §12.
+ *
  * Storage root discovery: <project>/.zcode/orchestrator/root.txt (pointer to a
  * custom root) if present, otherwise the default directory itself.
  */
@@ -482,6 +490,13 @@ function main() {
   // v1.2 M9-1 触发面①：宿主重启后首会话复活哨兵家族（锚已先发布——复活实例天然有锚；
   // 四闸见 reviveSentinelFamily 注）。
   reviveSentinelFamily(rootDir, sessionId);
+  // v1.7.1 (Q-17 grill#1 G6 改判)：子代理/托管 worker 会话不出简报（additionalContext 输出零噪声）。
+  // 判别字段（设计面自定，design-r2 §12 注记）：stdin session_id 前缀 sess_subagent（G14 活体实证
+  // EXP10 R6 同形状）+ env ORCH_MANAGED_WORKER（W-A0 活体实证）。锚发布面（publishWakeAnchor 内
+  // G14/W-A0 同闸）与哨兵复活面（reviveSentinelFamily 同闸）先行且各自带门，此处仅关简报输出面。
+  // 诚实残差：手工 -p 探针会话（sess_<uuid> 形状、无 env 标记）两判别面皆不命中，仍会收到简报
+  // （挂账，与 W-A0 残差同面；G6 门目标=子代理重放噪声与托管 worker 噪声，非全覆盖）。
+  if (safeSessionId(sessionId).startsWith("sess_subagent") || process.env.ORCH_MANAGED_WORKER) return;
   const board = loadBoard(rootDir);
   if (!board) return;
 

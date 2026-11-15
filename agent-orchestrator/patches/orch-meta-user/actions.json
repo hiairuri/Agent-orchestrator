@@ -1,7 +1,7 @@
 [
   {
-    "id": "q12-m0",
-    "anchor_family": "A2-collection-filter",
+    "id": "q17-V0",
+    "anchor_family": "S0-collection-filter-carry",
     "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
     "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
     "anchor": {
@@ -14,17 +14,18 @@
       "expect_count": 1
     },
     "locate": {
-      "window": "buildMetaUserAttachments (KDn) meta_user collection filter; the exclusion set A3a decides which meta_user sources are dropped - a new source not in A3a is collected with zero second-point patching",
-      "boundary_spec": "verify-only action: no byte change. Asserts the filter literal is unique and the A3a exclusion set contents are exactly [env_info, model, current_date] - i.e. orch_meta_brief is NOT excluded, so the q12-m6 sibling section is auto-collected into metaUserAttachments."
+      "window": "buildMetaUserAttachments (KDn) meta_user collection filter (q12-m0 carry-over): the exclusion set A3a decides which meta_user sources are dropped - a new source not in A3a is collected with zero third-point patching",
+      "boundary_spec": "verify-only action: no byte change. Asserts the filter literal is unique and the A3a exclusion set contents are exactly [env_info, model, current_date] - i.e. orch_hook_memory is NOT excluded, so the q17-S2 sibling section is auto-collected into metaUserAttachments. Also carries the ledger: v1 byte face (base 15408529 bytes +859 = 15409388 = a936cd0e) is retired into actions-v1-superseded.json; v2 namespace (__OHM / orch_hook_memory / Hook Memory) is pre-absent on the base (count=0 x3, measured 2026-11-15)."
     },
     "apply": {
       "kind": "verify-only",
       "payload": ""
     },
     "verify": [
-      "count of 'orch_meta_brief' in target == 0 pre-patch",
-      "count of 'orchMetaBrief' in target == 0 pre-patch",
-      "A3a set literal unique (count=1) and contents lack 'orch_meta_brief'"
+      "count of '__OHM' in target == 0 pre-patch",
+      "count of 'orch_hook_memory' in target == 0 pre-patch",
+      "count of '\"Hook Memory\"' in target == 0 pre-patch",
+      "A3a set literal unique (count=1) and contents lack 'orch_hook_memory'"
     ],
     "rollback": "no byte change - nothing to roll back",
     "span": [
@@ -32,168 +33,45 @@
       0
     ],
     "evidence": {
-      "source": "proposal §3.1 A2 row (DR-02 live-bundle re-verification 2026-11-09) + snapshot probe (count filter=1, set=1, orch_meta_brief=0)"
+      "source": "q12-m0 carry (proposal §3.1 A2 row, DR-02) + design-r2 §7.1 q17-V0 row + namespace pre-absence probe 2026-11-15 (count=0 x3 on the 2f753c85 snapshot)"
     }
   },
   {
-    "id": "q12-m1",
-    "anchor_family": "A1-block-construction",
+    "id": "q17-S1",
+    "anchor_family": "S1-hook-runner-capture-block",
     "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
     "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
     "anchor": {
-      "literal": "function Nxt(e){let t=h3a(e);return t?{name:\"Request User Context\",source:\"request_user_context\",injectionTarget:\"meta_user\",cacheHint:\"dynamic\",chars:t.length,tokens:ef(t),content:t,preview:t.slice(0,100)}:null}",
+      "literal": "}}return i}logAllowedToolCall",
       "expect_count": 1,
-      "anchor_len": 212
+      "anchor_len": 29
     },
     "locate": {
-      "window": "Nxt/h3a meta_user block-construction family (L14359 region): the sibling section builder Yqb inserts immediately before Nxt, mirroring Nxt's section shape exactly (name/source/injectionTarget/cacheHint/chars/tokens/content/preview)",
-      "boundary_spec": "insert point = anchor start (byte before must be ';' - the V() lazy-init registration tail); zero-length span; payload is a pure function declaration (no top-level statement, no evaluation-order dependency, Hqa no-registration precedent)"
-    },
-    "apply": {
-      "kind": "insert",
-      "insert_at": "anchor_start",
-      "payload": "function Yqb(e){return e?{name:\"Orch Memory\",source:\"orch_meta_brief\",injectionTarget:\"meta_user\",cacheHint:\"dynamic\",chars:e.length,tokens:ef(e),content:e,preview:e.slice(0,100)}:null}"
-    },
-    "verify": [
-      "count of 'function Yqb(e)' in patched file == 1",
-      "count of '\"Orch Memory\"' in patched file == 1",
-      "count of 'source:\"orch_meta_brief\"' in patched file == 1",
-      "byte at insert_point-1 == ';'"
-    ],
-    "rollback": "remove the inserted Yqb declaration (find payload, splice out) restoring the zero-length span",
-    "span": [
-      12842150,
-      12842150
-    ],
-    "evidence": {
-      "source": "proposal §3.1 A1 row: sibling block function {name:\"Orch Memory\",source:\"orch_meta_brief\",injectionTarget:\"meta_user\",cacheHint:\"dynamic\"}; shape mirror = Nxt verbatim field set"
-    }
-  },
-  {
-    "id": "q12-m2",
-    "anchor_family": "A3-init-single-read",
-    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
-    "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
-    "anchor": {
-      "literal": "await D9o(this),this.contextBuilder=this.createContextBuilderFromSnapshot(i,this.memoryRoot,{memoryIndexContent:this.memoryIndexContent,model:t})",
-      "expect_count": 1,
-      "anchor_len": 145
-    },
-    "locate": {
-      "window": "session init chain (L14687 region): immediately after 'this.memoryIndexContent=await Hqa(this,this.memoryRoot,lY),' and before the gen-UI directory ensure (D9o) and the init-time context builder creation - mirrors the native init-once read pattern; memoryRoot is already assigned (native task-type gate upstream), so the Xqb gate sees it",
-      "boundary_spec": "FULL expression-block replace incl. the init builder option object tail '{...model:t})'; the replace also carries orchMetaBrief into the init-time builder options; Xqb is awaited here (init may wait); payload keeps 'await D9o(this),' verbatim"
+      "window": "hook runner run() aggregate tail (L2280 region): the for-loop+catch closing braces immediately before 'return i'; 'logAllowedToolCall' is the adjacent r() registration literal (anti-minify stable anchor). In scope: t.hookEventName (public string convention) and i.additionalContexts (ordered aggregate of all hook outputs)",
+      "boundary_spec": "replace span = the 29-char anchor; payload keeps the anchor head '}}' and tail 'return i}logAllowedToolCall' verbatim and splices the capture/block gate between them. Event gate uses the public string literal 'UserPromptSubmit' (Tc enum is not identity-mapped on the bundle - DR-R1). Mark = '\\u0000OHM:' escaped source form (10 source chars, 5 runtime chars; zero raw control bytes on the byte plane). Sticky slot semantics: only a run with at least one captured string replaces globalThis.__OHM.UserPromptSubmit (unmarked runs leave the slot untouched - grill G2); non-UserPromptSubmit events are untouched (grill G3); async:true hooks bypass the aggregate by host construction (design §5.2)"
     },
     "apply": {
       "kind": "replace",
-      "payload": "await Xqb(this),await D9o(this),this.contextBuilder=this.createContextBuilderFromSnapshot(i,this.memoryRoot,{memoryIndexContent:this.memoryIndexContent,orchMetaBrief:this.orchMetaBrief,model:t})"
+      "payload": "}}if(t.hookEventName===\"UserPromptSubmit\"&&i.additionalContexts.length){let _k=[],_r=[],_p=\"\\u0000OHM:\";for(let _x of i.additionalContexts){let _s=typeof _x===\"string\"&&_x.slice(0,5)===_p;if(_s){let _c=_x.slice(5);_c&&_k.push(_c)}else _r.push(_x)}_k.length&&((globalThis.__OHM??(globalThis.__OHM={})).UserPromptSubmit=_k);i.additionalContexts=_r}return i}logAllowedToolCall"
     },
     "verify": [
-      "count of 'await Xqb(this)' in patched file == 1",
-      "count of 'orchMetaBrief:this.orchMetaBrief' in patched file == 1"
+      "count of 'globalThis.__OHM' in patched file == 4 (capture block x2 + mount block x2)",
+      "count of the escaped mark literal '\\u0000OHM:' == 1 (inside the capture block)",
+      "count of 'i.additionalContexts=_r' == 1 (downstream neutralization: marked strings removed from the aggregate)",
+      "count of 't.hookEventName===\"UserPromptSubmit\"' == 1 (event gate)"
     ],
-    "rollback": "rewrite span with the original anchor block (payload contains the anchor; reverse = payload->anchor swap)",
+    "rollback": "rewrite span with the original anchor block (payload -> anchor swap)",
     "span": [
-      13333830,
-      13333975
+      5061548,
+      5061577
     ],
     "evidence": {
-      "source": "proposal §3.1 A3 row (init single read at L14687 'memoryIndexContent=await Hqa(this,this.memoryRoot,lY)'); read strategy = init-once mirror"
+      "source": "design-r2 §4.2 + §7.1 S1 row (live a936cd0e count=1 + base 2f753c85 count=1, dual-state verified) + grill#1 G1 (mark = string prefix \\u0000OHM:) / G2 (sticky) / G3 (UserPromptSubmit only)"
     }
   },
   {
-    "id": "q12-m3",
-    "anchor_family": "A4-per-request-consumption",
-    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
-    "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
-    "anchor": {
-      "literal": "{memoryIndexContent:e.memoryIndexContent,model:t.model,persistEnvInfo:!1}",
-      "expect_count": 1,
-      "anchor_len": 73
-    },
-    "locate": {
-      "window": "per-request build (qT, L14655 region) branch 1 - the not-initialized early-return path rebuilds the builder; option object carries orchMetaBrief for shape consistency (guard fires on the main branch only)",
-      "boundary_spec": "full option-object replace incl. 'persistEnvInfo:!1}' tail; pure carry, no control-flow change"
-    },
-    "apply": {
-      "kind": "replace",
-      "payload": "{memoryIndexContent:e.memoryIndexContent,orchMetaBrief:e.orchMetaBrief,model:t.model,persistEnvInfo:!1}"
-    },
-    "verify": [
-      "count of 'orchMetaBrief:e.orchMetaBrief' in patched file == 2 (branch1 + branch2 option objects)"
-    ],
-    "rollback": "rewrite span with the original option object",
-    "span": [
-      13145644,
-      13145717
-    ],
-    "evidence": {
-      "source": "proposal §3.1 A4 row (L14655 build consumption ×2 option objects)"
-    }
-  },
-  {
-    "id": "q12-m4",
-    "anchor_family": "A4-per-request-consumption",
-    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
-    "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
-    "anchor": {
-      "literal": "e.contextBuilder=e.createContextBuilderFromSnapshot(n,e.memoryRoot,{memoryIndexContent:e.memoryIndexContent,model:t.model});let o=e.contextBuilder.build()",
-      "expect_count": 1,
-      "anchor_len": 154
-    },
-    "locate": {
-      "window": "per-request build (qT, L14655 region) branch 2 - the main per-request path; the mtime reread guard fires here: 'Xqb(e),' (fire-and-forget, qT is synchronous and callers use its return value, so no async surgery) then the builder option object carries orchMetaBrief",
-      "boundary_spec": "FULL statement-block replace from 'e.contextBuilder=' through 'let o=e.contextBuilder.build()' (anchor tail included); qT stays synchronous - Xqb never rejects (fully caught), the refreshed content lands for the next request (documented one-request lag); 1 async stat per request, re-read only on mtime change"
-    },
-    "apply": {
-      "kind": "replace",
-      "payload": "Xqb(e),e.contextBuilder=e.createContextBuilderFromSnapshot(n,e.memoryRoot,{memoryIndexContent:e.memoryIndexContent,orchMetaBrief:e.orchMetaBrief,model:t.model});let o=e.contextBuilder.build()"
-    },
-    "verify": [
-      "count of 'Xqb(e),e.contextBuilder=' in patched file == 1",
-      "count of 'orchMetaBrief:e.orchMetaBrief' in patched file == 2"
-    ],
-    "rollback": "rewrite span with the original statement block",
-    "span": [
-      13145875,
-      13146029
-    ],
-    "evidence": {
-      "source": "proposal §3.1 A4 row + §3.3 read strategy (per-request 1 stat, re-read on mtime change); qT sync constraint measured on bundle (callers use return value; async surgery forbidden)"
-    }
-  },
-  {
-    "id": "q12-m5",
-    "anchor_family": "A5-config-carry",
-    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
-    "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
-    "anchor": {
-      "literal": "memoryIndexContent:n.memoryIndexContent,memoryRoot:t,skills:this.skillLoadOutcome",
-      "expect_count": 1,
-      "anchor_len": 81
-    },
-    "locate": {
-      "window": "createContextBuilderFromSnapshot (F9o) config-object copy (L14687 line region, 'config 初装' family): the options->config copy is the only path through which builder options reach build(); without this carry the orchMetaBrief option never becomes this.config.orchMetaBrief; the subagent early-return path (aOn) is upstream of this object and stays untouched - injection gate follows native task types",
-      "boundary_spec": "full config-member replace incl. 'skills:this.skillLoadOutcome' tail"
-    },
-    "apply": {
-      "kind": "replace",
-      "payload": "memoryIndexContent:n.memoryIndexContent,orchMetaBrief:n.orchMetaBrief,memoryRoot:t,skills:this.skillLoadOutcome"
-    },
-    "verify": [
-      "count of 'orchMetaBrief:n.orchMetaBrief' in patched file == 1"
-    ],
-    "rollback": "rewrite span with the original config-member block",
-    "span": [
-      13335155,
-      13335236
-    ],
-    "evidence": {
-      "source": "proposal §3.1 A5 row (config carry family; DR-02 L14687 'init 单读赋值+config 初装 ×2') + snapshot trace of F9o options->config copy"
-    }
-  },
-  {
-    "id": "q12-m6",
-    "anchor_family": "A5-config-carry",
+    "id": "q17-S2",
+    "anchor_family": "S2-meta-user-mount",
     "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
     "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
     "anchor": {
@@ -202,58 +80,26 @@
       "anchor_len": 156
     },
     "locate": {
-      "window": "context builder build() (L14379 region, the Nxt config-carry/consume point): immediately after the native meta_user block push, the sibling Orch Memory section is constructed from this.config.orchMetaBrief via Yqb and pushed; KDn (q12-m0 filter) collects it into metaUserAttachments with zero further patching",
-      "boundary_spec": "full statement-block replace incl. 'h&&t.push(h);' tail; appended statements keep build()'s existing local naming (hO does not collide with build() locals t,n,o,i,a,c,u,f,R,D,h,_,v,S,k,I,C)"
+      "window": "context builder build() Nxt push point (L14379 region; the 156-byte q12-m6 base anchor - the literal exists on the BASE state only: a live bundle still carrying v1 payloads fails this gate by design = install-order discipline, reverse v1 first). Locals _a/_j collide with nothing in build() (t,n,o,i,a,c,u,f,R,D,h,_,v,S,k,I,C + v1-era hO); module-level ef (token estimator, Nxt same-family) is in scope",
+      "boundary_spec": "replace span = the 156-byte anchor; payload keeps the anchor verbatim and appends the mount block: reads globalThis.__OHM.UserPromptSubmit (capture XOR passthrough - only marked content mounts, unmarked stays native, zero double-mount), joins with a blank line, caps at 16384 (grill G4 lenient tier) with the '...[hook memory truncated]' 24-char tail (cut point 16360 = 16384-24), fail-soft on empty/whitespace (no section pushed), section shape mirrors Nxt's eight fields (name 'Hook Memory', source 'orch_hook_memory', injectionTarget 'meta_user', cacheHint 'dynamic'). KDn (q17-V0 filter) auto-collects the section - zero third point"
     },
     "apply": {
       "kind": "replace",
-      "payload": "let h=Nxt({userInstructions:this.config.userInstructions,memoryIndexContent:this.config.memoryIndexContent,memoryRoot:this.config.memoryRoot});h&&t.push(h);let hO=Yqb(this.config.orchMetaBrief);hO&&t.push(hO);"
+      "payload": "let h=Nxt({userInstructions:this.config.userInstructions,memoryIndexContent:this.config.memoryIndexContent,memoryRoot:this.config.memoryRoot});h&&t.push(h);{let _a=globalThis.__OHM&&globalThis.__OHM.UserPromptSubmit;if(_a&&_a.length){let _j=_a.join(\"\\n\\n\");_j.length>16384&&(_j=_j.slice(0,16360)+\"\\u2026[hook memory truncated]\");_j.trim()&&t.push({name:\"Hook Memory\",source:\"orch_hook_memory\",injectionTarget:\"meta_user\",cacheHint:\"dynamic\",chars:_j.length,tokens:ef(_j),content:_j,preview:_j.slice(0,100)})}}"
     },
     "verify": [
-      "count of 'Yqb(this.config.orchMetaBrief)' in patched file == 1",
-      "count of 'hO&&t.push(hO)' in patched file == 1"
+      "count of '\"Hook Memory\"' in patched file == 1",
+      "count of 'source:\"orch_hook_memory\"' == 1",
+      "count of '__OHM.UserPromptSubmit' == 2 (S1 capture + S2 mount)",
+      "count of the cap literal '16384' inside the mount block == 1 (grill G4 lenient tier)"
     ],
-    "rollback": "rewrite span with the original statement block",
+    "rollback": "rewrite span with the original anchor block (payload -> anchor swap)",
     "span": [
-      12853996,
-      12854152
+      12854340,
+      12854496
     ],
     "evidence": {
-      "source": "proposal §3.1 A1/A5 rows (block construction consumed at the build config-carry point, L14379 'Nxt 调用点')"
-    }
-  },
-  {
-    "id": "q12-m7",
-    "anchor_family": "R-read-strategy",
-    "target_build": "zcode-cli-3.17.2.9661-win-x64-patched-2f753c85 (noti-rc base + n0-n4)",
-    "base_file_sha256": "2f753c85685cd19afe802b5e6e46cc5a5f56b3f4fb2c338dc18cba5bdf5f22ba",
-    "anchor": {
-      "literal": "async function Hqa(e,t,n){if(n!==\"default-index\")return;let o=e.fileSystemPort;if(!o||!t)return;",
-      "expect_count": 1,
-      "anchor_len": 96
-    },
-    "locate": {
-      "window": "native memory index reader Hqa definition (L14687 region, second body on the line): the orch brief reader/guard Xqb inserts immediately before Hqa, in the same module scope (M9o path alias in scope, exactly as Hqa itself uses it)",
-      "boundary_spec": "insert point = anchor start (byte before must be '}' - the loadProjectMemoryRoot j9o tail); zero-length span; payload is a pure async function declaration (no top-level statement); Xqb = init-once read (q12-m2) + per-request mtime reread guard (q12-m4): stat per call, readTextFile only on stamp change, maxBytes 8192 cap (fail-soft truncate), full try/catch (never rejects), gate = fileSystemPort+memoryRoot+workspaceRoot all present (native task-type gate mirror - subagents excluded)"
-    },
-    "apply": {
-      "kind": "insert",
-      "insert_at": "anchor_start",
-      "payload": "async function Xqb(e){try{let o=e.fileSystemPort;if(!o||!e.memoryRoot||!e.workspaceRoot)return;let p=(0,M9o.join)(e.workspaceRoot,\".zcode\",\"orchestrator\",\"context\",\"meta-user-brief.md\");let s=await o.stat({path:p});if(!s||s.kind!==\"file\")return;if(e.orchMetaBriefStamp===s.mtimeMs&&e.orchMetaBrief!==void 0)return;let a=await o.readTextFile({path:p,maxBytes:8192}),c=a.content;e.orchMetaBriefStamp=s.mtimeMs;c!==void 0&&e.orchMetaBrief!==c&&(e.orchMetaBrief=c)}catch{return}}"
-    },
-    "verify": [
-      "count of 'async function Xqb(e)' in patched file == 1",
-      "count of 'orchMetaBriefStamp' in patched file == 2 (both inside Xqb)",
-      "count of 'meta-user-brief.md' in patched file == 1",
-      "byte at insert_point-1 == '}'"
-    ],
-    "rollback": "remove the inserted Xqb declaration (find payload, splice out) restoring the zero-length span",
-    "span": [
-      13335958,
-      13335958
-    ],
-    "evidence": {
-      "source": "proposal §3.3 read strategy (init once + mtime-change reread; injection source <storage root>/context/meta-user-brief.md cap 8KB) - reader mirrors Hqa init-once pattern (L14687 'Hqa 唯一赋值点')"
+      "source": "design-r2 §4.3 + §7.1 S2 row (q12-m6 base anchor, base count=1 measured 2026-11-15; live v1-state count=0 by design) + grill#1 G4 (cap 16384) / G7 (capture XOR passthrough)"
     }
   }
 ]
